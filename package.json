@@ -87,12 +87,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/unriddle-ai/pdf-viewer.git"
+    "url": "https://github.com/unriddle-ai/lector.git"
   },
   "bugs": {
-    "url": "https://github.com/unriddle-ai/pdf-viewer/issues"
+    "url": "https://github.com/unriddle-ai/lector/issues"
   },
-  "homepage": "https://github.com/unriddle-ai/pdf-viewer",
+  "homepage": "https://github.com/unriddle-ai/lector",
   "size-limit": [
     {
       "name": "Client",
