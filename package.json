@@ -90,7 +90,8 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/unriddle-ai/lector.git"
+    "url": "git+https://github.com/unriddle-ai/lector.git",
+    "directory": "packages/nuqs"
   },
   "bugs": {
     "url": "https://github.com/unriddle-ai/lector/issues"
