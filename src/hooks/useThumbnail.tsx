@@ -3,8 +3,8 @@ import { useEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../internal";
+import { useDpr } from "./useDpr";
 import { useVisibility } from "./useVisibility";
-import { useDpr } from "./viewport/useDpr";
 
 interface ThumbnailConfig {
   maxHeight?: number;

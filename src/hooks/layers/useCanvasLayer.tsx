@@ -2,8 +2,8 @@ import { useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
+import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
-import { useDpr } from "../viewport/useDpr";
 
 export const useCanvasLayer = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
