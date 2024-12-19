@@ -1,14 +1,15 @@
 import { useLayoutEffect, useRef } from "react";
-import { usePdf } from "../../internal";
-import { useDPR } from "../viewport/useDPR";
-import { usePDFPageNumber } from "../usePdfPageNumber";
 import { useDebounce } from "use-debounce";
+
+import { usePdf } from "../../internal";
+import { usePDFPageNumber } from "../usePdfPageNumber";
+import { useDpr } from "../viewport/useDpr";
 
 export const useCanvasLayer = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pageNumber = usePDFPageNumber();
 
-  const dpr = useDPR();
+  const dpr = useDpr();
 
   const bouncyZoom = usePdf((state) => state.zoom);
   const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
@@ -44,7 +45,6 @@ export const useCanvasLayer = () => {
     });
 
     renderingTask.promise.catch((error) => {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       if (error.name === "RenderingCancelledException") {
         return;
       }
@@ -55,7 +55,7 @@ export const useCanvasLayer = () => {
     return () => {
       void renderingTask.cancel();
     };
-  }, [pdfPageProxy, canvasRef.current, dpr, zoom]);
+  }, [pdfPageProxy, dpr, zoom]);
 
   return {
     canvasRef,

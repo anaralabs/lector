@@ -1,10 +1,11 @@
 import { AnnotationLayer } from "pdfjs-dist";
 import { useEffect, useRef } from "react";
-import { useVisibility } from "../useVisibility";
+
 import { usePdf } from "../../internal";
-import { usePDFPageNumber } from "../usePdfPageNumber";
-import { usePDFLinkService } from "../usePDFLinkService";
 import { cancellable } from "../../lib/cancellable";
+import { usePDFLinkService } from "../usePDFLinkService";
+import { usePDFPageNumber } from "../usePdfPageNumber";
+import { useVisibility } from "../useVisibility";
 
 export interface AnnotationLayerParams {
   /**
@@ -79,7 +80,7 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
     return () => {
       cancel();
     };
-  }, [pdfPageProxy, annotationLayerRef.current]);
+  }, [pdfPageProxy, params, linkService]);
 
   return {
     annotationLayerRef,

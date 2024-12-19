@@ -4,8 +4,9 @@ import {
   type ElementRef,
   forwardRef,
 } from "react";
-import { usePdf, type HighlightRect } from "../../internal";
+
 import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
+import { type HighlightRect,usePdf } from "../../internal";
 
 interface HighlightLayerProps extends ComponentPropsWithoutRef<"div"> {
   asChild?: boolean;

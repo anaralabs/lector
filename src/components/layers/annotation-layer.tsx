@@ -1,9 +1,10 @@
-import type { HTMLProps } from "react";
-import {
-  useAnnotationLayer,
-  type AnnotationLayerParams,
-} from "../../hooks/layers/useAnnotationLayer";
 import clsx from "clsx";
+import type { HTMLProps } from "react";
+
+import {
+  type AnnotationLayerParams,
+  useAnnotationLayer,
+} from "../../hooks/layers/useAnnotationLayer";
 
 export const AnnotationLayer = ({
   renderForms = true,

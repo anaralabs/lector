@@ -1,6 +1,7 @@
-import { useEffect, useRef } from "react";
-import { usePdf } from "../../internal";
 import { TextLayer } from "pdfjs-dist";
+import { useEffect, useRef } from "react";
+
+import { usePdf } from "../../internal";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
 export const useTextLayer = () => {
@@ -25,7 +26,7 @@ export const useTextLayer = () => {
     return () => {
       textLayer.cancel();
     };
-  }, [pdfPageProxy, textContainerRef.current]);
+  }, [pdfPageProxy]);
 
   return {
     textContainerRef,

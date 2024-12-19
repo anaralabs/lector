@@ -2,23 +2,25 @@ import {
   elementScroll,
   type VirtualizerOptions,
 } from "@tanstack/react-virtual";
-import { useCallback, useRef } from "react";
-import { PDFStore, usePdf } from "../../internal";
+import { useCallback } from "react";
 
-const easeInOutSmooth = (t: number): number => {
-  t *= 2;
-  if (t < 1) {
-    return 0.5 * t * t * t;
-  }
-  t -= 2;
-  return 0.5 * (t * t * t + 2);
-};
+import { PDFStore } from "../../internal";
+
+// const easeInOutSmooth = (t: number): number => {
+//   t *= 2;
+//   if (t < 1) {
+//     return 0.5 * t * t * t;
+//   }
+//   t -= 2;
+//   return 0.5 * (t * t * t + 2);
+// };
 
 export const useScrollFn = () => {
-  const scrollingRef = useRef<number | null>(null);
-  const viewportRef = usePdf((state) => state.viewportRef);
+  // const scrollingRef = useRef<number | null>(null);
+  // const viewportRef = usePdf((state) => state.viewportRef);
   const store = PDFStore.useContext();
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const scrollToFn: VirtualizerOptions<any, any>["scrollToFn"] = useCallback(
     (_offset, canSmooth, instance) => {
       // const duration = 200;
@@ -26,7 +28,7 @@ export const useScrollFn = () => {
       // const startTime = (scrollingRef.current = Date.now());
 
       const zoom = store.getState().zoom;
-      let offset = _offset * zoom;
+      const offset = _offset * zoom;
       // if we are in auto scroll mode, then immediately scroll
       // to the offset and not display any animation. For example if scroll
       // immediately to a rescaled offset if zoom/scale has just been changed
@@ -55,7 +57,7 @@ export const useScrollFn = () => {
 
       // requestAnimationFrame(run);
     },
-    [viewportRef],
+    [store],
   );
   return { scrollToFn };
 };

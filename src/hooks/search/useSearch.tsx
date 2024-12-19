@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+
 import { usePdf } from "../../internal";
 
 export interface SearchResult {
@@ -55,7 +56,7 @@ interface SearchOptions {
 
 export const useSearch = () => {
   const textContent = usePdf((state) => state.textContent);
-  const [keywords, setKeywords] = useState<string[]>([]);
+  const [keywords] = useState<string[]>([]);
   const [searchResults, setSearchResults] = useState<SearchResults>({
     exactMatches: [],
     fuzzyMatches: [],

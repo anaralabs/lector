@@ -1,3 +1,4 @@
+import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import {
   cloneElement,
   type HTMLProps,
@@ -7,13 +8,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
-import { usePdf } from "../internal";
-import { useViewportContainer } from "../hooks/viewport/useViewportContainer";
-import { useScrollFn } from "../hooks/pages/useScrollFn";
-import { useObserveElement } from "../hooks/pages/useObserveElement";
-import { useVisiblePage } from "../hooks/pages/useVisiblePage";
+
 import { useFitWidth } from "../hooks/pages/useFitWidth";
+import { useObserveElement } from "../hooks/pages/useObserveElement";
+import { useScrollFn } from "../hooks/pages/useScrollFn";
+import { useVisiblePage } from "../hooks/pages/useVisiblePage";
+import { useViewportContainer } from "../hooks/viewport/useViewportContainer";
+import { usePdf } from "../internal";
 import { Primitive } from "./primitive";
 
 const VIRTUAL_ITEM_GAP = 10;
@@ -90,6 +91,7 @@ export const Pages = ({
     return () => {
       clearTimeout(timeout);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPinching]);
 
   const virtualizerItems = virtualizer?.getVirtualItems() ?? [];

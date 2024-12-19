@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef } from "react";
 import {
-  useFloating,
-  useDismiss,
-  useInteractions,
   autoUpdate,
+  useDismiss,
+  useFloating,
+  useInteractions,
 } from "@floating-ui/react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+
 import { usePdf } from "../internal";
 
 interface SelectionTooltipProps {
@@ -27,7 +28,7 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
   const { getFloatingProps } = useInteractions([dismiss]);
 
   // Function to update tooltip position based on selection
-  const updateTooltipPosition = () => {
+  const updateTooltipPosition = useCallback(() => {
     const selection = document.getSelection();
 
     if (!selection || selection.isCollapsed) {
@@ -45,7 +46,7 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
       getClientRects: () => range.getClientRects(),
     });
     setIsOpen(true);
-  };
+  }, [refs]);
 
   useEffect(() => {
     const handleSelectionChange = () => {
@@ -72,10 +73,11 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
     return () => {
       document.removeEventListener("selectionchange", handleSelectionChange);
       if (viewportRef.current) {
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         viewportRef.current.removeEventListener("scroll", handleScroll);
       }
     };
-  }, [refs, isOpen, viewportRef]);
+  }, [refs, isOpen, viewportRef, updateTooltipPosition]);
 
   // Handle clicks on the floating tooltip
   useEffect(() => {

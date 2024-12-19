@@ -1,7 +1,8 @@
 import type { HTMLProps, ReactNode } from "react";
+
+import { PDFPageNumberContext } from "../hooks/usePdfPageNumber";
 import { usePdf } from "../internal";
 import { Primitive } from "./primitive";
-import { PDFPageNumberContext } from "../hooks/usePdfPageNumber";
 
 export const Page = ({
   children,

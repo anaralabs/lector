@@ -1,6 +1,7 @@
 import { type HTMLProps, useEffect, useRef, useState } from "react";
-import { usePdf } from "../internal";
+
 import { usePdfJump } from "../hooks/pages/usePdfJump";
+import { usePdf } from "../internal";
 
 export const NextPage = () => {};
 export const PreviousPage = () => {};
@@ -18,7 +19,7 @@ export const CurrentPage = ({ ...props }: HTMLProps<HTMLInputElement>) => {
       return;
     }
     setPageNumber(currentPage);
-  }, [currentPage, isSelected.current]);
+  }, [currentPage]);
 
   return (
     <input

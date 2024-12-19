@@ -1,10 +1,11 @@
 import { forwardRef, type HTMLProps, type ReactNode } from "react";
+
 import {
   usePDFDocumentContext,
   type usePDFDocumentParams,
 } from "../hooks/document/document";
-import { Primitive } from "./primitive";
 import { PDFStore } from "../internal";
+import { Primitive } from "./primitive";
 
 export const Root = forwardRef(
   (
@@ -40,3 +41,5 @@ export const Root = forwardRef(
     );
   },
 );
+
+Root.displayName = "Root";

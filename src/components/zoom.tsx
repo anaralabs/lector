@@ -1,6 +1,7 @@
 import { type HTMLProps, useEffect, useRef, useState } from "react";
-import { Primitive } from "./primitive";
+
 import { usePdf } from "../internal";
+import { Primitive } from "./primitive";
 
 export const ZoomIn = ({ ...props }: HTMLProps<HTMLButtonElement>) => {
   const setZoom = usePdf((state) => state.updateZoom);
@@ -8,6 +9,7 @@ export const ZoomIn = ({ ...props }: HTMLProps<HTMLButtonElement>) => {
   return (
     <Primitive.button
       {...props}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       onClick={(e: any) => {
         props.onClick && props.onClick(e);
         setZoom((zoom) => Number((zoom + 0.1).toFixed(1)));
@@ -22,6 +24,7 @@ export const ZoomOut = ({ ...props }: HTMLProps<HTMLButtonElement>) => {
   return (
     <Primitive.button
       {...props}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       onClick={(e: any) => {
         props.onClick && props.onClick(e);
         setZoom((zoom) => Number((zoom - 0.1).toFixed(1)));
@@ -43,7 +46,7 @@ export const CurrentZoom = ({ ...props }: HTMLProps<HTMLInputElement>) => {
     }
 
     setZoom((realZoom * 100).toFixed(0));
-  }, [realZoom, isSelected.current]);
+  }, [realZoom]);
 
   return (
     <input

@@ -1,10 +1,11 @@
 import React from "react";
 import type { StoreApi } from "zustand";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const createZustandContext = <TInitial, TStore extends StoreApi<any>>(
   getStore: (initial: TInitial) => TStore,
 ) => {
-  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const Context = React.createContext(null as any as TStore);
 
   const Provider = (props: {

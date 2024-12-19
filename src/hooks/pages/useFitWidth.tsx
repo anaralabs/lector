@@ -1,4 +1,5 @@
 import React, { useLayoutEffect } from "react";
+
 import { PDFStore, usePdf } from "../../internal";
 import { getFitWidthZoom } from "../../lib/zoom";
 
@@ -35,7 +36,7 @@ export const useFitWidth = ({ viewportRef }: UseFitWidth) => {
     return () => {
       resizeObserver.disconnect();
     };
-  }, [viewports, zoomOptions]);
+  }, [store, updateZoom, viewportRef, viewports, zoomOptions]);
 
   return null;
 };

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
-import { usePdf } from "../internal";
 import type { PDFPageProxy } from "pdfjs-dist";
 import type { TextItem } from "pdfjs-dist/types/src/display/api";
+import { useCallback, useEffect, useState } from "react";
+
+import { usePdf } from "../internal";
 
 interface SearchProps {
   children: React.ReactNode;
@@ -38,7 +39,7 @@ export const Search = ({ children, loading = "Loading..." }: SearchProps) => {
 
   useEffect(() => {
     getTextContent(proxies);
-  }, [proxies]);
+  }, [proxies, getTextContent]);
 
   return isLoading ? loading : children;
 };

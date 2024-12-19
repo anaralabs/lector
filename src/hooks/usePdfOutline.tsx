@@ -1,7 +1,8 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { cancellable } from "../lib/cancellable";
-import { usePdf } from "../internal";
 import { useEffect, useState } from "react";
+
+import { usePdf } from "../internal";
+import { cancellable } from "../lib/cancellable";
 
 export const usePDFOutline = () => {
   const pdfDocumentProxy = usePdf((state) => state.pdfDocumentProxy);
@@ -23,7 +24,7 @@ export const usePDFOutline = () => {
     return () => {
       cancel();
     };
-  }, []);
+  }, [pdfDocumentProxy]);
 
   return outline;
 };

@@ -59,6 +59,7 @@ export class LinkService implements IPDFLinkService {
 
     const explicitRef = explicitDest[0] as RefProxy;
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const page = await this.pdfDocumentProxy.getPageIndex(explicitRef);
 
     //TODO fix this

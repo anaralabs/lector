@@ -1,3 +1,4 @@
+import { useGesture } from "@use-gesture/react";
 import {
   type RefObject,
   useCallback,
@@ -6,10 +7,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { useGesture } from "@use-gesture/react";
+
 import { usePdf } from "../../internal";
-import { firstMemo } from "../../lib/memo";
 import { clamp } from "../../lib/clamp";
+import { firstMemo } from "../../lib/memo";
 
 export const useViewportContainer = ({
   containerRef,
@@ -31,7 +32,7 @@ export const useViewportContainer = ({
 
   useEffect(() => {
     viewportRef.current = containerRef.current;
-  }, [containerRef.current]);
+  }, [containerRef, viewportRef]);
 
   const transformations = useRef<{
     translateX: number;
@@ -59,7 +60,7 @@ export const useViewportContainer = ({
 
       const elementBoundingBox = elementRef.current.getBoundingClientRect();
 
-      let width = elementBoundingBox.width;
+      const width = elementBoundingBox.width;
 
       elementWrapperRef.current.style.width = `${width}px`;
       elementWrapperRef.current.style.height = `${elementBoundingBox.height}px`;
@@ -69,7 +70,7 @@ export const useViewportContainer = ({
 
       if (zoomUpdate) updateZoom(() => transformations.current.zoom);
     },
-    [containerRef.current, elementRef.current, updateZoom, zoom],
+    [containerRef, elementRef, elementWrapperRef, updateZoom],
   );
 
   useEffect(() => {
@@ -86,10 +87,12 @@ export const useViewportContainer = ({
     };
 
     updateTransform();
-  }, [zoom]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [containerRef, zoom]);
 
   useLayoutEffect(() => {
     updateTransform();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from "react";
+import { type RefObject, useEffect, useState } from "react";
 
 export const useVisibility = ({
   elementRef,
@@ -21,7 +21,7 @@ export const useVisibility = ({
     return () => {
       observer.disconnect();
     };
-  }, [elementRef.current]);
+  }, [elementRef]);
 
   return { visible };
 };

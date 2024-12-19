@@ -1,6 +1,7 @@
-import type { HTMLProps } from "react";
-import { useTextLayer } from "../../hooks/layers/useTextLayer";
 import clsx from "clsx";
+import type { HTMLProps } from "react";
+
+import { useTextLayer } from "../../hooks/layers/useTextLayer";
 
 export const TextLayer = ({
   className,

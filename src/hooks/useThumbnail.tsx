@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
-import { usePdf } from "../internal";
-import { useDPR } from "./viewport/useDPR";
-import { useVisibility } from "./useVisibility";
-import { useDebounce } from "use-debounce";
 import type { RenderTask } from "pdfjs-dist";
+import { useEffect, useRef } from "react";
+import { useDebounce } from "use-debounce";
+
+import { usePdf } from "../internal";
+import { useVisibility } from "./useVisibility";
+import { useDpr } from "./viewport/useDpr";
 
 interface ThumbnailConfig {
   maxHeight?: number;
@@ -33,7 +34,7 @@ export const useThumbnail = (
   const pageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
   const { visible } = useVisibility({ elementRef: containerRef });
   const [debouncedVisible] = useDebounce(visible, 50);
-  const dpr = useDPR();
+  const dpr = useDpr();
 
   const isVisible = isFirstPage || debouncedVisible;
 

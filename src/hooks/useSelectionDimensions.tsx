@@ -1,4 +1,4 @@
-import { PDFStore, type HighlightRect } from "../internal";
+import { type HighlightRect, PDFStore } from "../internal";
 
 const MERGE_THRESHOLD = 5; // Increased threshold for more aggressive merging
 
@@ -43,7 +43,6 @@ const consolidateRects = (rects: HighlightRect[]): HighlightRect[] => {
 
   // Sort by vertical position primarily
   const sortedRects = [...rects].sort((a, b) => a.top - b.top);
-  let result: HighlightRect[] = [];
 
   // Keep merging until no more merges are possible
   let hasChanges: boolean;
@@ -53,15 +52,18 @@ const consolidateRects = (rects: HighlightRect[]): HighlightRect[] => {
     const tempResult: HighlightRect[] = [];
 
     for (let i = 1; i < sortedRects.length; i++) {
-      if (shouldMergeRects(currentRect, sortedRects[i])) {
-        currentRect = mergeRects(currentRect, sortedRects[i]);
+      const sorted = sortedRects[i];
+      if (!currentRect || !sorted) continue;
+
+      if (shouldMergeRects(currentRect, sorted)) {
+        currentRect = mergeRects(currentRect, sorted);
         hasChanges = true;
       } else {
         tempResult.push(currentRect);
-        currentRect = sortedRects[i];
+        currentRect = sorted;
       }
     }
-    tempResult.push(currentRect);
+    if (currentRect) tempResult.push(currentRect);
 
     sortedRects.length = 0;
     sortedRects.push(...tempResult);
@@ -116,7 +118,7 @@ export const useSelectionDimensions = () => {
       textLayerMap.get(pageNumber)?.push(rect);
     });
 
-    textLayerMap.forEach((rects, pageNumber) => {
+    textLayerMap.forEach((rects) => {
       if (rects.length > 0) {
         highlights.push(...consolidateRects(rects));
       }

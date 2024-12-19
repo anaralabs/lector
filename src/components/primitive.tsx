@@ -20,6 +20,7 @@ type PrimitiveProps<E extends HTMLTag> = Omit<ComponentPropsWithRef<E>, "ref"> &
 const makePrimitive = (htmlTag: HTMLTag) => {
   const primitive = forwardRef(
     (props: Omit<PrimitiveProps<typeof htmlTag>, "ref">, ref) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const Renderer: any = htmlTag;
 
       return <Renderer {...props} ref={ref} />;

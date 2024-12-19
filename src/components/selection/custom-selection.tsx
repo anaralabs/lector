@@ -1,5 +1,5 @@
+import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
 import { usePdf } from "../../internal";
-import { usePDFPageNumber } from "../../lib/pdf/page";
 
 interface CustomSelectionProps {
   textColor?: string;

@@ -1,6 +1,7 @@
-import { useCallback, useEffect } from "react";
-import { usePdf } from "../../internal";
 import type { VirtualItem } from "@tanstack/react-virtual";
+import { useCallback, useEffect } from "react";
+
+import { usePdf } from "../../internal";
 
 interface UseVisiblePageProps {
   items: VirtualItem[];

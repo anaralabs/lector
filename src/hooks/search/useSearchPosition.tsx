@@ -1,7 +1,8 @@
 import type { PDFPageProxy } from "pdfjs-dist";
 import type { TextItem } from "pdfjs-dist/types/src/display/api";
-import type { SearchResult } from "./useSearch";
+
 import type { HighlightRect } from "../../internal";
+import type { SearchResult } from "./useSearch";
 
 interface TextPosition {
   pageNumber: number;

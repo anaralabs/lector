@@ -1,8 +1,9 @@
 import { cloneElement, type HTMLProps, type ReactElement } from "react";
+
 import { usePdfJump } from "../hooks/pages/usePdfJump";
-import { Primitive } from "./primitive";
-import { usePdf } from "../internal";
 import { useThumbnail } from "../hooks/useThumbnail";
+import { usePdf } from "../internal";
+import { Primitive } from "./primitive";
 
 export const Thumbnail = ({
   pageNumber = 1,
@@ -20,6 +21,7 @@ export const Thumbnail = ({
           {...props}
           role="button"
           tabIndex={0}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           onClick={(e: any) => {
             if (props.onClick) {
               props.onClick(e);
@@ -27,6 +29,7 @@ export const Thumbnail = ({
 
             jumpToPage(pageNumber, { behavior: "auto" });
           }}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           onKeyDown={(e: any) => {
             if (props.onKeyDown) {
               props.onKeyDown(e);

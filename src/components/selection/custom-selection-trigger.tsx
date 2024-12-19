@@ -1,6 +1,7 @@
-import React, { useEffect, useCallback } from "react";
+import { useCallback, useEffect } from "react";
+
+import { useSelectionDimensions } from "../../hooks/useSelectionDimensions";
 import { usePdf } from "../../internal";
-import { useSelectionDimensions } from "../..";
 
 export const CustomSelectionTrigger = () => {
   const setCustomSelectionRects = usePdf(

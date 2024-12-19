@@ -1,15 +1,16 @@
+import type { RefProxy } from "pdfjs-dist/types/src/display/api";
 import {
   cloneElement,
-  useCallback,
   type FunctionComponent,
   type HTMLProps,
   type ReactElement,
+  useCallback,
 } from "react";
-import { Primitive } from "./primitive";
-import { usePdf } from "../internal";
+
 import { usePdfJump } from "../hooks/pages/usePdfJump";
-import type { RefProxy } from "pdfjs-dist/types/src/display/api";
 import { usePDFOutline } from "../hooks/usePdfOutline";
+import { usePdf } from "../internal";
+import { Primitive } from "./primitive";
 
 type OutlineItemType = NonNullable<ReturnType<typeof usePDFOutline>>[number];
 
@@ -42,29 +43,30 @@ export const OutlineItem: FunctionComponent<OutlineItemProps> = ({
   const pdfDocumentProxy = usePdf((state) => state.pdfDocumentProxy);
   const { jumpToPage } = usePdfJump();
 
-  const getDestinationPage = async (
-    dest: string | unknown[] | Promise<unknown[]>,
-  ) => {
-    let explicitDest: unknown[] | null;
+  const getDestinationPage = useCallback(
+    async (dest: string | unknown[] | Promise<unknown[]>) => {
+      let explicitDest: unknown[] | null;
 
-    if (typeof dest === "string") {
-      explicitDest = await pdfDocumentProxy.getDestination(dest);
-    } else if (Array.isArray(dest)) {
-      explicitDest = dest;
-    } else {
-      explicitDest = await dest;
-    }
+      if (typeof dest === "string") {
+        explicitDest = await pdfDocumentProxy.getDestination(dest);
+      } else if (Array.isArray(dest)) {
+        explicitDest = dest;
+      } else {
+        explicitDest = await dest;
+      }
 
-    if (!explicitDest) {
-      return;
-    }
+      if (!explicitDest) {
+        return;
+      }
 
-    const explicitRef = explicitDest[0] as RefProxy;
+      const explicitRef = explicitDest[0] as RefProxy;
 
-    const page = await pdfDocumentProxy.getPageIndex(explicitRef);
+      const page = await pdfDocumentProxy.getPageIndex(explicitRef);
 
-    return page;
-  };
+      return page;
+    },
+    [pdfDocumentProxy],
+  );
 
   const navigate = useCallback(() => {
     if (!item.dest) {
@@ -78,7 +80,7 @@ export const OutlineItem: FunctionComponent<OutlineItemProps> = ({
 
       jumpToPage(page, { behavior: "smooth" });
     });
-  }, [item.dest, getDestinationPage]);
+  }, [item.dest, jumpToPage, getDestinationPage]);
 
   return (
     <Primitive.li {...props}>
@@ -98,10 +100,10 @@ export const OutlineItem: FunctionComponent<OutlineItemProps> = ({
       {item.items &&
         item.items.length > 0 &&
         cloneElement(children, {
-          // @ts-expect-error
+          // @ts-expect-error we are missing the corect props types
           children: item.items.map((item, index) =>
             cloneElement(outlineItem, {
-              // @ts-expect-error
+              // @ts-expect-error we are missing the corect props types
               level: level + 1,
               item,
               outlineItem,

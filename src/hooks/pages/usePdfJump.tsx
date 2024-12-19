@@ -1,4 +1,4 @@
-import { usePdf, type HighlightRect } from "../../internal";
+import { type HighlightRect, usePdf } from "../../internal";
 
 export const usePdfJump = () => {
   const virtualizer = usePdf((state) => state.virtualizer);
@@ -22,6 +22,7 @@ export const usePdfJump = () => {
     // Merge default options with any provided options
 
     const finalOptions = { ...defaultOptions, ...options };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     virtualizer.scrollToIndex(pageIndex - 1, finalOptions as any);
   };
 

@@ -1,4 +1,5 @@
 import { debounce, Virtualizer } from "@tanstack/react-virtual";
+
 import { PDFStore } from "../../internal";
 
 const supportsScrollend =
@@ -14,6 +15,7 @@ export const useObserveElement = () => {
   const store = PDFStore.useContext();
 
   const observeElementOffset = <T extends Element>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     instance: Virtualizer<T, any>,
     cb: ObserveOffsetCallBack,
   ) => {

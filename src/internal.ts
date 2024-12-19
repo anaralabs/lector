@@ -1,10 +1,11 @@
-import { createStore, useStore } from "zustand";
+import { Virtualizer } from "@tanstack/react-virtual";
 import type { PageViewport, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import { createRef } from "react";
-import { Virtualizer } from "@tanstack/react-virtual";
-import { createZustandContext } from "./lib/zustand";
-import { getFitWidthZoom } from "./lib/zoom";
+import { createStore, useStore } from "zustand";
+
 import { clamp } from "./lib/clamp";
+import { getFitWidthZoom } from "./lib/zoom";
+import { createZustandContext } from "./lib/zustand";
 
 type TextContent = {
   pageNumber: number;
@@ -63,6 +64,7 @@ interface PDFState {
   setCustomSelectionRects: (rects: HighlightRect[]) => void;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type PDFVirtualizer = Virtualizer<any, any>;
 
 export type InitialPDFState = Pick<
