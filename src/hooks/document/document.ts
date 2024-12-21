@@ -4,7 +4,7 @@ import {
   type PDFDocumentProxy,
   type PDFPageProxy,
 } from "pdfjs-dist";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { InitialPDFState } from "../../internal";
 
@@ -35,8 +35,8 @@ export const usePDFDocumentContext = ({
   const [initialState, setInitialState] = useState<InitialPDFState | null>();
   const [rotation] = useState<number>(initialRotation);
 
-  const generateViewports = useCallback(
-    async (pdf: PDFDocumentProxy) => {
+  useEffect(() => {
+    const generateViewports = async (pdf: PDFDocumentProxy) => {
       const pageProxies: Array<PDFPageProxy> = [];
       const rotations: number[] = [];
       const viewports = await Promise.all(
@@ -64,11 +64,8 @@ export const usePDFDocumentContext = ({
         pageProxies: sortedPageProxies,
         pdfDocumentProxy: pdf,
       });
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isZoomFitWidth],
-  );
-  useEffect(() => {
+    };
+
     const loadDocument = () => {
       setInitialState(null);
       setProgress(0);
@@ -104,7 +101,8 @@ export const usePDFDocumentContext = ({
       };
     };
     loadDocument();
-  }, [fileURL, generateViewports, onDocumentLoad]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileURL]);
 
   return {
     initialState,

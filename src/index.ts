@@ -16,7 +16,7 @@ export { Root } from "./components/root";
 export { Search } from "./components/search";
 export { SelectionTooltip } from "./components/selection-tooltip";
 export { Thumbnail, Thumbnails } from "./components/thumbnails";
-export { CurrentZoom,ZoomIn, ZoomOut } from "./components/zoom";
+export { CurrentZoom, ZoomIn, ZoomOut } from "./components/zoom";
 export { usePdfJump } from "./hooks/pages/usePdfJump";
 export {
   type SearchResult,
@@ -25,4 +25,5 @@ export {
 } from "./hooks/search/useSearch";
 export { calculateHighlightRects } from "./hooks/search/useSearchPosition";
 export { LinkService } from "./hooks/usePDFLinkService";
-export { usePdf } from "./internal";
+export { useSelectionDimensions } from "./hooks/useSelectionDimensions";
+export { type HighlightRect,usePdf } from "./internal";
