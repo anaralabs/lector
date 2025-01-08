@@ -26,4 +26,4 @@ export {
 export { calculateHighlightRects } from "./hooks/search/useSearchPosition";
 export { LinkService } from "./hooks/usePDFLinkService";
 export { useSelectionDimensions } from "./hooks/useSelectionDimensions";
-export { type HighlightRect,usePdf } from "./internal";
+export { type HighlightRect, usePdf } from "./internal";
