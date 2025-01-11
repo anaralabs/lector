@@ -17,40 +17,26 @@ export const useVisiblePage = ({ items }: UseVisiblePageProps) => {
     (virtualItems: VirtualItem[]) => {
       if (!scrollElement || virtualItems.length === 0) return 0;
 
-      const scrollTop = scrollElement.scrollTop;
-      const viewportHeight = scrollElement.clientHeight;
+      const scrollTop = scrollElement.scrollTop / zoomLevel;
+      const viewportHeight = scrollElement.clientHeight / zoomLevel;
+      const viewportCenter = scrollTop + viewportHeight / 2;
 
-      // Calculate visibility percentage for each item
-      const visibilityScores = virtualItems.map((item) => {
-        const itemTop = item.start * zoomLevel;
-        const itemBottom = (item.start + item.size) * zoomLevel;
+      // Find the page whose center is closest to viewport center
+      let closestIndex = 0;
+      let smallestDistance = Infinity;
 
-        // Calculate overlap with viewport
-        const overlapTop = Math.max(scrollTop, itemTop);
-        const overlapBottom = Math.min(scrollTop + viewportHeight, itemBottom);
-        const overlapHeight = Math.max(0, overlapBottom - overlapTop);
+      for (const item of virtualItems) {
+        const itemCenter = item.start + item.size / 2;
+        const distance = Math.abs(itemCenter - viewportCenter);
 
-        // Calculate visibility percentage and add bias towards center of viewport
-        const visibilityPercentage = overlapHeight / (item.size * zoomLevel);
-        const itemCenter = (itemTop + itemBottom) / 2;
-        const viewportCenter = scrollTop + viewportHeight / 2;
-        const distanceFromCenter = Math.abs(itemCenter - viewportCenter);
-        const centerBias = 1 - distanceFromCenter / viewportHeight;
+        // Add a 20% threshold to prevent frequent switches
+        if (distance < smallestDistance * 0.8) {
+          smallestDistance = distance;
+          closestIndex = item.index;
+        }
+      }
 
-        return {
-          index: item.index,
-          visibility: visibilityPercentage * centerBias,
-        };
-      });
-
-      // Find the item with maximum visibility
-      const mostVisibleItem = visibilityScores.reduce(
-        (prev, current) =>
-          current.visibility > prev.visibility ? current : prev,
-        { index: 0, visibility: 0 },
-      );
-
-      return mostVisibleItem.index;
+      return closestIndex;
     },
     [scrollElement, zoomLevel],
   );
@@ -58,6 +44,7 @@ export const useVisiblePage = ({ items }: UseVisiblePageProps) => {
   useEffect(() => {
     if (!isPinching && items.length > 0) {
       const mostVisibleIndex = calculateVisiblePageIndex(items);
+
       setCurrentPage?.(mostVisibleIndex + 1);
     }
   }, [items, isPinching, calculateVisiblePageIndex, setCurrentPage]);
