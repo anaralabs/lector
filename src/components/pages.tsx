@@ -121,9 +121,9 @@ export const Pages = ({
         display: "flex",
         justifyContent: "center",
         height: "100%",
-        ...props.style,
         position: "relative",
         overflow: "auto",
+        ...props.style,
       }}
     >
       <div
