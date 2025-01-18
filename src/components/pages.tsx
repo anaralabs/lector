@@ -17,18 +17,19 @@ import { useViewportContainer } from "../hooks/viewport/useViewportContainer";
 import { usePdf } from "../internal";
 import { Primitive } from "./primitive";
 
-const VIRTUAL_ITEM_GAP = 10;
 const DEFAULT_HEIGHT = 600;
 const EXTRA_HEIGHT = 0;
 
 export const Pages = ({
   children,
+  gap = 10,
   virtualizerOptions = { overscan: 3 },
   ...props
 }: HTMLProps<HTMLDivElement> & {
   virtualizerOptions?: {
     overscan?: number;
   };
+  gap?: number;
   children: ReactElement;
 }) => {
   const [tempItems, setTempItems] = useState<VirtualItem[]>([]);
@@ -67,7 +68,7 @@ export const Pages = ({
     observeElementOffset,
     overscan: virtualizerOptions?.overscan ?? 0,
     scrollToFn,
-    gap: VIRTUAL_ITEM_GAP,
+    gap,
   });
 
   useEffect(() => {
