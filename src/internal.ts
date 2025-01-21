@@ -69,15 +69,14 @@ export type PDFVirtualizer = Virtualizer<any, any>;
 
 export type InitialPDFState = Pick<
   PDFState,
-  "pdfDocumentProxy" | "pageProxies" | "viewports"
+  "pdfDocumentProxy" | "pageProxies" | "viewports" | "zoom"
 > & { isZoomFitWidth?: boolean };
 
 export const PDFStore = createZustandContext(
   (initialState: InitialPDFState) => {
     return createStore<PDFState>((set, get) => ({
       pdfDocumentProxy: initialState.pdfDocumentProxy,
-
-      zoom: 1,
+      zoom: initialState.zoom,
       isZoomFitWidth: initialState.isZoomFitWidth ?? false,
       zoomOptions: {
         minZoom: 0.5,
