@@ -1,5 +1,7 @@
 import {
   autoUpdate,
+  offset,
+  shift,
   useDismiss,
   useFloating,
   useInteractions,
@@ -22,6 +24,7 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
     open: isOpen,
     onOpenChange: setIsOpen,
     whileElementsMounted: autoUpdate,
+    middleware: [offset(10), shift({ padding: 8 })],
   });
 
   const dismiss = useDismiss(context);
@@ -40,12 +43,28 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
     const range = selection.getRangeAt(0);
     if (!range) return;
 
+    const rects = range.getClientRects();
+    const lastRect = rects[rects.length - 1];
+
     lastSelectionRef.current = range;
-    refs.setReference({
-      getBoundingClientRect: () => range.getBoundingClientRect(),
-      getClientRects: () => range.getClientRects(),
-    });
-    setIsOpen(true);
+    if (lastRect) {
+      refs.setReference({
+        getBoundingClientRect: () => ({
+          width: lastRect.width,
+          height: lastRect.height,
+          x: lastRect.left,
+          y: lastRect.bottom, // Position below the last line of selection
+          top: lastRect.bottom,
+          right: lastRect.right,
+          bottom: lastRect.bottom + lastRect.height,
+          left: lastRect.left,
+        }),
+        getClientRects: () => [lastRect],
+      });
+      setIsOpen(true);
+    } else {
+      setIsOpen(false);
+    }
   }, [refs]);
 
   useEffect(() => {
