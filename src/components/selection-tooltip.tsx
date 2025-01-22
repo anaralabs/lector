@@ -69,20 +69,25 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
 
   useEffect(() => {
     const handleSelectionChange = () => {
-      // Use requestAnimationFrame to avoid rapid updates
-      requestAnimationFrame(updateTooltipPosition);
+      const selection = document.getSelection();
+
+      // Check if selection is within the viewport
+
+      if (selection && viewportRef.current?.contains(selection.anchorNode)) {
+        requestAnimationFrame(updateTooltipPosition);
+      } else {
+        setIsOpen(false);
+      }
     };
 
-    // Handle scroll events in the viewport
     const handleScroll = () => {
       if (!isOpen || !lastSelectionRef.current) return;
       requestAnimationFrame(updateTooltipPosition);
     };
 
-    // Add selection change listener
+    // Add selection change listener to document (since it can't be added directly to elements)
     document.addEventListener("selectionchange", handleSelectionChange);
 
-    // Add scroll listener to viewport if it exists
     if (viewportRef.current) {
       viewportRef.current.addEventListener("scroll", handleScroll, {
         passive: true,
