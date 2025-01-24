@@ -24,6 +24,8 @@ export const Pages = ({
   children,
   gap = 10,
   virtualizerOptions = { overscan: 3 },
+  initialOffset,
+  onOffsetChange,
   ...props
 }: HTMLProps<HTMLDivElement> & {
   virtualizerOptions?: {
@@ -31,6 +33,8 @@ export const Pages = ({
   };
   gap?: number;
   children: ReactElement;
+  initialOffset?: number;
+  onOffsetChange?: (offset: number) => void;
 }) => {
   const [tempItems, setTempItems] = useState<VirtualItem[]>([]);
 
@@ -69,7 +73,13 @@ export const Pages = ({
     overscan: virtualizerOptions?.overscan ?? 0,
     scrollToFn,
     gap,
+    initialOffset: initialOffset,
   });
+
+  useEffect(() => {
+    if (onOffsetChange && virtualizer.scrollOffset)
+      onOffsetChange(virtualizer.scrollOffset);
+  }, [virtualizer.scrollOffset, onOffsetChange]);
 
   useEffect(() => {
     setVirtualizer(virtualizer);
