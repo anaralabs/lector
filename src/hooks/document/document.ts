@@ -4,6 +4,7 @@ import {
   type PDFDocumentProxy,
   type PDFPageProxy,
 } from "pdfjs-dist";
+import type { DocumentInitParameters, TypedArray } from "pdfjs-dist/types/src/display/api";
 import { useEffect, useState } from "react";
 
 import type { InitialPDFState } from "../../internal";
@@ -12,22 +13,24 @@ export interface usePDFDocumentParams {
   /**
    * The URL of the PDF file to load.
    */
-  fileURL: string;
+  source: Source;
   onDocumentLoad?: ({
     proxy,
-    documentUrl,
+    source,
   }: {
     proxy: PDFDocumentProxy;
-    documentUrl: string;
+    source: Source;
   }) => void;
   initialRotation?: number;
   isZoomFitWidth?: boolean;
   zoom?: number;
 }
 
+export type Source = string | URL | TypedArray | ArrayBuffer | DocumentInitParameters;
+
 export const usePDFDocumentContext = ({
   onDocumentLoad,
-  fileURL,
+  source,
   initialRotation = 0,
   isZoomFitWidth,
   zoom = 1,
@@ -73,7 +76,7 @@ export const usePDFDocumentContext = ({
       setInitialState(null);
       setProgress(0);
 
-      const loadingTask = getDocument(fileURL);
+      const loadingTask = getDocument(source);
 
       loadingTask.onProgress = (progressEvent: OnProgressParameters) => {
         // Added to dedupe state updates when the file is fully loaded
@@ -86,7 +89,7 @@ export const usePDFDocumentContext = ({
 
       const loadingPromise = loadingTask.promise
         .then((proxy) => {
-          onDocumentLoad?.({ proxy, documentUrl: fileURL });
+          onDocumentLoad?.({ proxy, source });
           setProgress(1);
 
           generateViewports(proxy);
@@ -105,7 +108,7 @@ export const usePDFDocumentContext = ({
     };
     loadDocument();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileURL]);
+  }, [source]);
 
   return {
     initialState,

@@ -11,7 +11,7 @@ export const Root = forwardRef(
   (
     {
       children,
-      fileURL,
+      source,
       loader,
       onDocumentLoad,
       isZoomFitWidth,
@@ -24,7 +24,7 @@ export const Root = forwardRef(
     ref,
   ) => {
     const { initialState } = usePDFDocumentContext({
-      fileURL,
+      source,
       onDocumentLoad,
       isZoomFitWidth,
       zoom,

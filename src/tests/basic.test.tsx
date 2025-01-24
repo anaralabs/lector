@@ -8,5 +8,5 @@ import { Root } from "../../dist";
 GlobalWorkerOptions.workerSrc = PDFWorker;
 
 test("renders name", () => {
-  render(<Root fileURL="/form.pdf" />);
+  render(<Root source="/form.pdf" />);
 });
