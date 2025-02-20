@@ -4,10 +4,13 @@ import {
   type PDFDocumentProxy,
   type PDFPageProxy,
 } from "pdfjs-dist";
-import type { DocumentInitParameters, TypedArray } from "pdfjs-dist/types/src/display/api";
+import type {
+  DocumentInitParameters,
+  TypedArray,
+} from "pdfjs-dist/types/src/display/api";
 import { useEffect, useState } from "react";
 
-import type { InitialPDFState } from "../../internal";
+import type { InitialPDFState, ZoomOptions } from "../../internal";
 
 export interface usePDFDocumentParams {
   /**
@@ -24,9 +27,15 @@ export interface usePDFDocumentParams {
   initialRotation?: number;
   isZoomFitWidth?: boolean;
   zoom?: number;
+  zoomOptions?: ZoomOptions;
 }
 
-export type Source = string | URL | TypedArray | ArrayBuffer | DocumentInitParameters;
+export type Source =
+  | string
+  | URL
+  | TypedArray
+  | ArrayBuffer
+  | DocumentInitParameters;
 
 export const usePDFDocumentContext = ({
   onDocumentLoad,
@@ -34,6 +43,7 @@ export const usePDFDocumentContext = ({
   initialRotation = 0,
   isZoomFitWidth,
   zoom = 1,
+  zoomOptions = {},
 }: usePDFDocumentParams) => {
   const [_, setProgress] = useState(0);
 
@@ -69,6 +79,10 @@ export const usePDFDocumentContext = ({
         pageProxies: sortedPageProxies,
         pdfDocumentProxy: pdf,
         zoom,
+        zoomOptions: {
+          minZoom: zoomOptions.minZoom ?? 0.5,
+          maxZoom: zoomOptions.maxZoom ?? 10,
+        },
       });
     };
 

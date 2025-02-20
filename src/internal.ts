@@ -21,6 +21,11 @@ export type HighlightRect = {
   type?: "pixels" | "percent";
 };
 
+export interface ZoomOptions {
+  minZoom?: number;
+  maxZoom?: number;
+}
+
 interface PDFState {
   pdfDocumentProxy: PDFDocumentProxy;
 
@@ -47,10 +52,7 @@ interface PDFState {
   textContent: TextContent[];
   setTextContent: (textContents: TextContent[]) => void;
 
-  zoomOptions: {
-    minZoom: number;
-    maxZoom: number;
-  };
+  zoomOptions: Required<ZoomOptions>;
 
   virtualizer: PDFVirtualizer | null;
   setVirtualizer: (virtualizer: PDFVirtualizer) => void;
@@ -67,10 +69,14 @@ interface PDFState {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type PDFVirtualizer = Virtualizer<any, any>;
 
-export type InitialPDFState = Pick<
-  PDFState,
-  "pdfDocumentProxy" | "pageProxies" | "viewports" | "zoom"
-> & { isZoomFitWidth?: boolean };
+export interface InitialPDFState {
+  pdfDocumentProxy: PDFDocumentProxy;
+  pageProxies: PDFPageProxy[];
+  viewports: Array<PageViewport>;
+  zoom: number;
+  isZoomFitWidth?: boolean;
+  zoomOptions?: ZoomOptions;
+}
 
 export const PDFStore = createZustandContext(
   (initialState: InitialPDFState) => {
@@ -79,8 +85,8 @@ export const PDFStore = createZustandContext(
       zoom: initialState.zoom,
       isZoomFitWidth: initialState.isZoomFitWidth ?? false,
       zoomOptions: {
-        minZoom: 0.5,
-        maxZoom: 10,
+        minZoom: initialState.zoomOptions?.minZoom ?? 0.1,
+        maxZoom: initialState.zoomOptions?.maxZoom ?? 10,
       },
 
       viewportRef: createRef<HTMLDivElement>(),
