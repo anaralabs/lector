@@ -85,7 +85,7 @@ export const PDFStore = createZustandContext(
       zoom: initialState.zoom,
       isZoomFitWidth: initialState.isZoomFitWidth ?? false,
       zoomOptions: {
-        minZoom: initialState.zoomOptions?.minZoom ?? 0.1,
+        minZoom: initialState.zoomOptions?.minZoom ?? 0.5,
         maxZoom: initialState.zoomOptions?.maxZoom ?? 10,
       },
 

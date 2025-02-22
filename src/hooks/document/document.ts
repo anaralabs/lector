@@ -79,10 +79,7 @@ export const usePDFDocumentContext = ({
         pageProxies: sortedPageProxies,
         pdfDocumentProxy: pdf,
         zoom,
-        zoomOptions: {
-          minZoom: zoomOptions.minZoom ?? 0.5,
-          maxZoom: zoomOptions.maxZoom ?? 10,
-        },
+        zoomOptions,
       });
     };
 
