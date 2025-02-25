@@ -38,6 +38,7 @@ export const usePdfJump = () => {
     rects: HighlightRect[],
     type: "pixels" | "percent",
     align: "start" | "center" = "start",
+    additionalOffset: number = 0,
   ) => {
     if (!virtualizer) return;
 
@@ -53,29 +54,42 @@ export const usePdfJump = () => {
     const targetRect = rects.find((rect) => rect.pageNumber === firstPage);
 
     if (!targetRect) return;
-    // Calculate absolute scroll position:
-    // Page offset + highlight's position within the page
-    const isNumber = pageOffset?.[0] != null;
 
+    const isNumber = pageOffset?.[0] != null;
     if (!isNumber) return;
 
-    let scrollOffset: number;
+    const pageStart = pageOffset[0] ?? 0;
+
+    // Calculate the rect position and height
+    let rectTop: number;
+    let rectHeight: number;
 
     if (type === "percent") {
-      // Get the page dimensions
       const estimatePageHeight = virtualizer.options.estimateSize(
         firstPage - 1,
       );
-
-      // Convert percentage to pixels based on page height
-      const topInPixels = (targetRect.top / 100) * estimatePageHeight;
-      scrollOffset = (pageOffset[0] ?? 0) + topInPixels;
+      rectTop = (targetRect.top / 100) * estimatePageHeight;
+      rectHeight = (targetRect.height / 100) * estimatePageHeight;
     } else {
-      // Original pixel-based calculation
-      scrollOffset = (pageOffset[0] ?? 0) + targetRect.top;
+      rectTop = targetRect.top;
+      rectHeight = targetRect.height;
     }
 
-    // Adjust for padding
+    // Calculate the scroll offset based on alignment
+    let scrollOffset: number;
+
+    if (align === "center") {
+      // Use the center of the highlight rect
+      scrollOffset = pageStart + rectTop + rectHeight / 2;
+    } else {
+      // Use the top of the highlight rect
+      scrollOffset = pageStart + rectTop;
+    }
+
+    // Apply the additional offset
+    scrollOffset += additionalOffset;
+
+    // Ensure we don't scroll to a negative offset
     const adjustedOffset = Math.max(0, scrollOffset);
 
     virtualizer.scrollToOffset(adjustedOffset, {
