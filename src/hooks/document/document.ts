@@ -122,9 +122,6 @@ export const usePDFDocumentContext = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source]);
 
-  useEffect(() => {
-    setInitialState((prev) => (prev ? { ...prev, zoomOptions } : null));
-  }, [zoomOptions]);
 
   return {
     initialState,
