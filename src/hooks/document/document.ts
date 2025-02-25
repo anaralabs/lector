@@ -43,7 +43,7 @@ export const usePDFDocumentContext = ({
   initialRotation = 0,
   isZoomFitWidth,
   zoom = 1,
-  zoomOptions = {},
+  zoomOptions,
 }: usePDFDocumentParams) => {
   const [_, setProgress] = useState(0);
 
@@ -119,7 +119,7 @@ export const usePDFDocumentContext = ({
     };
     loadDocument();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source]);
+  }, [source, zoomOptions]);
 
   return {
     initialState,
