@@ -37,6 +37,7 @@ export const usePdfJump = () => {
   const jumpToHighlightRects = (
     rects: HighlightRect[],
     type: "pixels" | "percent",
+    align: "start" | "center" = "start",
   ) => {
     if (!virtualizer) return;
 
@@ -78,7 +79,7 @@ export const usePdfJump = () => {
     const adjustedOffset = Math.max(0, scrollOffset);
 
     virtualizer.scrollToOffset(adjustedOffset, {
-      align: "start",
+      align: align,
       behavior: "smooth",
     });
   };

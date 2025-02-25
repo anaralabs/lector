@@ -29,11 +29,11 @@ export const useScrollFn = () => {
 
       const zoom = store.getState().zoom;
       const offset = _offset * zoom;
+
       // if we are in auto scroll mode, then immediately scroll
       // to the offset and not display any animation. For example if scroll
       // immediately to a rescaled offset if zoom/scale has just been changed
       elementScroll(offset, canSmooth, instance);
-
       // if (canSmooth.behavior === "auto") {
       //   elementScroll(offset, canSmooth, instance);
       //   return;
