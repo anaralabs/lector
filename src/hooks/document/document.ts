@@ -73,14 +73,15 @@ export const usePDFDocumentContext = ({
       const sortedPageProxies = pageProxies.sort((a, b) => {
         return a.pageNumber - b.pageNumber;
       });
-      setInitialState({
+      setInitialState((prev) => ({
+        ...prev,
         isZoomFitWidth,
         viewports,
         pageProxies: sortedPageProxies,
         pdfDocumentProxy: pdf,
         zoom,
         zoomOptions,
-      });
+      }));
     };
 
     const loadDocument = () => {
@@ -119,7 +120,11 @@ export const usePDFDocumentContext = ({
     };
     loadDocument();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source, zoomOptions]);
+  }, [source]);
+
+  useEffect(() => {
+    setInitialState((prev) => (prev ? { ...prev, zoomOptions } : null));
+  }, [zoomOptions]);
 
   return {
     initialState,
