@@ -79,8 +79,13 @@ export const usePdfJump = () => {
     let scrollOffset: number;
 
     if (align === "center") {
-      // Use the center of the highlight rect
-      scrollOffset = pageStart + rectTop + rectHeight / 2;
+      // When centering in the viewport, we need the viewport height
+      const viewportHeight = virtualizer.scrollElement?.clientHeight || 0;
+
+      // The target position is the rect's center minus half the viewport height
+      // This places the rect in the center of the viewport
+      const rectCenter = pageStart + rectTop + rectHeight / 2;
+      scrollOffset = rectCenter - viewportHeight / 2;
     } else {
       // Use the top of the highlight rect
       scrollOffset = pageStart + rectTop;
@@ -93,7 +98,7 @@ export const usePdfJump = () => {
     const adjustedOffset = Math.max(0, scrollOffset);
 
     virtualizer.scrollToOffset(adjustedOffset, {
-      align: align,
+      align: "start", // Always use start when we've calculated our own centering
       behavior: "smooth",
     });
   };
