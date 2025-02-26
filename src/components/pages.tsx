@@ -124,6 +124,48 @@ export const Pages = ({
     Math.max(...state.viewports.map((v) => v.width)),
   );
 
+  const zoom = usePdf((state) => state.zoom);
+  useEffect(() => {
+    virtualizer.getOffsetForAlignment = (
+      toOffset: number,
+      align: "start" | "center" | "end" | "auto",
+      itemSize = 0,
+    ) => {
+      //@ts-expect-error this is a private stuff
+      const size = virtualizer.getSize();
+
+      //@ts-expect-error this is a private stuff
+      const scrollOffset = virtualizer.getScrollOffset();
+
+      if (align === "auto") {
+        align = toOffset >= scrollOffset + size ? "end" : "start";
+      }
+
+      if (align === "center") {
+        // When aligning to a particular item (e.g. with scrollToIndex),
+        // adjust offset by the size of the item to center on the item
+        toOffset += (itemSize - size) / 2;
+      } else if (align === "end") {
+        toOffset -= size;
+      }
+
+      const scrollSizeProp = virtualizer.options.horizontal
+        ? "scrollWidth"
+        : "scrollHeight";
+      const scrollSize = virtualizer.scrollElement
+        ? "document" in virtualizer.scrollElement
+          ? //@ts-expect-error this is a private stuff
+            virtualizer.scrollElement.document.documentElement[scrollSizeProp]
+          : virtualizer.scrollElement[scrollSizeProp]
+        : 0;
+
+      const maxOffset = scrollSize - size;
+      console.log(scrollSize, maxOffset, toOffset);
+
+      return Math.max(toOffset, 0);
+    };
+  }, [zoom, virtualizer]);
+
   return (
     <Primitive.div
       ref={containerRef}
