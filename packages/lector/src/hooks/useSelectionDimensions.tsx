@@ -29,7 +29,7 @@ const shouldMergeRectangles = (
   return verticalOverlap && horizontallyClose;
 };
 
-const mregeRectanges = (
+const mergeRectangles = (
   rect1: HighlightRect,
   rect2: HighlightRect,
 ): HighlightRect => {
@@ -56,25 +56,42 @@ const consolidateRects = (rects: HighlightRect[]): HighlightRect[] => {
     sortedRectangles[0] as HighlightRect; // initialize with first rectangle to bootstrap the process
   const allMergedRectangles: HighlightRect[] = [];
 
-  for (const [index, currentRectangle] of sortedRectangles.entries()) {
-    // if shouldn't merge, add to allMergedRectangles
-    if (
-      !shouldMergeRectangles(withinThresholdMergedRectangles, currentRectangle)
-    ) {
-      allMergedRectangles.push(withinThresholdMergedRectangles);
-      withinThresholdMergedRectangles = currentRectangle;
-      continue;
-    }
+  const blowUpMergedRectangles = (rect: HighlightRect): HighlightRect => {
+    return {
+      ...rect,
+      left: rect.left - 2,
+      top: rect.top - 2,
+      width: rect.width + 4,
+      height: rect.height + 2,
+    };
+  };
 
-    // merge
-    withinThresholdMergedRectangles = mregeRectanges(
+  for (const [index, currentRectangle] of sortedRectangles.entries()) {
+    withinThresholdMergedRectangles = mergeRectangles(
       withinThresholdMergedRectangles,
       currentRectangle,
     );
 
-    // if last rectangle/iteration, add to allMergedRectangles
-    if (index === sortedRectangles.length - 1) {
-      allMergedRectangles.push(withinThresholdMergedRectangles);
+    const nextRectangle = sortedRectangles[index + 1];
+
+    // establish the last merged rectangle if there are no more rectangles to merge
+    if (!nextRectangle) {
+      allMergedRectangles.push(
+        blowUpMergedRectangles(withinThresholdMergedRectangles),
+      );
+      break;
+    }
+
+    // check if the next rectangle should be merged
+    if (
+      !shouldMergeRectangles(withinThresholdMergedRectangles, nextRectangle)
+    ) {
+      // establish already merged rectangles
+      allMergedRectangles.push(
+        blowUpMergedRectangles(withinThresholdMergedRectangles),
+      );
+      // reset merged rectangles with the next unmerged rectangle in the queue
+      withinThresholdMergedRectangles = nextRectangle;
     }
   }
   return allMergedRectangles;
