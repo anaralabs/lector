@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { usePDFPageNumber } from "../../../hooks/usePdfPageNumber";
 import { useSelectionDimensions } from "../../../hooks/useSelectionDimensions";
 import { usePdf, type ColoredHighlight } from "../../../internal";

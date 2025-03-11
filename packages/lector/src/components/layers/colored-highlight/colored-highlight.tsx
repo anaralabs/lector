@@ -35,6 +35,7 @@ export const ColoredHighlightComponent = ({
             // mixBlendMode: "lighten", // changes the color of the text
             mixBlendMode: "darken", // best results
             // mixBlendMode: "multiply", // works but coloring has some inconsistencies
+            borderRadius: "0.2rem",
           }}
         />
       ))}
@@ -42,7 +43,7 @@ export const ColoredHighlightComponent = ({
         <button
           key={`${selection.uuid}-delete-button`}
           style={{
-            backgroundColor: "gray",
+            backgroundColor: "white",
             color: "white",
             borderRadius: "5px",
             padding: "5px",
