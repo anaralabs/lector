@@ -1,5 +1,5 @@
 {
-  "name": "@unriddle-ai/lector",
+  "name": "@anaralabs/lector",
   "version": "0.0.0-semantically-released",
   "description": "Headless PDF viewer for React",
   "author": "andrewdr (https://github.com/andrewdoro)",
@@ -85,18 +85,18 @@
     "headless",
     "viewer",
     "react-pdf",
-    "unriddle-ai",
+    "anaralabs",
     "typescript"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/unriddle-ai/lector.git",
+    "url": "git+https://github.com/anaralabs/lector.git",
     "directory": "packages/nuqs"
   },
   "bugs": {
-    "url": "https://github.com/unriddle-ai/lector/issues"
+    "url": "https://github.com/anaralabs/lector/issues"
   },
-  "homepage": "https://github.com/unriddle-ai/lector",
+  "homepage": "https://github.com/anaralabs/lector",
   "size-limit": [
     {
       "name": "Client",
