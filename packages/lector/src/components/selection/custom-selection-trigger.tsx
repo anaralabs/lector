@@ -27,20 +27,23 @@ export const CustomSelectionTrigger = () => {
   }, [getDimension, setCustomSelectionRects]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
     // Handle selection changes
-    document.addEventListener("selectionchange", handleSelection);
+    document.addEventListener("selectionchange", handleSelection, { signal });
 
     // Handle blur events on the document
-    document.addEventListener("blur", handleSelection, true);
+    document.addEventListener("blur", handleSelection, {
+      signal,
+      capture: true,
+    });
 
     // Handle mouseup for cases where selectionchange might not fire
-    document.addEventListener("mouseup", handleSelection);
+    document.addEventListener("mouseup", handleSelection, { signal });
 
     // Clean up all listeners
     return () => {
-      document.removeEventListener("selectionchange", handleSelection);
-      document.removeEventListener("blur", handleSelection, true);
-      document.removeEventListener("mouseup", handleSelection);
+      controller.abort();
     };
   }, [handleSelection]);
 

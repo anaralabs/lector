@@ -160,7 +160,6 @@ export const Pages = ({
         : 0;
 
       const maxOffset = scrollSize - size;
-      console.log(scrollSize, maxOffset, toOffset);
 
       return Math.max(toOffset, 0);
     };

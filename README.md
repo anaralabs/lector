@@ -50,6 +50,39 @@ export default function PDFViewer() {
 }
 ```
 
+## Local Development using PNPM and Yalc
+
+When you are using "pnpm link", you are bound to use pnpm on your consumer project when you are developing locally.
+With yalc, we are decoupling the need for pnpm and now the package can be tested with any package managers. Any
+changes should be automatically published to yalc on save, forcing a rebuilt and updating the consumer project.
+
+Install yalc globally:
+
+```
+pnpm i yalc -g
+```
+
+From lector:
+
+```bash
+# navigate to lector package folder and install dependencies
+pnpm i
+# when you first start development, make sure you publish the package locally
+yalc publish
+# and run the project in development mode to start a watcher that rebuilds the project and pushes the changes locally on save
+pnpm dev
+```
+
+From consumer project:
+(It doesn't really matter what package manager you are using)
+
+```bash
+# add local package to your package.json of the consumer project using yalc
+yalc add @anaralabs/lector
+# or if you don't want to add the yalc package in your package.json
+yalc link @anaralabs/lector
+```
+
 ## Features
 
 - 📱 Responsive and mobile-friendly
