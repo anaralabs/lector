@@ -78,9 +78,9 @@ From consumer project:
 
 ```bash
 # add local package to your package.json of the consumer project using yalc
-yalc add @unriddle-ai/lector
+yalc add @anaralabs/lector
 # or if you don't want to add the yalc package in your package.json
-yalc link @unriddle-ai/lector
+yalc link @anaralabs/lector
 ```
 
 ## Features
