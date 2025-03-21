@@ -23,7 +23,7 @@ import {
   HighlightLayer,
   useSelectionDimensions,
   usePdf,
-} from "@unriddle-ai/lector";
+} from "@anaralabs/lector";
 
 const PdfHighlightSelect = () => (
   <Root
@@ -72,7 +72,7 @@ const HighlightLayerContent = () => {
 Add a custom tooltip that appears when text is selected:
 
 ```tsx
-import { SelectionTooltip } from "@unriddle-ai/lector";
+import { SelectionTooltip } from "@anaralabs/lector";
 
 export const CustomSelect = ({ onHighlight }: { onHighlight: () => void }) => {
   return (

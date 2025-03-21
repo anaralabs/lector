@@ -9,7 +9,7 @@ import {
   TextLayer,
   ZoomIn,
   ZoomOut,
-} from "@unriddle-ai/lector";
+} from "@anaralabs/lector";
 
 import "@/lib/setup";
 

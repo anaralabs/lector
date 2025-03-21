@@ -9,7 +9,7 @@ import {
   Root,
   TextLayer,
   usePdfJump,
-} from "@unriddle-ai/lector";
+} from "@anaralabs/lector";
 import "@/lib/setup";
 
 const fileUrl = "/pdf/pathways.pdf";

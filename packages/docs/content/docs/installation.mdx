@@ -17,16 +17,16 @@ Before installing Lector, make sure you have:
 
 ```bash
 # Using npm
-npm install @unriddle-ai/lector pdfjs-dist
+npm install @anaralabs/lector pdfjs-dist
 
 # Using yarn
-yarn add @unriddle-ai/lector pdfjs-dist
+yarn add @anaralabs/lector pdfjs-dist
 
 # Using pnpm
-pnpm add @unriddle-ai/lector pdfjs-dist
+pnpm add @anaralabs/lector pdfjs-dist
 
 # Using bun
-bun add @unriddle-ai/lector pdfjs-dist
+bun add @anaralabs/lector pdfjs-dist
 ```
 
 ## Setting up PDF.js Worker
@@ -65,7 +65,7 @@ export function PDFViewer() {
 In your PDF viewer component:
 
 ```tsx
-import { Root, Pages, Page, CanvasLayer } from "@unriddle-ai/lector";
+import { Root, Pages, Page, CanvasLayer } from "@anaralabs/lector";
 import "pdfjs-dist/build/pdf.worker.min.mjs";
 import "pdfjs-dist/web/pdf_viewer.css";
 
@@ -96,7 +96,7 @@ import "pdfjs-dist/web/pdf_viewer.css";
 To verify that Lector is properly installed, create a basic PDF viewer component:
 
 ```tsx
-import { Root, Pages, Page, CanvasLayer } from "@unriddle-ai/lector";
+import { Root, Pages, Page, CanvasLayer } from "@anaralabs/lector";
 
 function BasicPDFViewer() {
   return (

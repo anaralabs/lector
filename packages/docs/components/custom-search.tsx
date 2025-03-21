@@ -5,7 +5,7 @@ import {
   usePdf,
   usePdfJump,
   useSearch,
-} from "@unriddle-ai/lector";
+} from "@anaralabs/lector";
 import { useEffect, useState } from "react";
 
 interface ResultItemProps {

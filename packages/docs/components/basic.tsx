@@ -1,6 +1,6 @@
 "use client";
 
-import { CanvasLayer, Page, Pages, Root, TextLayer } from "@unriddle-ai/lector";
+import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
 import React from "react";
 import "@/lib/setup";
 

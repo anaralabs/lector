@@ -24,17 +24,17 @@
     "headless",
     "viewer",
     "react-pdf",
-    "unriddle-ai",
+    "anaralabs",
     "typescript"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/unriddle-ai/lector.git"
+    "url": "https://github.com/anaralabs/lector.git"
   },
   "bugs": {
-    "url": "https://github.com/unriddle-ai/lector/issues"
+    "url": "https://github.com/anaralabs/lector/issues"
   },
-  "homepage": "https://github.com/unriddle-ai/lector",
+  "homepage": "https://github.com/anaralabs/lector",
   "packageManager": "pnpm@9.5.0",
   "dependencies": {
     "husky": "^9.1.7",

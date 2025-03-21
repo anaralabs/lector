@@ -1,4 +1,4 @@
-import { usePdf } from "@unriddle-ai/lector";
+import { usePdf } from "@anaralabs/lector";
 import { ChevronUpIcon, MinusIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {

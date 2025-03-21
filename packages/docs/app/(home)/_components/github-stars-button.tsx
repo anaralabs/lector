@@ -15,7 +15,7 @@ export const GithubStarsButton = ({ className }: Props) => {
   const [stars, setStars] = useState<string>();
 
   const fetchStars = async () => {
-    const res = await fetch("https://api.github.com/repos/unriddle-ai/lector");
+    const res = await fetch("https://api.github.com/repos/anaralabs/lector");
     const data = (await res.json()) as { stargazers_count: number };
     if (typeof data?.stargazers_count === "number") {
       setStars(new Intl.NumberFormat().format(data.stargazers_count));
@@ -27,10 +27,7 @@ export const GithubStarsButton = ({ className }: Props) => {
   }, []);
 
   return (
-    <Link
-      href="https://github.com/unriddle-ai/lector/stargazers"
-      target="_blank"
-    >
+    <Link href="https://github.com/anaralabs/lector/stargazers" target="_blank">
       <Button variant="secondary" className={className}>
         <Icon as={Star} className="h-4 w-4" />
         <span>Star</span>

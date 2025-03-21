@@ -1,6 +1,6 @@
 "use client";
 
-import { CanvasLayer, Page, Pages, Root, TextLayer } from "@unriddle-ai/lector";
+import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
 import React from "react";
 import "pdfjs-dist/web/pdf_viewer.css";
 
@@ -16,7 +16,7 @@ GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
-export const UnriddleViewer = () => {
+export const AnaraViewer = () => {
   return (
     <Root
       className="border overflow-hidden flex flex-col w-full h-[600px] rounded-lg"

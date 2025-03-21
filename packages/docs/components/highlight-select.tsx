@@ -10,7 +10,7 @@ import {
   TextLayer,
   useSelectionDimensions,
   usePdf,
-} from "@unriddle-ai/lector";
+} from "@anaralabs/lector";
 
 import "@/lib/setup";
 import { CustomSelect } from "./custom-select";

@@ -1,4 +1,4 @@
-import { CanvasLayer, Page, Pages, Root, TextLayer } from "@unriddle-ai/lector";
+import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
 import { GlobalWorkerOptions } from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
 
@@ -15,7 +15,7 @@ export default function App() {
         <div className="mb-4 flex items-center justify-between rounded-lg bg-white p-4 shadow-sm">
           <h1 className="text-xl font-semibold">Lector PDF Viewer</h1>
           <a
-            href="https://github.com/unriddle-ai/lector"
+            href="https://github.com/anaralabs/lector"
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm text-gray-500 hover:text-gray-700"

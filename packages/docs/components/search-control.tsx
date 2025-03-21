@@ -8,7 +8,7 @@ import {
   Root,
   Search,
   TextLayer,
-} from "@unriddle-ai/lector";
+} from "@anaralabs/lector";
 
 import "@/lib/setup";
 import { SearchUI } from "./custom-search";

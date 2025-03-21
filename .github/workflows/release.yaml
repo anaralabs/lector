@@ -118,7 +118,7 @@ jobs:
         run: pnpm install --ignore-scripts --frozen-lockfile --filter lector...
 
       - name: Build package
-        run: pnpm build --filter @unriddle-ai/lector
+        run: pnpm build --filter @anaralabs/lector
 
       - name: Set execute permissions
         run: chmod +x ./packages/lector/scripts/prepack.sh

@@ -1,5 +1,5 @@
 import React from "react";
-import { SelectionTooltip } from "@unriddle-ai/lector";
+import { SelectionTooltip } from "@anaralabs/lector";
 
 export const CustomSelect = ({ onHighlight }: { onHighlight: () => void }) => {
   return (

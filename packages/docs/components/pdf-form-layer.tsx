@@ -6,7 +6,7 @@ import {
   Pages,
   Root,
   TextLayer,
-} from "@unriddle-ai/lector";
+} from "@anaralabs/lector";
 import React, { useState, FormEvent } from "react";
 import "@/lib/setup";
 

@@ -23,7 +23,7 @@
       "persistent": true,
       "cache": false
     },
-    "@unriddle-ai/lector#test": {
+    "@anaralabs/lector#test": {
       "outputs": ["dist/**", "coverage/**"],
       "dependsOn": ["build"]
     }

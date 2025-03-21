@@ -17,7 +17,7 @@ export function Footer(): React.ReactElement {
 
           <div className="flex gap-6">
             <a
-              href="https://github.com/unriddle-ai/lector"
+              href="https://github.com/anaralabs/lector"
               target="_blank"
               rel="noreferrer"
               className="text-muted-foreground hover:text-foreground transition-colors"
@@ -26,7 +26,7 @@ export function Footer(): React.ReactElement {
               <Icon as={Github} className="h-5 w-5" />
             </a>
             <a
-              href="https://twitter.com/unriddle_ai"
+              href="https://twitter.com/anaralabs"
               target="_blank"
               rel="noreferrer"
               className="text-muted-foreground hover:text-foreground transition-colors"
@@ -41,12 +41,12 @@ export function Footer(): React.ReactElement {
           <div className="flex items-center gap-1">
             Powered by{" "}
             <a
-              href="https://www.unriddle.ai"
+              href="https://anara.so"
               target="_blank"
               rel="noreferrer"
               className="font-medium text-[#ff7a00] hover:text-[#ff7a00]/80 transition-colors inline-flex items-center gap-1"
             >
-              Unriddle
+              Anara
               <span className="text-xs bg-[#ff7a00]/10 text-[#ff7a00] px-2 py-0.5 rounded-full">
                 YC S24
               </span>
@@ -55,7 +55,7 @@ export function Footer(): React.ReactElement {
 
           <div className="flex gap-6 text-sm">
             <a
-              href="https://www.unriddle.ai/careers"
+              href="https://anara.so/careers"
               target="_blank"
               rel="noreferrer"
               className="hover:text-foreground transition-colors"
@@ -63,7 +63,7 @@ export function Footer(): React.ReactElement {
               Careers
             </a>
             <a
-              href="https://www.unriddle.ai"
+              href="https://anara.so"
               target="_blank"
               rel="noreferrer"
               className="hover:text-foreground transition-colors"

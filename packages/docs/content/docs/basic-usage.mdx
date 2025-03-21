@@ -33,7 +33,7 @@ GlobalWorkerOptions.workerSrc = new URL(
 Here's a minimal example of a PDF viewer:
 
 ```tsx
-import { Root, Pages, Page, CanvasLayer, TextLayer } from "@unriddle-ai/lector";
+import { Root, Pages, Page, CanvasLayer, TextLayer } from "@anaralabs/lector";
 
 function PDFViewer() {
   return (
@@ -97,7 +97,7 @@ Each page can have multiple layers for different functionality:
 ### Adding Zoom Controls
 
 ```tsx
-import { ZoomIn, ZoomOut, CurrentZoom } from "@unriddle-ai/lector";
+import { ZoomIn, ZoomOut, CurrentZoom } from "@anaralabs/lector";
 
 function PDFViewerWithZoom() {
   return (
@@ -121,7 +121,7 @@ function PDFViewerWithZoom() {
 ### Adding Page Navigation
 
 ```tsx
-import { CurrentPage, TotalPages } from "@unriddle-ai/lector";
+import { CurrentPage, TotalPages } from "@anaralabs/lector";
 
 function PDFViewerWithNavigation() {
   return (

@@ -9,6 +9,6 @@ export default defineConfig({
     host: true,
   },
   optimizeDeps: {
-    include: ["@unriddle-ai/lector", "pdfjs-dist"],
+    include: ["@anaralabs/lector", "pdfjs-dist"],
   },
 });
