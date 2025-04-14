@@ -1,8 +1,16 @@
 import { type HighlightRect, PDFStore } from "../internal";
 
-const MERGE_THRESHOLD = 5; // Increased threshold for more aggressive merging
+const MERGE_THRESHOLD = 20; // Increased threshold for more aggressive merging
 
-const shouldMergeRects = (
+type CollapsibleSelection = {
+  highlights: HighlightRect[];
+  text: string;
+  isCollapsed: boolean;
+};
+
+type Selection = Omit<CollapsibleSelection, "isCollapsed">;
+
+const shouldMergeRectangles = (
   rect1: HighlightRect,
   rect2: HighlightRect,
 ): boolean => {
@@ -21,7 +29,7 @@ const shouldMergeRects = (
   return verticalOverlap && horizontallyClose;
 };
 
-const mergeRects = (
+const mergeRectangles = (
   rect1: HighlightRect,
   rect2: HighlightRect,
 ): HighlightRect => {
@@ -42,40 +50,57 @@ const consolidateRects = (rects: HighlightRect[]): HighlightRect[] => {
   if (rects.length <= 1) return rects;
 
   // Sort by vertical position primarily
-  const sortedRects = [...rects].sort((a, b) => a.top - b.top);
+  const sortedRectangles = rects.toSorted((a, b) => a.top - b.top);
 
-  // Keep merging until no more merges are possible
-  let hasChanges: boolean;
-  do {
-    hasChanges = false;
-    let currentRect = sortedRects[0];
-    const tempResult: HighlightRect[] = [];
+  let withinThresholdMergedRectangles: HighlightRect =
+    sortedRectangles[0] as HighlightRect; // initialize with first rectangle to bootstrap the process
+  const allMergedRectangles: HighlightRect[] = [];
 
-    for (let i = 1; i < sortedRects.length; i++) {
-      const sorted = sortedRects[i];
-      if (!currentRect || !sorted) continue;
+  const blowUpMergedRectangles = (rect: HighlightRect): HighlightRect => {
+    return {
+      ...rect,
+      left: rect.left - 2,
+      top: rect.top - 2,
+      width: rect.width + 4,
+      height: rect.height + 2,
+    };
+  };
 
-      if (shouldMergeRects(currentRect, sorted)) {
-        currentRect = mergeRects(currentRect, sorted);
-        hasChanges = true;
-      } else {
-        tempResult.push(currentRect);
-        currentRect = sorted;
-      }
+  for (const [index, currentRectangle] of sortedRectangles.entries()) {
+    withinThresholdMergedRectangles = mergeRectangles(
+      withinThresholdMergedRectangles,
+      currentRectangle,
+    );
+
+    const nextRectangle = sortedRectangles[index + 1];
+
+    // establish the last merged rectangle if there are no more rectangles to merge
+    if (!nextRectangle) {
+      allMergedRectangles.push(
+        blowUpMergedRectangles(withinThresholdMergedRectangles),
+      );
+      break;
     }
-    if (currentRect) tempResult.push(currentRect);
 
-    sortedRects.length = 0;
-    sortedRects.push(...tempResult);
-  } while (hasChanges);
-
-  return sortedRects;
+    // check if the next rectangle should be merged
+    if (
+      !shouldMergeRectangles(withinThresholdMergedRectangles, nextRectangle)
+    ) {
+      // establish already merged rectangles
+      allMergedRectangles.push(
+        blowUpMergedRectangles(withinThresholdMergedRectangles),
+      );
+      // reset merged rectangles with the next unmerged rectangle in the queue
+      withinThresholdMergedRectangles = nextRectangle;
+    }
+  }
+  return allMergedRectangles;
 };
 
 export const useSelectionDimensions = () => {
   const store = PDFStore.useContext();
 
-  const getDimension = () => {
+  const getDimension = (): CollapsibleSelection | undefined => {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) return;
 
@@ -131,5 +156,7 @@ export const useSelectionDimensions = () => {
     };
   };
 
-  return { getDimension };
+  const getSelection = (): Selection => getDimension() as Selection;
+
+  return { getDimension, getSelection };
 };

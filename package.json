@@ -22,7 +22,7 @@
     "access": "public"
   },
   "scripts": {
-    "dev": "tsup --watch",
+    "dev": "tsup --watch --onSuccess 'yalc push'",
     "prebuild": "rm -rf dist",
     "build": "tsup",
     "lint": "eslint .",
@@ -74,6 +74,7 @@
     "@tanstack/react-virtual": "^3.10.9",
     "react-dom": "18.3.1",
     "use-debounce": "^10.0.4",
+    "uuid": "^11.1.0",
     "zustand": "^5.0.2"
   },
   "optionalDependencies": {

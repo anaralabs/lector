@@ -26,6 +26,14 @@ export interface ZoomOptions {
   maxZoom?: number;
 }
 
+export type ColoredHighlight = {
+  color: string;
+  rectangles: HighlightRect[];
+  pageNumber: number;
+  text: string;
+  uuid: string;
+};
+
 interface PDFState {
   pdfDocumentProxy: PDFDocumentProxy;
 
@@ -64,6 +72,10 @@ interface PDFState {
 
   customSelectionRects: HighlightRect[];
   setCustomSelectionRects: (rects: HighlightRect[]) => void;
+
+  coloredHighlights: ColoredHighlight[];
+  addColoredHighlight: (value: ColoredHighlight) => void;
+  deleteColoredHighlight: (uuid: string) => void;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -173,6 +185,18 @@ export const PDFStore = createZustandContext(
           customSelectionRects: val,
         });
       },
+
+      coloredHighlights: [],
+      addColoredHighlight: (value: ColoredHighlight) =>
+        set((prevState) => ({
+          coloredHighlights: [...prevState.coloredHighlights, value],
+        })),
+      deleteColoredHighlight: (uuid: string) =>
+        set((prevState) => ({
+          coloredHighlights: prevState.coloredHighlights.filter(
+            (rect) => rect.uuid !== uuid,
+          ),
+        })),
     }));
   },
 );
