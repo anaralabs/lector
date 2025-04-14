@@ -5,7 +5,7 @@ import { usePdf } from "../../internal";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
-export const useCanvasLayer = () => {
+export const useCanvasLayer = ({ background }: { background?: string }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pageNumber = usePDFPageNumber();
 
@@ -42,6 +42,7 @@ export const useCanvasLayer = () => {
     const renderingTask = pdfPageProxy.render({
       canvasContext: canvasContext,
       viewport,
+      background,
     });
 
     renderingTask.promise.catch((error) => {
