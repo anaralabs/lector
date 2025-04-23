@@ -8,15 +8,30 @@ interface TextPosition {
   pageNumber: number;
   text: string;
   matchIndex: number;
+  searchText?: string; // Optional parameter to specify the exact search text to highlight
 }
 
+/**
+ * Calculates the highlight rectangles for a given text match.
+ * 
+ * @param pageProxy - The PDF page proxy object
+ * @param textMatch - An object containing:
+ *   - pageNumber: The page number where the match is found
+ *   - text: The text content containing the match (usually a larger chunk of text)
+ *   - matchIndex: The index within the text where the match starts
+ *   - searchText: (Optional) The exact search term to highlight. If provided, only highlights 
+ *                 this exact term instead of the entire text. If not provided, highlights the full text.
+ * @returns An array of HighlightRect objects representing the areas to highlight
+ */
 export async function calculateHighlightRects(
   pageProxy: PDFPageProxy,
   textMatch: TextPosition,
 ): Promise<HighlightRect[]> {
   const textContent = await pageProxy.getTextContent();
   const items = textContent.items as TextItem[];
-  const matchLength = textMatch.text.length;
+  
+  const matchLength = textMatch.searchText ? textMatch.searchText.length : textMatch.text.length;
+  
   const matchRects: HighlightRect[] = [];
   let currentIndex = 0;
   let remainingMatchLength = matchLength;
@@ -31,7 +46,6 @@ export async function calculateHighlightRects(
 
     const itemLength = item.str.length;
 
-    // Check if we've found the start of our match
     if (
       !foundStart &&
       currentIndex <= textMatch.matchIndex &&
@@ -58,7 +72,6 @@ export async function calculateHighlightRects(
       matchRects.push(rect);
       remainingMatchLength -= matchLengthInItem;
     }
-    // Continue adding rectangles for subsequent parts of the match
     else if (foundStart && remainingMatchLength > 0) {
       const matchLengthInItem = Math.min(itemLength, remainingMatchLength);
 
@@ -77,7 +90,6 @@ export async function calculateHighlightRects(
       remainingMatchLength -= matchLengthInItem;
     }
 
-    // Stop if we've found all parts of the match
     if (remainingMatchLength <= 0 && foundStart) {
       break;
     }
@@ -100,12 +112,10 @@ function mergeAdjacentRects(rects: HighlightRect[]): HighlightRect[] {
     const next = rects[i];
 
     if (!next) continue;
-    // If rects are on the same line (approximately same y position)
     if (
       Math.abs(current.top - next.top) < 2 &&
       Math.abs(current.height - next.height) < 2
     ) {
-      // Merge them
       current = {
         ...current,
         width: next.left + next.width - current.left,
@@ -120,15 +130,18 @@ function mergeAdjacentRects(rects: HighlightRect[]): HighlightRect[] {
   return merged;
 }
 
-// Usage example with search results
 export async function processSearchResults(
   result: SearchResult,
   pageProxy: PDFPageProxy,
+  searchText?: string,
 ) {
+  const searchTermToHighlight = searchText || (result as any).searchText;
+  
   const highlights = await calculateHighlightRects(pageProxy, {
     pageNumber: result.pageNumber,
     text: result.text,
     matchIndex: result.matchIndex,
+    searchText: searchTermToHighlight,
   });
 
   return {

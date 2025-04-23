@@ -10,9 +10,10 @@ import { useEffect, useState } from "react";
 
 interface ResultItemProps {
   result: SearchResult;
+  originalSearchText?: string;
 }
 
-const ResultItem = ({ result }: ResultItemProps) => {
+const ResultItem = ({ result, originalSearchText }: ResultItemProps) => {
   const { jumpToHighlightRects } = usePdfJump();
   const getPdfPageProxy = usePdf((state) => state.getPdfPageProxy);
 
@@ -23,7 +24,8 @@ const ResultItem = ({ result }: ResultItemProps) => {
       pageNumber: result.pageNumber,
       text: result.text,
       matchIndex: result.matchIndex,
-    });
+      searchText: originalSearchText,
+    } as any);
 
     jumpToHighlightRects(rects, "pixels");
   };
@@ -50,9 +52,10 @@ interface ResultGroupProps {
   title: string;
   results: SearchResult[];
   displayCount?: number;
+  originalSearchText?: string;
 }
 
-const ResultGroup = ({ title, results, displayCount }: ResultGroupProps) => {
+const ResultGroup = ({ title, results, displayCount, originalSearchText }: ResultGroupProps) => {
   if (!results.length) return null;
 
   const displayResults = displayCount
@@ -67,6 +70,7 @@ const ResultGroup = ({ title, results, displayCount }: ResultGroupProps) => {
           <ResultItem
             key={`${result.pageNumber}-${result.matchIndex}`}
             result={result}
+            originalSearchText={originalSearchText}
           />
         ))}
       </div>
@@ -146,8 +150,16 @@ export const SearchResults = ({
 
   return (
     <div className="flex flex-col gap-4">
-      <ResultGroup title="Exact Matches" results={results.exactMatches} />
-      <ResultGroup title="Similar Matches" results={results.fuzzyMatches} />
+      <ResultGroup 
+        title="Exact Matches" 
+        results={results.exactMatches} 
+        originalSearchText={searchText} 
+      />
+      <ResultGroup 
+        title="Similar Matches" 
+        results={results.fuzzyMatches} 
+        originalSearchText={searchText} 
+      />
 
       {results.hasMoreResults && (
         <button
