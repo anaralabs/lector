@@ -1,5 +1,6 @@
 export { AnnotationLayer } from "./components/layers/annotation-layer";
 export { CanvasLayer } from "./components/layers/canvas-layer";
+export { ColoredHighlightLayer } from "./components/layers/colored-highlight/colored-highlight-layer";
 export { CustomLayer } from "./components/layers/custom-layer";
 export { HighlightLayer } from "./components/layers/highlight-layer";
 export { TextLayer } from "./components/layers/text-layer";
@@ -26,5 +27,4 @@ export {
 export { calculateHighlightRects } from "./hooks/search/useSearchPosition";
 export { LinkService } from "./hooks/usePDFLinkService";
 export { useSelectionDimensions } from "./hooks/useSelectionDimensions";
-export { type HighlightRect, type ColoredHighlight, usePdf } from "./internal";
-export { ColoredHighlightLayer } from "./components/layers/colored-highlight/colored-highlight-layer";
+export { type ColoredHighlight, type HighlightRect, usePdf } from "./internal";

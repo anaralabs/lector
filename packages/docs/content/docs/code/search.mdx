@@ -7,9 +7,45 @@ import CustomSearch from "@/components/search-control.tsx";
 
 <CustomSearch />
 
-## Basic Usage
+## Implementation
 
-Create a PDF viewer with custom search functionality and result highlighting:
+This example demonstrates two different highlighting behaviors when searching in a PDF document.
+
+### Exact Term Highlighting
+
+```tsx
+// Highlight only the exact search term
+const ResultItem = ({ result, originalSearchText }) => {
+  const onClick = async () => {
+    const rects = await calculateHighlightRects(pageProxy, {
+      pageNumber: result.pageNumber,
+      text: result.text,
+      matchIndex: result.matchIndex,
+      searchText: originalSearchText, // Pass searchText to highlight only the exact term
+    });
+    jumpToHighlightRects(rects, "pixels");
+  };
+};
+```
+
+### Full Context Highlighting
+
+```tsx
+// Highlight the entire text chunk containing the search term
+const ResultItemFullHighlight = ({ result }) => {
+  const onClick = async () => {
+    const rects = await calculateHighlightRects(pageProxy, {
+      pageNumber: result.pageNumber,
+      text: result.text,
+      matchIndex: result.matchIndex,
+      // No searchText parameter = highlight full context
+    });
+    jumpToHighlightRects(rects, "pixels");
+  };
+};
+```
+
+### Complete Example
 
 ```tsx
 "use client";
@@ -23,61 +59,6 @@ import {
   HighlightLayer,
   Search,
 } from "@anaralabs/lector";
-import { useState } from "react";
-
-const ResultItem = ({ result }) => (
-  <div className="flex py-2 hover:bg-gray-50 cursor-pointer">
-    <div className="flex-1 min-w-0">
-      <p className="text-sm text-gray-900">{result.text}</p>
-      <p className="text-sm text-gray-500">Page {result.pageNumber}</p>
-    </div>
-  </div>
-);
-
-const SearchUI = () => {
-  const [searchText, setSearchText] = useState("");
-
-  return (
-    <div className="flex flex-col w-64 h-full">
-      <div className="px-4 py-4 border-b border-gray-200 bg-white">
-        <input
-          type="text"
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          placeholder="Search in document..."
-          className="w-full px-4 py-2 border rounded-lg"
-        />
-      </div>
-      <div className="flex-1 overflow-y-auto px-4">
-        {/* Results will appear here */}
-      </div>
-    </div>
-  );
-};
-
-export default function CustomSearch() {
-  return (
-    <Root source="/pdf/large.pdf" className="flex bg-gray-50 h-[500px]">
-      <Search>
-        <SearchUI />
-      </Search>
-      <Pages className="p-4 w-full">
-        <Page>
-          <CanvasLayer />
-          <TextLayer />
-          <HighlightLayer className="bg-yellow-200/70" />
-        </Page>
-      </Pages>
-    </Root>
-  );
-}
-```
-
-## Advanced Implementation
-
-For more advanced features like debouncing, fuzzy matching, and jumping to results, here's the complete implementation:
-
-```tsx
 import { useDebounce } from "use-debounce";
 import {
   calculateHighlightRects,
@@ -88,11 +69,20 @@ import {
 } from "@anaralabs/lector";
 import { useEffect, useState } from "react";
 
+// Define the TextPosition interface
+interface TextPosition {
+  pageNumber: number;
+  text: string;
+  matchIndex: number;
+  searchText?: string;
+}
+
 interface ResultItemProps {
   result: SearchResult;
   originalSearchText: string;
 }
 
+// Exact term highlighting component
 const ResultItem = ({ result, originalSearchText }: ResultItemProps) => {
   const { jumpToHighlightRects } = usePdfJump();
   const getPdfPageProxy = usePdf((state) => state.getPdfPageProxy);
@@ -103,7 +93,7 @@ const ResultItem = ({ result, originalSearchText }: ResultItemProps) => {
       pageNumber: result.pageNumber,
       text: result.text,
       matchIndex: result.matchIndex,
-      searchText: originalSearchText,
+      searchText: originalSearchText, // Pass searchText for exact term highlighting
     });
     jumpToHighlightRects(rects, "pixels");
   };
@@ -123,37 +113,8 @@ const ResultItem = ({ result, originalSearchText }: ResultItemProps) => {
   );
 };
 
-interface ResultGroupProps {
-  title: string;
-  results: SearchResult[];
-  displayCount?: number;
-  originalSearchText: string;
-}
-
-const ResultGroup = ({ title, results, displayCount, originalSearchText }: ResultGroupProps) => {
-  if (!results.length) return null;
-
-  const displayResults = displayCount
-    ? results.slice(0, displayCount)
-    : results;
-
-  return (
-    <div className="space-y-2">
-      <h3 className="text-sm font-medium text-gray-700">{title}</h3>
-      <div className="divide-y divide-gray-100">
-        {displayResults.map((result) => (
-          <ResultItem
-            key={`${result.pageNumber}-${result.matchIndex}`}
-            result={result}
-            originalSearchText={originalSearchText}
-          />
-        ))}
-      </div>
-    </div>
-  );
-};
-
-export function SearchUI() {
+// Search UI component
+function SearchUI() {
   const [searchText, setSearchText] = useState("");
   const [debouncedSearchText] = useDebounce(searchText, 500);
   const [limit, setLimit] = useState(5);
@@ -183,68 +144,80 @@ export function SearchUI() {
       </div>
       <div className="flex-1 overflow-y-auto px-4">
         <div className="py-4">
-          <SearchResults
-            searchText={searchText}
-            results={results}
-            onLoadMore={handleLoadMore}
-          />
+          {!searchText ? null : !results.exactMatches.length &&
+            !results.fuzzyMatches.length ? (
+            <div className="text-center py-4 text-gray-500">
+              No results found
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4">
+              {results.exactMatches.length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-sm font-medium text-gray-700">
+                    Exact Matches
+                  </h3>
+                  <div className="divide-y divide-gray-100">
+                    {results.exactMatches.map((result) => (
+                      <ResultItem
+                        key={`${result.pageNumber}-${result.matchIndex}`}
+                        result={result}
+                        originalSearchText={searchText}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {results.hasMoreResults && (
+                <button
+                  onClick={handleLoadMore}
+                  className="w-full py-2 px-4 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors"
+                >
+                  Load More Results
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-interface SearchResultsProps {
-  searchText: string;
-  results: {
-    exactMatches: SearchResult[];
-    fuzzyMatches: SearchResult[];
-    hasMoreResults: boolean;
-  };
-  onLoadMore: () => void;
-}
-
-export const SearchResults = ({
-  searchText,
-  results,
-  onLoadMore,
-}: SearchResultsProps) => {
-  if (!searchText) return null;
-
-  if (!results.exactMatches.length && !results.fuzzyMatches.length) {
-    return (
-      <div className="text-center py-4 text-gray-500">No results found</div>
-    );
-  }
-
+// Main component
+export default function CustomSearchExample() {
   return (
-    <div className="flex flex-col gap-4">
-      <ResultGroup
-        title="Exact Matches"
-        results={results.exactMatches}
-        originalSearchText={searchText}
-      />
-      <ResultGroup
-        title="Similar Matches"
-        results={results.fuzzyMatches}
-        originalSearchText={searchText}
-      />
-
-      {results.hasMoreResults && (
-        <button
-          onClick={onLoadMore}
-          className="w-full py-2 px-4 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors"
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col">
+        <h3 className="text-lg font-semibold mb-2">
+          Exact Search Term Highlighting
+        </h3>
+        <Root
+          source="/pdf/pathways.pdf"
+          className="flex bg-gray-50 h-[500px]"
+          loader={<div className="p-4">Loading...</div>}
         >
-          Load More Results
-        </button>
-      )}
+          <Search>
+            <SearchUI />
+          </Search>
+          <Pages className="p-4 w-full">
+            <Page>
+              <CanvasLayer />
+              <TextLayer />
+              <HighlightLayer className="bg-yellow-200/70" />
+            </Page>
+          </Pages>
+        </Root>
+      </div>
     </div>
   );
 }
+```
 
 ## Features
 
 - Real-time search with debouncing
+- Configurable highlighting (exact term or full context)
 - Result highlighting
 - Page jumping to search results
 - Load more functionality
@@ -252,7 +225,7 @@ export const SearchResults = ({
 ## Best Practices
 
 - Use debouncing to prevent excessive searches
+- Choose appropriate highlighting mode for your use case
 - Include proper page navigation
 - Handle empty states gracefully
 - Optimize search performance
-```
