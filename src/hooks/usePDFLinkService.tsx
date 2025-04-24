@@ -145,7 +145,7 @@ export class LinkService implements IPDFLinkService {
         try {
           const refProxy = destRef as RefProxy;
           pageIndex = await this.pdfDocumentProxy.getPageIndex(refProxy);
-        } catch (error) {
+        } catch (_error) {
           return;
         }
       } else {
@@ -170,7 +170,7 @@ export class LinkService implements IPDFLinkService {
     // Intentionally empty
   }
   
-  navigateTo(dest: any): void {
+  navigateTo(dest: string | unknown[] | Promise<unknown[]>): void {
     this.goToDestination(dest);
   }
 

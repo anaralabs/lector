@@ -159,7 +159,7 @@ export const Pages = ({
           : virtualizer.scrollElement[scrollSizeProp]
         : 0;
 
-      const maxOffset = scrollSize - size;
+      const _maxOffset = scrollSize - size;
 
       return Math.max(toOffset, 0);
     };

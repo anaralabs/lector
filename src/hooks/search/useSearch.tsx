@@ -8,6 +8,7 @@ export interface SearchResult {
   score: number;
   matchIndex: number;
   isExactMatch: boolean;
+  searchText?: string;
 }
 
 export interface SearchResults {
@@ -84,6 +85,7 @@ export const useSearch = () => {
         score: 1,
         matchIndex,
         isExactMatch: true,
+        searchText,
       });
 
       index = matchIndex + searchText.length;
@@ -128,6 +130,7 @@ export const useSearch = () => {
           score,
           matchIndex: index,
           isExactMatch: false,
+          searchText,
         });
         index += searchLower.length;
       } else {

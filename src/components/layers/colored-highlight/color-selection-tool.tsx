@@ -1,4 +1,3 @@
-import type { ColoredHighlight } from "../../../internal";
 import { SelectionTooltip } from "../../selection-tooltip";
 
 type ColorSelectionToolProps = {

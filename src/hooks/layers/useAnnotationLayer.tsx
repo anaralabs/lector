@@ -3,10 +3,10 @@ import { useEffect, useRef } from "react";
 
 import { usePdf } from "../../internal";
 import { cancellable } from "../../lib/cancellable";
+import { usePdfJump } from "../pages/usePdfJump";
 import { usePDFLinkService } from "../usePDFLinkService";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 import { useVisibility } from "../useVisibility";
-import { usePdfJump } from "../pages/usePdfJump";
 
 export interface AnnotationLayerParams {
   /**
@@ -206,7 +206,7 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
             linkService,
           });
           
-        } catch (error) {
+        } catch (_error) {
           // Silently handle rendering errors
         }
       })(),

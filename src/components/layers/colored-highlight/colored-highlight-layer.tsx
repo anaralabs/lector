@@ -1,11 +1,11 @@
 import { useCallback } from "react";
-import { usePDFPageNumber } from "../../../hooks/usePdfPageNumber";
-import { useSelectionDimensions } from "../../../hooks/useSelectionDimensions";
-import { usePdf, type ColoredHighlight } from "../../../internal";
 import { v4 as uuidv4 } from "uuid";
 
-import { ColoredHighlightComponent } from "./colored-highlight";
+import { usePDFPageNumber } from "../../../hooks/usePdfPageNumber";
+import { useSelectionDimensions } from "../../../hooks/useSelectionDimensions";
+import { type ColoredHighlight,usePdf } from "../../../internal";
 import { ColorSelectionTool } from "./color-selection-tool";
+import { ColoredHighlightComponent } from "./colored-highlight";
 
 type ColoredHighlightLayerProps = {
   onHighlight?: (highlight: ColoredHighlight) => void;
