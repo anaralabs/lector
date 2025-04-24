@@ -8,6 +8,14 @@ import {
 } from "@anaralabs/lector";
 import { useEffect, useState } from "react";
 
+// Define the TextPosition interface to match the one in useSearchPosition.tsx
+interface TextPosition {
+  pageNumber: number;
+  text: string;
+  matchIndex: number;
+  searchText?: string;
+}
+
 interface ResultItemProps {
   result: SearchResult;
   originalSearchText?: string;
@@ -20,12 +28,14 @@ const ResultItem = ({ result, originalSearchText }: ResultItemProps) => {
   const onClick = async () => {
     const pageProxy = getPdfPageProxy(result.pageNumber);
 
-    const rects = await calculateHighlightRects(pageProxy, {
+    const textPosition: TextPosition = {
       pageNumber: result.pageNumber,
       text: result.text,
       matchIndex: result.matchIndex,
       searchText: originalSearchText,
-    } as any);
+    };
+
+    const rects = await calculateHighlightRects(pageProxy, textPosition);
 
     jumpToHighlightRects(rects, "pixels");
   };

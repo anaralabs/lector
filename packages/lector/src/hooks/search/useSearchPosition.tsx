@@ -135,7 +135,7 @@ export async function processSearchResults(
   pageProxy: PDFPageProxy,
   searchText?: string,
 ) {
-  const searchTermToHighlight = searchText || (result as any).searchText;
+  const searchTermToHighlight = searchText || (result as { searchText?: string }).searchText;
   
   const highlights = await calculateHighlightRects(pageProxy, {
     pageNumber: result.pageNumber,
