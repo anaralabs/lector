@@ -60,10 +60,10 @@ const PDFContent = ({
       pageNumber: selection.highlights[0].pageNumber,
       highlights: selection.highlights,
       color: "rgba(255, 255, 0, 0.3)", 
+      text: selection.text,
     };
 
     addAnnotation(newAnnotation);
-
     window.getSelection()?.removeAllRanges();
   }, [addAnnotation, getSelection]);
 

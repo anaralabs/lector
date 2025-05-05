@@ -107,6 +107,7 @@ export const useAnnotationTooltip = ({
   }, [annotation.highlights, annotation.pageNumber, refs, viewportRef]);
 
   useEffect(() => {
+    const viewport = viewportRef.current;
     updateTooltipPosition();
 
     const handleScroll = () => {
@@ -117,8 +118,8 @@ export const useAnnotationTooltip = ({
       requestAnimationFrame(updateTooltipPosition);
     };
 
-    if (viewportRef.current) {
-      viewportRef.current.addEventListener("scroll", handleScroll, {
+    if (viewport) {
+      viewport.addEventListener("scroll", handleScroll, {
         passive: true,
       });
     }
@@ -126,8 +127,8 @@ export const useAnnotationTooltip = ({
     window.addEventListener("resize", handleResize, { passive: true });
 
     return () => {
-      if (viewportRef.current) {
-        viewportRef.current.removeEventListener("scroll", handleScroll);
+      if (viewport) {
+        viewport.removeEventListener("scroll", handleScroll);
       }
       window.removeEventListener("resize", handleResize);
     };

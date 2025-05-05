@@ -69,10 +69,21 @@ export const AnnotationHighlightLayer = ({
                   width: highlight.width,
                   height: highlight.height,
                   backgroundColor: annotation.color || "rgba(255, 255, 0, 0.3)",
-                  transition: "background-color 0.2s ease",
+                  mixBlendMode: "multiply",
+                  borderRadius: "2px",
+                  transition: "all 0.2s ease",
                   cursor: "pointer",
-                  opacity: focusedAnnotationId === annotation.id ? 1 : 0.5,
+                  opacity: focusedAnnotationId === annotation.id ? 1 : 0.9,
+                  lineHeight: `${highlight.height}px`,
+                  textAlign: "left",
+                  whiteSpace: "pre",
+                  pointerEvents: "all",
+                  boxShadow: focusedAnnotationId === annotation.id 
+                    ? "0 1px 3px rgba(0,0,0,0.12)"
+                    : "none",
+                  zIndex: focusedAnnotationId === annotation.id ? 31 : 30,
                 }}
+                data-highlight-id={annotation.id}
               />
             ))}
           </div>
