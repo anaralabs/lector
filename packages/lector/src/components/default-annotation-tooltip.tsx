@@ -1,5 +1,5 @@
-import type { Annotation } from "../hooks/useAnnotations";
 import { useAnnotationActions } from "../hooks/useAnnotationActions";
+import type { Annotation } from "../hooks/useAnnotations";
 
 interface DefaultAnnotationTooltipContentProps {
   annotation: Annotation;

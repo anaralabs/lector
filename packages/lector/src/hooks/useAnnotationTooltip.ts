@@ -8,8 +8,9 @@ import {
   useInteractions,
 } from "@floating-ui/react";
 import { useCallback, useEffect, useState } from "react";
-import type { Annotation } from "./useAnnotations";
+
 import { usePdf } from "../internal";
+import type { Annotation } from "./useAnnotations";
 
 interface UseAnnotationTooltipProps {
   annotation: Annotation;
@@ -74,7 +75,7 @@ export const useAnnotationTooltip = ({
 
     // Get the last highlight rect to position the tooltip
     const lastHighlight = annotation.highlights[annotation.highlights.length - 1];
-    
+
     refs.setReference({
       getBoundingClientRect: () => {
         const viewportElement = viewportRef.current;
@@ -84,7 +85,7 @@ export const useAnnotationTooltip = ({
         if (!pageElement) return defaultRect;
 
         const pageRect = pageElement.getBoundingClientRect();
-        
+
         // Calculate client coordinates relative to the viewport
         const left = pageRect.left + lastHighlight.left;
         const top = pageRect.top + lastHighlight.top;

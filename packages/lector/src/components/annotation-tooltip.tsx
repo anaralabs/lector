@@ -1,17 +1,7 @@
-import {
-  autoUpdate,
-  flip,
-  offset,
-  shift,
-  useDismiss,
-  useFloating,
-  useInteractions,
-  useClick,
-} from "@floating-ui/react";
-import { useCallback, useEffect, useState } from "react";
+
+import { useCallback} from "react";
+
 import type { Annotation } from "../hooks/useAnnotations";
-import { useAnnotations } from "../hooks/useAnnotations";
-import { usePdf } from "../internal";
 import { useAnnotationTooltip } from "../hooks/useAnnotationTooltip";
 
 interface AnnotationTooltipProps {
@@ -19,27 +9,18 @@ interface AnnotationTooltipProps {
   children: React.ReactNode;
   tooltipContent: React.ReactNode;
   onOpenChange?: (open: boolean) => void;
+  isOpen?: boolean;
 }
-
-const defaultRect = {
-  width: 0,
-  height: 0,
-  x: 0,
-  y: 0,
-  top: 0,
-  right: 0,
-  bottom: 0,
-  left: 0,
-};
 
 export const AnnotationTooltip = ({
   annotation,
   children,
   tooltipContent,
   onOpenChange,
+  isOpen: controlledIsOpen,
 }: AnnotationTooltipProps) => {
   const {
-    isOpen,
+    isOpen: uncontrolledIsOpen,
     setIsOpen,
     refs,
     floatingStyles,
@@ -50,9 +31,13 @@ export const AnnotationTooltip = ({
     onOpenChange,
   });
 
+  const isOpen = controlledIsOpen ?? uncontrolledIsOpen;
+
   const handleClick = useCallback(() => {
-    setIsOpen(!isOpen);
-  }, [isOpen, setIsOpen]);
+    if (controlledIsOpen === undefined) {
+      setIsOpen(!isOpen);
+    }
+  }, [controlledIsOpen, isOpen, setIsOpen]);
 
   return (
     <>

@@ -1,12 +1,8 @@
-import { useCallback } from "react";
-import { useSelectionDimensions } from "../../hooks/useSelectionDimensions";
-import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
-import { useAnnotations } from "../../hooks/useAnnotations";
 import type { Annotation } from "../../hooks/useAnnotations";
-import { SelectionTooltip } from "../selection-tooltip";
+import { useAnnotations } from "../../hooks/useAnnotations";
+import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
 import { AnnotationTooltip } from "../annotation-tooltip";
 import { DefaultAnnotationTooltipContent } from "../default-annotation-tooltip";
-import { usePdf } from "../../internal";
 
 interface AnnotationHighlightLayerProps {
   className?: string;
@@ -15,12 +11,16 @@ interface AnnotationHighlightLayerProps {
     annotation: Annotation;
     onClose: () => void;
   }) => React.ReactNode;
+  focusedAnnotationId?: string;
+  onAnnotationClick?: (annotation: Annotation) => void;
 }
 
 export const AnnotationHighlightLayer = ({
   className,
   style,
   renderTooltipContent,
+  focusedAnnotationId,
+  onAnnotationClick,
 }: AnnotationHighlightLayerProps) => {
   const { annotations } = useAnnotations();
   const pageNumber = usePDFPageNumber();
@@ -35,6 +35,12 @@ export const AnnotationHighlightLayer = ({
         <AnnotationTooltip
           key={annotation.id}
           annotation={annotation}
+          isOpen={focusedAnnotationId === annotation.id}
+          onOpenChange={(open) => {
+            if (open && onAnnotationClick) {
+              onAnnotationClick(annotation);
+            }
+          }}
           tooltipContent={
             renderTooltipContent ? (
               renderTooltipContent({
@@ -49,7 +55,10 @@ export const AnnotationHighlightLayer = ({
             )
           }
         >
-          <div style={{ cursor: "pointer" }}>
+          <div 
+            style={{ cursor: "pointer" }}
+            onClick={() => onAnnotationClick?.(annotation)}
+          >
             {annotation.highlights.map((highlight, index) => (
               <div
                 key={index}
@@ -62,6 +71,7 @@ export const AnnotationHighlightLayer = ({
                   backgroundColor: annotation.color || "rgba(255, 255, 0, 0.3)",
                   transition: "background-color 0.2s ease",
                   cursor: "pointer",
+                  opacity: focusedAnnotationId === annotation.id ? 1 : 0.5,
                 }}
               />
             ))}
