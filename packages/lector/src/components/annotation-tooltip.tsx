@@ -1,8 +1,9 @@
-
 import { useCallback} from "react";
+import { createPortal } from "react-dom";
 
 import type { Annotation } from "../hooks/useAnnotations";
 import { useAnnotationTooltip } from "../hooks/useAnnotationTooltip";
+import { usePdf } from "../internal";
 
 interface AnnotationTooltipProps {
   annotation: Annotation;
@@ -10,6 +11,7 @@ interface AnnotationTooltipProps {
   tooltipContent: React.ReactNode;
   onOpenChange?: (open: boolean) => void;
   isOpen?: boolean;
+  className?: string;
 }
 
 export const AnnotationTooltip = ({
@@ -17,8 +19,10 @@ export const AnnotationTooltip = ({
   children,
   tooltipContent,
   onOpenChange,
+  className,
   isOpen: controlledIsOpen,
 }: AnnotationTooltipProps) => {
+  const viewportRef = usePdf((state) => state.viewportRef);
   const {
     isOpen: uncontrolledIsOpen,
     setIsOpen,
@@ -48,19 +52,20 @@ export const AnnotationTooltip = ({
       >
         {children}
       </div>
-      {isOpen && (
+      {isOpen && viewportRef.current && createPortal(
         <div
           ref={refs.setFloating}
-          className="bg-white shadow-lg rounded-lg p-3 z-50 min-w-[200px]"
+          className={className}
           style={{
             ...floatingStyles,
-            position: 'fixed',
-            zIndex: 9999,
+            position: 'absolute',
+            pointerEvents: 'auto',
           }}
           {...getFloatingProps()}
         >
           {tooltipContent}
-        </div>
+        </div>,
+        viewportRef.current
       )}
     </>
   );

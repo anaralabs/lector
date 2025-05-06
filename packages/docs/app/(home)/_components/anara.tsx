@@ -125,6 +125,7 @@ const PDFContent = ({
         <TextLayer />
         <AnnotationHighlightLayer 
           focusedAnnotationId={focusedAnnotationId}
+          tooltipClassName="bg-white shadow-lg rounded-lg p-3 min-w-[200px]"
           onAnnotationClick={onAnnotationClick}
           renderTooltipContent={renderTooltipContent}
         />
