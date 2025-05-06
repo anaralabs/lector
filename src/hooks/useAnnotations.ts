@@ -1,4 +1,3 @@
-import { v4 as uuidv4 } from "uuid";
 import { create } from "zustand";
 
 export interface Annotation {
@@ -11,15 +10,16 @@ export interface Annotation {
     width: number;
     pageNumber: number;
   }>;
-  comment?: string;
-  color?: string;
+  color: string;
   createdAt: Date;
   updatedAt: Date;
+  comment?: string;
+  metadata?: Record<string, any>;
 }
 
 interface AnnotationState {
   annotations: Annotation[];
-  addAnnotation: (annotation: Omit<Annotation, "id" | "createdAt" | "updatedAt">) => void;
+  addAnnotation: (annotation: Annotation) => void;
   updateAnnotation: (id: string, updates: Partial<Annotation>) => void;
   deleteAnnotation: (id: string) => void;
   setAnnotations: (annotations: Annotation[]) => void;
@@ -27,16 +27,11 @@ interface AnnotationState {
 
 export const useAnnotations = create<AnnotationState>((set) => ({
   annotations: [],
-  addAnnotation: (annotation) => 
+  addAnnotation: (annotation) =>
     set((state) => ({
       annotations: [
         ...state.annotations,
-        {
-          ...annotation,
-          id: uuidv4(),
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
+        annotation,
       ],
     })),
   updateAnnotation: (id, updates) =>
@@ -44,10 +39,9 @@ export const useAnnotations = create<AnnotationState>((set) => ({
       annotations: state.annotations.map((annotation) =>
         annotation.id === id
           ? {
-              ...annotation,
-              ...updates,
-              updatedAt: new Date(),
-            }
+            ...annotation,
+            ...updates,
+          }
           : annotation
       ),
     })),
