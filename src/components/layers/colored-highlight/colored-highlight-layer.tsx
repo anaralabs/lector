@@ -15,7 +15,7 @@ export const ColoredHighlightLayer = ({
   onHighlight,
 }: ColoredHighlightLayerProps) => {
   const pageNumber = usePDFPageNumber();
-  const { getSelection } = useSelectionDimensions();
+  const { getDimension } = useSelectionDimensions();
 
   const highlights: ColoredHighlight[] = usePdf(
     (state) => state.coloredHighlights,
@@ -23,7 +23,10 @@ export const ColoredHighlightLayer = ({
   const addColoredHighlight = usePdf((state) => state.addColoredHighlight);
 
   const handleHighlighting = useCallback((color: string) => {
-    const { highlights, text } = getSelection();
+    const dimension = getDimension();
+    if (!dimension) return;
+
+    const { highlights, text } = dimension;
 
     if (highlights[0]) {
       const highlight: ColoredHighlight = {
