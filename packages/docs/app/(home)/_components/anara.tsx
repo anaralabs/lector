@@ -1,5 +1,6 @@
 "use client";
 
+import { v4 as uuidv4 } from "uuid";
 import { 
   CanvasLayer, 
   Page, 
@@ -20,7 +21,7 @@ import { GlobalWorkerOptions } from "pdfjs-dist";
 import ZoomMenu from "./zoom-menu";
 import DocumentMenu from "./document-menu";
 import { PageNavigation } from "./page-navigation";
-import { SelectionTooltipContent, TooltipContent, TooltipContentProps } from "./annotationts";
+import { SelectionTooltipContent, TooltipContent, TooltipContentProps } from "./annotations";
 
 const fileUrl = "/pdf/pathways.pdf";
 const STORAGE_KEY = "pdf-annotations";
@@ -61,6 +62,9 @@ const PDFContent = ({
       highlights: selection.highlights,
       color: "rgba(255, 255, 0, 0.3)", 
       text: selection.text,
+      id: uuidv4(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
     };
 
     addAnnotation(newAnnotation);

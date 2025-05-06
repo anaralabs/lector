@@ -14,7 +14,7 @@ export interface Annotation {
   createdAt: Date;
   updatedAt: Date;
   comment?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 interface AnnotationState {

@@ -26,7 +26,8 @@
     "shiki": "^1.24.4",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
-    "use-debounce": "^10.0.4"
+    "use-debounce": "^10.0.4",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "@types/mdx": "^2.0.13",
