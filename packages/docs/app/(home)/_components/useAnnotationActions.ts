@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 
-import type { Annotation } from "../../../../lector/src/hooks/useAnnotations";
-import { useAnnotations } from "../../../../lector/src/hooks/useAnnotations";
+import type { Annotation } from "@anaralabs/lector";
+import { useAnnotations } from "@anaralabs/lector";
 
 interface UseAnnotationActionsProps {
   annotation: Annotation;
