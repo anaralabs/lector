@@ -2,12 +2,11 @@ import type { Annotation } from "../../hooks/useAnnotations";
 import { useAnnotations } from "../../hooks/useAnnotations";
 import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
 import { AnnotationTooltip } from "../annotation-tooltip";
-import { DefaultAnnotationTooltipContent } from "../default-annotation-tooltip";
 
 interface AnnotationHighlightLayerProps {
   className?: string;
   style?: React.CSSProperties;
-  renderTooltipContent?: (props: {
+  renderTooltipContent: (props: {
     annotation: Annotation;
     onClose: () => void;
   }) => React.ReactNode;
@@ -41,18 +40,12 @@ export const AnnotationHighlightLayer = ({
               onAnnotationClick(annotation);
             }
           }}
-          tooltipContent={
-            renderTooltipContent ? (
+          tooltipContent={(
               renderTooltipContent({
                 annotation,
                 onClose: () => {},
               })
-            ) : (
-              <DefaultAnnotationTooltipContent
-                annotation={annotation}
-                onClose={() => {}}
-              />
-            )
+            ) 
           }
         >
           <div 
@@ -75,13 +68,7 @@ export const AnnotationHighlightLayer = ({
                   cursor: "pointer",
                   opacity: focusedAnnotationId === annotation.id ? 1 : 0.9,
                   lineHeight: `${highlight.height}px`,
-                  textAlign: "left",
-                  whiteSpace: "pre",
                   pointerEvents: "all",
-                  boxShadow: focusedAnnotationId === annotation.id 
-                    ? "0 1px 3px rgba(0,0,0,0.12)"
-                    : "none",
-                  zIndex: focusedAnnotationId === annotation.id ? 31 : 30,
                 }}
                 data-highlight-id={annotation.id}
               />

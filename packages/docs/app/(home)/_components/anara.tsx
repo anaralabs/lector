@@ -44,7 +44,7 @@ const PDFContent = ({
   onAnnotationClick,
 }: PDFContentProps) => {
   const { addAnnotation, annotations } = useAnnotations();
-  const { getSelection } = useSelectionDimensions();
+  const { getDimension } = useSelectionDimensions();
   const { jumpToHighlightRects } = usePdfJump();
 
 
@@ -53,7 +53,7 @@ const PDFContent = ({
   }, [annotations, onAnnotationsChange]);
 
   const handleCreateAnnotation = useCallback(() => {
-    const selection = getSelection();
+    const selection = getDimension();
     if (!selection || !selection.highlights.length) return;
 
     const newAnnotation = {
