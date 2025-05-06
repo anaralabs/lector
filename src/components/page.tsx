@@ -30,6 +30,7 @@ export const Page = ({
             {
               ...style,
               "--scale-factor": 1,
+              "--total-scale-factor": 1,
               position: "relative",
               width,
               height,
