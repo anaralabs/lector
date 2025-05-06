@@ -1,12 +1,12 @@
 import {
   autoUpdate,
   flip,
+  inline,
   offset,
   shift,
   useDismiss,
   useFloating,
   useInteractions,
-  inline,
 } from "@floating-ui/react";
 import { useCallback, useEffect, useState } from "react";
 
