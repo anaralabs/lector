@@ -12,15 +12,20 @@
     "resolveJsonModule": true,
     // Language & Environment
     "target": "ESNext",
-    "lib": ["DOM", "DOM.Iterable", "ESNext"],
-    "types": ["node"],
+    "lib": [
+      "DOM",
+      "DOM.Iterable",
+      "ESNext"
+    ],
+    "types": [
+      "node"
+    ],
     // Emit
     "noEmit": true,
     "declaration": true,
     "declarationMap": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
-
     "downlevelIteration": true,
     // Interop
     "allowJs": true,
@@ -33,6 +38,12 @@
     "incremental": true,
     "tsBuildInfoFile": ".tsbuildinfo"
   },
-  "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }
