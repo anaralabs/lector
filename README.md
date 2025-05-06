@@ -1,5 +1,4 @@
 <p align="center">
-  <!-- <h1 align="center"><img src="https://www.anara.ai/icons/logo.png" width="196" /></h1> -->
   <p align="center">
     <i>Simple primitives to compose powerful PDF viewing experiences.<br>powered by <code><a href="https://mozilla.github.io/pdf.js/">PDF.js</a></code> and <code><a href="https://reactjs.org/">React</a></code></i>
   </p>
