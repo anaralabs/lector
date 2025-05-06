@@ -21,6 +21,23 @@ export type HighlightRect = {
   type?: "pixels" | "percent";
 };
 
+
+export interface Annotation {
+  id: string;
+  pageNumber: number;
+  highlights: Array<{
+    height: number;
+    left: number;
+    top: number;
+    width: number;
+    pageNumber: number;
+  }>;
+  comment?: string;
+  color?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface ZoomOptions {
   minZoom?: number;
   maxZoom?: number;
@@ -76,6 +93,13 @@ interface PDFState {
   coloredHighlights: ColoredHighlight[];
   addColoredHighlight: (value: ColoredHighlight) => void;
   deleteColoredHighlight: (uuid: string) => void;
+
+  // Add PDF annotation support
+  annotations: Annotation[];
+  addAnnotation: (annotation: Annotation) => void;
+  updateAnnotation: (id: string, annotation: Partial<Annotation>) => void;
+  removeAnnotation: (id: string) => void;
+  setAnnotations: (annotations: Annotation[]) => void;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -197,6 +221,25 @@ export const PDFStore = createZustandContext(
             (rect) => rect.uuid !== uuid,
           ),
         })),
+
+      // Initialize PDF annotation state
+      annotations: [],
+      addAnnotation: (annotation: Annotation) =>
+        set((state) => ({
+          annotations: [...state.annotations, annotation],
+        })),
+      updateAnnotation: (id: string, updates: Partial<Annotation>) =>
+        set((state) => ({
+          annotations: state.annotations.map((ann) =>
+            ann.id === id ? { ...ann, ...updates } : ann
+          ),
+        })),
+      removeAnnotation: (id: string) =>
+        set((state) => ({
+          annotations: state.annotations.filter((ann) => ann.id !== id),
+        })),
+      setAnnotations: (annotations: Annotation[]) =>
+        set({ annotations }),
     }));
   },
 );

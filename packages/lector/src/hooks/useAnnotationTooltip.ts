@@ -10,7 +10,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 
 import { usePdf } from "../internal";
-import type { Annotation } from "./useAnnotations";
+import type { Annotation } from "../internal";
 
 interface UseAnnotationTooltipProps {
   annotation: Annotation;
@@ -41,9 +41,7 @@ export const useAnnotationTooltip = ({
   annotation,
   onOpenChange,
 }: UseAnnotationTooltipProps): UseAnnotationTooltipReturn => {
-  // Show tooltip immediately if it's a new annotation
-  const isNewAnnotation = Date.now() - new Date(annotation.createdAt).getTime() < 1000;
-  const [isOpen, setIsOpen] = useState(isNewAnnotation);
+  const [isOpen, setIsOpen] = useState(false);
   const viewportRef = usePdf((state) => state.viewportRef);
 
   const {
@@ -71,15 +69,10 @@ export const useAnnotationTooltip = ({
   const { getReferenceProps, getFloatingProps } = useInteractions([dismiss]);
 
   const updateTooltipPosition = useCallback(() => {
-    if (!annotation.highlights.length) return;
-
-    // Get the last highlight rect to position the tooltip
-    const lastHighlight = annotation.highlights[annotation.highlights.length - 1];
-
     refs.setReference({
       getBoundingClientRect: () => {
         const viewportElement = viewportRef.current;
-        if (!viewportElement || !lastHighlight) return defaultRect;
+        if (!viewportElement) return defaultRect;
 
         const pageElement = viewportElement.querySelector(`[data-page-number="${annotation.pageNumber}"]`);
         if (!pageElement) return defaultRect;
@@ -87,10 +80,10 @@ export const useAnnotationTooltip = ({
         const pageRect = pageElement.getBoundingClientRect();
 
         // Calculate client coordinates relative to the viewport
-        const left = pageRect.left + lastHighlight.left;
-        const top = pageRect.top + lastHighlight.top;
-        const width = lastHighlight.width;
-        const height = lastHighlight.height;
+        const left = pageRect.left + (annotation.highlights[0]?.left || 0);
+        const top = pageRect.top + (annotation.highlights[0]?.top || 0);
+        const width = annotation.highlights[0]?.width || 0;
+        const height = annotation.highlights[0]?.height || 0;
 
         return {
           width,

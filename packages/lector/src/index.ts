@@ -27,9 +27,11 @@ export {
   useSearch,
 } from "./hooks/search/useSearch";
 export { calculateHighlightRects } from "./hooks/search/useSearchPosition";
-export type { Annotation } from "./hooks/useAnnotations";
 export { useAnnotations } from "./hooks/useAnnotations";
 export { LinkService } from "./hooks/usePDFLinkService";
 export { usePDFPageNumber } from "./hooks/usePdfPageNumber";
 export { useSelectionDimensions } from "./hooks/useSelectionDimensions";
 export { type ColoredHighlight, type HighlightRect, usePdf } from "./internal";
+export type { Annotation } from './internal';
+export type { StoreApi } from 'zustand';
+export type { UseBoundStore } from 'zustand/react';

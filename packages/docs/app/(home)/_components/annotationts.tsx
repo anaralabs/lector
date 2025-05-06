@@ -1,10 +1,8 @@
-
-
 import { 
   type Annotation,
-  useAnnotations,
+  usePdf,
 } from "@anaralabs/lector";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useState, useMemo } from "react";
 
 export const SelectionTooltipContent = ({ onHighlight }: { onHighlight: () => void }) => {
   return (
@@ -67,9 +65,23 @@ export interface TooltipContentProps {
 }
 
 export const TooltipContent = ({ annotation, onClose }: TooltipContentProps) => {
-  const { updateAnnotation, deleteAnnotation } = useAnnotations();
+  // Memoize the selector to prevent infinite loops
+  const selector = useCallback((state: any) => ({
+    updateAnnotation: state.updateAnnotation,
+    removeAnnotation: state.removeAnnotation
+  }), []);
+
+  const { updateAnnotation, removeAnnotation } = usePdf(selector);
   const [comment, setComment] = useState(annotation.comment || "");
   const [isEditing, setIsEditing] = useState(false);
+
+  // Memoize colors array
+  const colors = useMemo(() => [
+    "rgba(255, 255, 0, 0.3)", // Yellow
+    "rgba(0, 255, 0, 0.3)", // Green
+    "rgba(255, 182, 193, 0.3)", // Pink
+    "rgba(135, 206, 235, 0.3)", // Sky Blue
+  ], []);
 
   const handleSaveComment = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -96,42 +108,35 @@ export const TooltipContent = ({ annotation, onClose }: TooltipContentProps) => 
 
   const handleDelete = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    deleteAnnotation(annotation.id);
+    removeAnnotation(annotation.id);
     onClose?.();
-  }, [annotation.id, deleteAnnotation, onClose]);
-
-  const colors = [
-    "rgba(255, 255, 0, 0.3)", // Yellow
-    "rgba(0, 255, 0, 0.3)", // Green
-    "rgba(255, 182, 193, 0.3)", // Pink
-    "rgba(135, 206, 235, 0.3)", // Sky Blue
-  ];
+  }, [annotation.id, removeAnnotation, onClose]);
 
   const handleTooltipClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
   }, []);
 
   return (
-    <div className="flex flex-col gap-2" onClick={handleTooltipClick}>
+    <div className="bg-white shadow-lg rounded-md p-2 z-50" onClick={handleTooltipClick}>
       {/* Color picker and delete button */}
       <div className="flex items-center justify-center gap-2">
-          {colors.map((color) => (
-            <button
-              key={color}
-              className="w-6 h-6 rounded"
-              style={{ backgroundColor: color }}
-              onClick={(e) => handleColorChange(e, color)}
-            />
-          ))}
+        {colors.map((color) => (
+          <button
+            key={color}
+            className="w-6 h-6 rounded"
+            style={{ backgroundColor: color }}
+            onClick={(e) => handleColorChange(e, color)}
+          />
+        ))}
       </div>
 
       {/* Comment section */}
       {isEditing ? (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 mt-2">
           <textarea
             value={comment}
             onChange={(e) => setComment(e.target.value)}
-            className="border rounded p-2 text-sm"
+            className="border rounded p-2 text-sm min-w-[200px]"
             placeholder="Add a comment..."
             rows={3}
             onClick={(e) => e.stopPropagation()}
@@ -152,24 +157,32 @@ export const TooltipContent = ({ annotation, onClose }: TooltipContentProps) => 
           </div>
         </div>
       ) : (
-        <div className="flex flex-row gap-2">
+        <div className="flex flex-row gap-2 mt-2">
           {annotation.comment ? (
-            <div className="text-sm text-gray-700">{annotation.comment}</div>
+            <>
+              <div className="text-sm text-gray-700 min-w-[150px]">{annotation.comment}</div>
+              <button
+                onClick={handleDelete}
+                className="text-sm text-red-500 hover:text-red-600 ml-auto"
+              >
+                Delete
+              </button>
+            </>
           ) : (
             <>
-            <button
-              onClick={handleStartEditing}
-              className="text-sm text-blue-500 hover:text-blue-600"
-            >
-              Add comment
-            </button>
-            
-        <button
-        onClick={handleDelete}
-        className="text-sm text-red-500 hover:text-red-600"
-      >
-        Delete
-      </button>
+              <button
+                onClick={handleStartEditing}
+                className="text-sm text-blue-500 hover:text-blue-600"
+              >
+                Add comment
+              </button>
+              
+              <button
+                onClick={handleDelete}
+                className="text-sm text-red-500 hover:text-red-600"
+              >
+                Delete
+              </button>
             </>
           )}
         </div>

@@ -1,67 +1,45 @@
+import { Slot } from "@radix-ui/react-slot";
+import type { ElementRef, ReactNode } from "react";
+import { forwardRef } from "react";
 
-import { useCallback} from "react";
-
-import type { Annotation } from "../hooks/useAnnotations";
 import { useAnnotationTooltip } from "../hooks/useAnnotationTooltip";
+import type { Annotation } from "../internal";
 
 interface AnnotationTooltipProps {
   annotation: Annotation;
-  children: React.ReactNode;
-  tooltipContent: React.ReactNode;
-  onOpenChange?: (open: boolean) => void;
+  tooltipContent: ReactNode;
+  children: ReactNode;
   isOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  asChild?: boolean;
 }
 
-export const AnnotationTooltip = ({
-  annotation,
-  children,
-  tooltipContent,
-  onOpenChange,
-  isOpen: controlledIsOpen,
-}: AnnotationTooltipProps) => {
-  const {
-    isOpen: uncontrolledIsOpen,
-    setIsOpen,
-    refs,
-    floatingStyles,
-    getFloatingProps,
-    getReferenceProps,
-  } = useAnnotationTooltip({
+export const AnnotationTooltip = forwardRef<
+  ElementRef<"div">,
+  AnnotationTooltipProps
+>(({ annotation, tooltipContent, children, isOpen, onOpenChange, asChild, ...props }, ref) => {
+  const { getReferenceProps, getFloatingProps, refs, floatingStyles } = useAnnotationTooltip({
     annotation,
     onOpenChange,
   });
 
-  const isOpen = controlledIsOpen ?? uncontrolledIsOpen;
-
-  const handleClick = useCallback(() => {
-    if (controlledIsOpen === undefined) {
-      setIsOpen(!isOpen);
-    }
-  }, [controlledIsOpen, isOpen, setIsOpen]);
+  const Comp = asChild ? Slot : "div";
 
   return (
     <>
-      <div 
-        ref={refs.setReference} 
-        onClick={handleClick}
-        {...getReferenceProps()}
-      >
+      <Comp ref={refs.setReference} {...getReferenceProps()} {...props}>
         {children}
-      </div>
+      </Comp>
       {isOpen && (
         <div
           ref={refs.setFloating}
-          className="bg-white shadow-lg rounded-lg p-3 z-50 min-w-[200px]"
-          style={{
-            ...floatingStyles,
-            position: 'fixed',
-            zIndex: 9999,
-          }}
+          style={floatingStyles}
           {...getFloatingProps()}
+          className="z-50"
         >
           {tooltipContent}
         </div>
       )}
     </>
   );
-}; 
+}); 

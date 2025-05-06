@@ -6,12 +6,12 @@ import {
   Pages, 
   Root, 
   TextLayer, 
-  AnnotationHighlightLayer, 
-  type Annotation,
+  AnnotationHighlightLayer,
   SelectionTooltip,
-  useAnnotations,
   useSelectionDimensions,
   usePdfJump,
+  usePdf,
+  Annotation,
 } from "@anaralabs/lector";
 import React, { useCallback, useEffect, useState } from "react";
 import "pdfjs-dist/web/pdf_viewer.css";
@@ -30,67 +30,112 @@ GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
-interface PDFContentProps {
-  onAnnotationsChange: (annotations: Annotation[]) => void;
-  initialAnnotations?: Annotation[];
-  focusedAnnotationId?: string;
-  onAnnotationClick: (annotation: Annotation | null) => void;
-}
 
+// Helper function to load annotations from localStorage
+const loadAnnotations = () => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return saved ? (JSON.parse(saved) as Annotation[]) : [];
+  } catch (error) {
+    console.error('Error loading annotations:', error);
+    return [];
+  }
+};
+
+// Helper function to save annotations to localStorage
+const saveAnnotations = (annotations: Annotation[]) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(annotations));
+  } catch (error) {
+    console.error('Error saving annotations:', error);
+  }
+};
+
+const usePersistedAnnotations = () => {
+  const annotations = usePdf(state => state.annotations);
+  const setAnnotations = usePdf(state => state.setAnnotations);
+  const addAnnotation = usePdf(state => state.addAnnotation);
+  const updateAnnotation = usePdf(state => state.updateAnnotation);
+  const removeAnnotation = usePdf(state => state.removeAnnotation);
+
+  // Load saved annotations on mount
+  useEffect(() => {
+    const savedAnnotations = loadAnnotations();
+    if (savedAnnotations.length > 0) {
+      setAnnotations(savedAnnotations);
+    }
+  }, [setAnnotations]);
+
+  // Save annotations whenever they change
+  useEffect(() => {
+    saveAnnotations(annotations);
+  }, [annotations]);
+
+  return {
+    annotations,
+    setAnnotations,
+    addAnnotation,
+    updateAnnotation,
+    removeAnnotation
+  };
+};
 
 const PDFContent = ({ 
-  onAnnotationsChange, 
   focusedAnnotationId,
   onAnnotationClick,
-}: PDFContentProps) => {
-  const { addAnnotation, annotations } = useAnnotations();
+}: {
+  focusedAnnotationId?: string;
+  onAnnotationClick: (annotation: Annotation | null) => void;
+}) => {
   const { getDimension } = useSelectionDimensions();
   const { jumpToHighlightRects } = usePdfJump();
-
-
-  useEffect(() => {
-    onAnnotationsChange(annotations);
-  }, [annotations, onAnnotationsChange]);
+  const { annotations, addAnnotation } = usePersistedAnnotations();
 
   const handleCreateAnnotation = useCallback(() => {
     const selection = getDimension();
     if (!selection || !selection.highlights.length) return;
 
-    const newAnnotation = {
-      pageNumber: selection.highlights[0].pageNumber,
+    const highlight = selection.highlights[0];
+    const newAnnotation: Annotation = {
+      id: Math.random().toString(36).substring(7),
+      pageNumber: highlight.pageNumber,
       highlights: selection.highlights,
-      color: "rgba(255, 255, 0, 0.3)", 
-      text: selection.text,
+      color: "rgba(255, 255, 0, 0.3)",
+      comment: selection.text,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     };
 
     addAnnotation(newAnnotation);
+    onAnnotationClick(newAnnotation);
     window.getSelection()?.removeAllRanges();
-  }, [addAnnotation, getSelection]);
-
-  useEffect(() => {
-    if (annotations.length === 0) return;
-    
-    const lastAnnotation = annotations[annotations.length - 1];
-    const isNewAnnotation = Date.now() - new Date(lastAnnotation.createdAt).getTime() < 1000;
-    
-    if (isNewAnnotation) {
-      onAnnotationClick(lastAnnotation);
-    }
-  }, [annotations, onAnnotationClick]);
+  }, [getDimension, addAnnotation, onAnnotationClick]);
 
   useEffect(() => {
     if (!focusedAnnotationId) return;
 
-    const annotation = annotations.find(a => a.id === focusedAnnotationId);
-    if (!annotation || !annotation.highlights.length) return;
+    const jumpToAnnotation = (annotation: Annotation) => {
+      const highlight = {
+        pageNumber: annotation.pageNumber,
+        top: annotation.highlights[0].top,
+        left: annotation.highlights[0].left,
+        width: annotation.highlights[0].width,
+        height: annotation.highlights[0].height,
+      };
 
-    jumpToHighlightRects(
-      annotation.highlights,
-      "pixels",
-      "center", 
-      -50 
-    );
-  }, [focusedAnnotationId, annotations, jumpToHighlightRects]);
+      jumpToHighlightRects(
+        [highlight],
+        "pixels",
+        "center", 
+        -50 
+      );
+    };
+
+    const annotation = annotations.find((a: Annotation) => a.id === focusedAnnotationId);
+    if (annotation) {
+      jumpToAnnotation(annotation);
+    }
+  }, [focusedAnnotationId, jumpToHighlightRects, annotations]);
 
   const handlePagesClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -137,17 +182,7 @@ const PDFContent = ({
 };
 
 export const AnaraViewer = () => {
-  const [savedAnnotations, setSavedAnnotations] = React.useState<Annotation[]>([]);
   const [focusedAnnotationId, setFocusedAnnotationId] = useState<string>();
-
-  const handleAnnotationsChange = useCallback((annotations: Annotation[]) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(annotations));
-      setSavedAnnotations(annotations);
-    } catch (error) {
-      console.error('Error saving annotations:', error);
-    }
-  }, []);
 
   const handleAnnotationClick = useCallback((annotation: Annotation | null) => {
     setFocusedAnnotationId(annotation?.id);
@@ -167,8 +202,6 @@ export const AnaraViewer = () => {
           <DocumentMenu documentUrl={fileUrl} />
         </div>
         <PDFContent 
-          initialAnnotations={savedAnnotations}
-          onAnnotationsChange={handleAnnotationsChange}
           focusedAnnotationId={focusedAnnotationId}
           onAnnotationClick={handleAnnotationClick}
         />

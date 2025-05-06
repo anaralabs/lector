@@ -1,7 +1,9 @@
-import type { Annotation } from "../../hooks/useAnnotations";
-import { useAnnotations } from "../../hooks/useAnnotations";
+import { useEffect } from "react";
 import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
 import { AnnotationTooltip } from "../annotation-tooltip";
+import { useAnnotationLayer } from "../../hooks/layers/useAnnotationLayer";
+import { usePdf } from "../../internal";
+import type { Annotation } from "../../internal";
 
 interface AnnotationHighlightLayerProps {
   className?: string;
@@ -11,7 +13,7 @@ interface AnnotationHighlightLayerProps {
     onClose: () => void;
   }) => React.ReactNode;
   focusedAnnotationId?: string;
-  onAnnotationClick?: (annotation: Annotation) => void;
+  onAnnotationClick?: (annotation: Annotation | null) => void;
 }
 
 export const AnnotationHighlightLayer = ({
@@ -21,38 +23,78 @@ export const AnnotationHighlightLayer = ({
   focusedAnnotationId,
   onAnnotationClick,
 }: AnnotationHighlightLayerProps) => {
-  const { annotations } = useAnnotations();
   const pageNumber = usePDFPageNumber();
+  const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
+  const annotations = usePdf((state) => state.annotations);
+  const setAnnotations = usePdf((state) => state.setAnnotations);
 
+  // Setup PDF.js annotation layer
+  const { annotationLayerRef } = useAnnotationLayer({
+    renderForms: true,
+    externalLinksEnabled: true,
+  });
+
+  // Load PDF annotations when page changes
+  useEffect(() => {
+    if (!pdfPageProxy) return;
+
+    const loadAnnotations = async () => {
+      try {
+        const pdfAnnotations = await pdfPageProxy.getAnnotations();
+        const processedAnnotations = pdfAnnotations.map((ann: any) => ({
+          id: ann.id || Math.random().toString(36).substring(7),
+          pageNumber,
+          highlights: ann.highlights,
+          color: ann.color,
+          comment: ann.comment,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as Annotation));
+        
+        // Add each annotation to the store
+        setAnnotations(processedAnnotations);
+      } catch (error) {
+        console.error('Error loading PDF annotations:', error);
+      }
+    };
+
+    void loadAnnotations();
+  }, [pdfPageProxy, pageNumber]);
+
+  // Filter annotations for current page
   const pageAnnotations = annotations.filter(
     (annotation) => annotation.pageNumber === pageNumber
   );
 
   return (
-    <div className={className} style={style}>
-      {pageAnnotations.map((annotation) => (
-        <AnnotationTooltip
-          key={annotation.id}
-          annotation={annotation}
-          isOpen={focusedAnnotationId === annotation.id}
-          onOpenChange={(open) => {
-            if (open && onAnnotationClick) {
-              onAnnotationClick(annotation);
-            }
-          }}
-          tooltipContent={(
+    <>
+      {/* Native PDF.js annotation layer */}
+      <div ref={annotationLayerRef} className="annotationLayer" />
+
+      {/* Custom highlight annotations */}
+      <div className={className} style={style}>
+        {pageAnnotations.map((annotation) => (
+          <AnnotationTooltip
+            key={annotation.id}
+            annotation={annotation}
+            isOpen={focusedAnnotationId === annotation.id}
+            onOpenChange={(open) => {
+              if (open && onAnnotationClick) {
+                onAnnotationClick(annotation);
+              }
+            }}
+            tooltipContent={
               renderTooltipContent({
                 annotation,
                 onClose: () => {},
               })
-            ) 
-          }
-        >
-          <div 
-            style={{ cursor: "pointer" }}
-            onClick={() => onAnnotationClick?.(annotation)}
+            }
           >
-            {annotation.highlights.map((highlight, index) => (
+            <div 
+              style={{ cursor: "pointer" }}
+              onClick={() => onAnnotationClick?.(annotation)}
+            >
+              {annotation.highlights?.map((highlight, index) => (
               <div
                 key={index}
                 style={{
@@ -69,9 +111,10 @@ export const AnnotationHighlightLayer = ({
                 data-highlight-id={annotation.id}
               />
             ))}
-          </div>
-        </AnnotationTooltip>
-      ))}
-    </div>
+            </div>
+          </AnnotationTooltip>
+        ))}
+      </div>
+    </>
   );
 }; 
