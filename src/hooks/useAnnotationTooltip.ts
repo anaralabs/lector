@@ -1,6 +1,7 @@
 import {
   autoUpdate,
   flip,
+  inline,
   offset,
   shift,
   useDismiss,
@@ -45,6 +46,7 @@ export const useAnnotationTooltip = ({
   const isNewAnnotation = Date.now() - new Date(annotation.createdAt).getTime() < 1000;
   const [isOpen, setIsOpen] = useState(isNewAnnotation);
   const viewportRef = usePdf((state) => state.viewportRef);
+  const scale = usePdf((state) => state.zoom);
 
   const {
     refs,
@@ -59,9 +61,11 @@ export const useAnnotationTooltip = ({
     },
     whileElementsMounted: autoUpdate,
     middleware: [
+      inline(),
       offset(10),
       flip({
         crossAxis: false,
+        fallbackAxisSideDirection: "end",
       }),
       shift({ padding: 8 }),
     ],
@@ -73,38 +77,64 @@ export const useAnnotationTooltip = ({
   const updateTooltipPosition = useCallback(() => {
     if (!annotation.highlights.length) return;
 
-    // Get the last highlight rect to position the tooltip
-    const lastHighlight = annotation.highlights[annotation.highlights.length - 1];
+    const highlightRects = annotation.highlights;
+    let minLeft = Infinity;
+    let maxRight = -Infinity;
+    let minTop = Infinity;
+    let maxBottom = -Infinity;
 
     refs.setReference({
-      getBoundingClientRect: () => {
+      getBoundingClientRect() {
         const viewportElement = viewportRef.current;
-        if (!viewportElement || !lastHighlight) return defaultRect;
+        if (!viewportElement) return defaultRect;
 
         const pageElement = viewportElement.querySelector(`[data-page-number="${annotation.pageNumber}"]`);
         if (!pageElement) return defaultRect;
 
         const pageRect = pageElement.getBoundingClientRect();
 
-        // Calculate client coordinates relative to the viewport
-        const left = pageRect.left + lastHighlight.left;
-        const top = pageRect.top + lastHighlight.top;
-        const width = lastHighlight.width;
-        const height = lastHighlight.height;
+        // Calculate the bounding box in viewport coordinates using the PDF scale
+        highlightRects.forEach(highlight => {
+          const scaledLeft = highlight.left * scale;
+          const scaledWidth = highlight.width * scale;
+          const scaledTop = highlight.top * scale;
+          const scaledHeight = highlight.height * scale;
 
-        return {
+          const left = pageRect.left + scaledLeft;
+          const right = left + scaledWidth;
+          const top = pageRect.top + scaledTop;
+          const bottom = top + scaledHeight;
+
+          minLeft = Math.min(minLeft, left);
+          maxRight = Math.max(maxRight, right);
+          minTop = Math.min(minTop, top);
+          maxBottom = Math.max(maxBottom, bottom);
+        });
+
+        const width = maxRight - minLeft;
+        const height = maxBottom - minTop;
+        const centerX = minLeft + width / 2;
+        const centerY = minTop + height / 2;
+
+        const rect = {
           width,
           height,
-          x: left,
-          y: top,
-          top,
-          right: left + width,
-          bottom: top + height,
-          left,
+          x: centerX - width / 2,
+          y: centerY - height / 2,
+          top: centerY - height / 2,
+          right: centerX + width / 2,
+          bottom: centerY + height / 2,
+          left: centerX - width / 2,
         };
+
+        return rect;
       },
+      getClientRects() {
+        return [this.getBoundingClientRect()];
+      },
+      contextElement: viewportRef.current || undefined,
     });
-  }, [annotation.highlights, annotation.pageNumber, refs, viewportRef]);
+  }, [annotation.highlights, annotation.pageNumber, refs, viewportRef, scale]);
 
   useEffect(() => {
     const viewport = viewportRef.current;

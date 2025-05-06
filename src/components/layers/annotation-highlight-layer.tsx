@@ -12,12 +12,14 @@ interface AnnotationHighlightLayerProps {
   }) => React.ReactNode;
   focusedAnnotationId?: string;
   onAnnotationClick?: (annotation: Annotation) => void;
+  tooltipClassName?: string;
 }
 
 export const AnnotationHighlightLayer = ({
   className,
   style,
   renderTooltipContent,
+  tooltipClassName,
   focusedAnnotationId,
   onAnnotationClick,
 }: AnnotationHighlightLayerProps) => {
@@ -34,6 +36,7 @@ export const AnnotationHighlightLayer = ({
         <AnnotationTooltip
           key={annotation.id}
           annotation={annotation}
+          className={tooltipClassName}
           isOpen={focusedAnnotationId === annotation.id}
           onOpenChange={(open) => {
             if (open && onAnnotationClick) {
