@@ -132,6 +132,7 @@ const PDFContent = ({
           tooltipClassName="bg-white shadow-lg rounded-lg p-3 min-w-[200px]"
           onAnnotationClick={onAnnotationClick}
           renderTooltipContent={renderTooltipContent}
+          renderHoverTooltipContent={renderTooltipContent}
         />
         <SelectionTooltip>
           <SelectionTooltipContent onHighlight={handleCreateAnnotation} />
