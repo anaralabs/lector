@@ -81,7 +81,7 @@ export const AnnotationTooltip = ({
     }
   }, [setHoverIsOpen]);
 
-  const handleMouseLeave = useCallback((e: React.MouseEvent) => {
+  const handleMouseLeave = useCallback(() => {
     if (!hoverTooltipContent) return;
     
     // Set a timeout to close the tooltip, giving time to move to it
