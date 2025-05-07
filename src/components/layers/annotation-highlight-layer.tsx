@@ -10,18 +10,25 @@ interface AnnotationHighlightLayerProps {
     annotation: Annotation;
     onClose: () => void;
   }) => React.ReactNode;
+  renderHoverTooltipContent: (props: {
+    annotation: Annotation;
+    onClose: () => void;
+  }) => React.ReactNode;
   focusedAnnotationId?: string;
   onAnnotationClick?: (annotation: Annotation) => void;
   tooltipClassName?: string;
+  hoverTooltipClassName?: string;
 }
 
 export const AnnotationHighlightLayer = ({
   className,
   style,
   renderTooltipContent,
+  renderHoverTooltipContent,
   tooltipClassName,
   focusedAnnotationId,
   onAnnotationClick,
+  hoverTooltipClassName
 }: AnnotationHighlightLayerProps) => {
   const { annotations } = useAnnotations();
   const pageNumber = usePDFPageNumber();
@@ -37,6 +44,7 @@ export const AnnotationHighlightLayer = ({
           key={annotation.id}
           annotation={annotation}
           className={tooltipClassName}
+          hoverClassName={hoverTooltipClassName}
           isOpen={focusedAnnotationId === annotation.id}
           onOpenChange={(open) => {
             if (open && onAnnotationClick) {
@@ -45,6 +53,13 @@ export const AnnotationHighlightLayer = ({
           }}
           tooltipContent={(
               renderTooltipContent({
+                annotation,
+                onClose: () => {},
+              })
+            ) 
+          }
+          hoverTooltipContent={(
+            renderHoverTooltipContent({
                 annotation,
                 onClose: () => {},
               })

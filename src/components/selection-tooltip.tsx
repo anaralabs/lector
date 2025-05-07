@@ -71,10 +71,41 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
     const handleSelectionChange = () => {
       const selection = document.getSelection();
 
-      // Check if selection is within the viewport
-
+      // Check if selection is within the viewport and not within a tooltip
       if (selection && viewportRef.current?.contains(selection.anchorNode)) {
-        requestAnimationFrame(updateTooltipPosition);
+        // Check if the selection is within a tooltip
+        const anchorNode = selection.anchorNode;
+        const focusNode = selection.focusNode;
+        
+        const isInUnselectableArea = (node: Node | null): boolean => {
+          if (!node) return false;
+          
+          let element = node.nodeType === Node.ELEMENT_NODE 
+            ? node as Element 
+            : node.parentElement;
+            
+          while (element) {
+            // Check for our custom tooltip attributes
+            if (element.getAttribute('data-annotation-tooltip')) {
+              return true;
+            }
+
+            // Check for floating UI portal
+            if (element.hasAttribute('data-floating-ui-portal')) {
+              return true;
+            }
+
+            element = element.parentElement;
+          }
+          return false;
+        };
+
+        // Only show selection tooltip if selection is not in an unselectable area
+        if (!isInUnselectableArea(anchorNode) && !isInUnselectableArea(focusNode)) {
+          requestAnimationFrame(updateTooltipPosition);
+        } else {
+          setIsOpen(false);
+        }
       } else {
         setIsOpen(false);
       }
