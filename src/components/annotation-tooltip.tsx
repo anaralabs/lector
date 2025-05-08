@@ -15,6 +15,7 @@ interface AnnotationTooltipProps {
   className?: string;
   hoverClassName?: string;
   hoverIsOpen?: boolean;
+  tooltipBubbleSize: number;
   renderHoverTooltipContent?: (props: {
     annotation: Annotation;
     onClose: () => void;
@@ -30,6 +31,7 @@ export const AnnotationTooltip = ({
   className,
   hoverClassName,
   isOpen: controlledIsOpen, 
+  tooltipBubbleSize,
   hoverIsOpen: controlledHoverIsOpen,
 }: AnnotationTooltipProps) => { 
   const viewportRef = usePdf((state) => state.viewportRef);
@@ -119,6 +121,19 @@ export const AnnotationTooltip = ({
         {...getReferenceProps()}
         {...getHoverReferenceProps()}
       >
+        {
+          !isOpen && !hoverIsOpen && annotation.comment && (
+            <div className="rounded-full" style={{
+              position: 'absolute',
+              top: annotation.highlights[0]?.top ? annotation.highlights[0]?.top - tooltipBubbleSize / 2 : 0,
+              left: annotation.highlights[0]?.left ? annotation.highlights[0]?.left - tooltipBubbleSize / 2 : 0,
+              backgroundColor: annotation.borderColor,
+              height: `${tooltipBubbleSize}px`,
+              width: `${tooltipBubbleSize}px`,
+              zIndex: 50,
+            }}/>
+          )
+        }
         {children}
       </div>
       {/* Click tooltip */}

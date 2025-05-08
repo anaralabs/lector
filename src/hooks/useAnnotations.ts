@@ -11,6 +11,7 @@ export interface Annotation {
     pageNumber: number;
   }>;
   color: string;
+  borderColor: string;
   createdAt: Date;
   updatedAt: Date;
   comment?: string;
