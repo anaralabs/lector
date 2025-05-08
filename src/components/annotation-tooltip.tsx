@@ -14,6 +14,7 @@ interface AnnotationTooltipProps {
   isOpen?: boolean;
   className?: string;
   hoverClassName?: string;
+  hoverIsOpen?: boolean;
   renderHoverTooltipContent?: (props: {
     annotation: Annotation;
     onClose: () => void;
@@ -28,8 +29,9 @@ export const AnnotationTooltip = ({
   onOpenChange,
   className,
   hoverClassName,
-  isOpen: controlledIsOpen,
-}: AnnotationTooltipProps) => {
+  isOpen: controlledIsOpen, 
+  hoverIsOpen: controlledHoverIsOpen,
+}: AnnotationTooltipProps) => { 
   const viewportRef = usePdf((state) => state.viewportRef);
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isMouseInTooltipRef = useRef(false);
@@ -47,17 +49,20 @@ export const AnnotationTooltip = ({
   });
 
   const {
-    isOpen: hoverIsOpen,
+    isOpen: uncontrolledHoverIsOpen,
     setIsOpen: setHoverIsOpen,
     refs: hoverRefs,
+    
     floatingStyles: hoverFloatingStyles,
     getFloatingProps: getHoverFloatingProps,
     getReferenceProps: getHoverReferenceProps,
   } = useAnnotationTooltip({
+    position: "bottom",
     annotation,
   });
 
   const isOpen = controlledIsOpen ?? uncontrolledIsOpen;
+  const hoverIsOpen = controlledHoverIsOpen || uncontrolledHoverIsOpen;
 
   const handleClick = useCallback(() => {
     if (controlledIsOpen === undefined) {

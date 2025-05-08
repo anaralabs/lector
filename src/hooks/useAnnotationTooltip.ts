@@ -16,6 +16,7 @@ import type { Annotation } from "./useAnnotations";
 interface UseAnnotationTooltipProps {
   annotation: Annotation;
   onOpenChange?: (open: boolean) => void;
+  position?: "top" | "bottom" | "left" | "right";
 }
 
 interface UseAnnotationTooltipReturn {
@@ -41,6 +42,7 @@ const defaultRect = {
 export const useAnnotationTooltip = ({
   annotation,
   onOpenChange,
+  position = "top",
 }: UseAnnotationTooltipProps): UseAnnotationTooltipReturn => {
   // Show tooltip immediately if it's a new annotation
   const isNewAnnotation = Date.now() - new Date(annotation.createdAt).getTime() < 1000;
@@ -53,7 +55,7 @@ export const useAnnotationTooltip = ({
     floatingStyles,
     context,
   } = useFloating({
-    placement: "top",
+    placement: position,
     open: isOpen,
     onOpenChange: (open) => {
       setIsOpen(open);
