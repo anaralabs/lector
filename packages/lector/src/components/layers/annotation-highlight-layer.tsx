@@ -20,6 +20,7 @@ interface AnnotationHighlightLayerProps {
   tooltipClassName?: string;
   hoverTooltipClassName?: string;
   highlightClassName?: string;
+  tooltipBubbleSize?: number;
 }
 
 export const AnnotationHighlightLayer = ({
@@ -32,7 +33,8 @@ export const AnnotationHighlightLayer = ({
   focusedAnnotationId,
   focusedHoverAnnotationId,
   onAnnotationClick,
-  hoverTooltipClassName
+  hoverTooltipClassName,
+  tooltipBubbleSize = 6,
 }: AnnotationHighlightLayerProps) => {
   const { annotations } = useAnnotations();
   const pageNumber = usePDFPageNumber();
@@ -50,6 +52,7 @@ export const AnnotationHighlightLayer = ({
           className={tooltipClassName}
           hoverClassName={hoverTooltipClassName}
           isOpen={focusedAnnotationId === annotation.id}
+          tooltipBubbleSize={tooltipBubbleSize}
           hoverIsOpen={focusedHoverAnnotationId === annotation.id}
           onOpenChange={(open) => {
             if (open && onAnnotationClick) {

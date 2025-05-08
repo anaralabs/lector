@@ -61,6 +61,7 @@ const PDFContent = ({
       pageNumber: selection.highlights[0].pageNumber,
       highlights: selection.highlights,
       color: "rgba(255, 255, 0, 0.3)", 
+      borderColor: "rgba(255, 255, 0, 0.1)",
       text: selection.text,
       id: uuidv4(),
       createdAt: new Date(),

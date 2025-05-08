@@ -34,7 +34,7 @@ export const usePdfJump = () => {
     });
   };
 
-  const jumpToHighlightRects = (
+  const scrollToHighlightRects = (
     rects: HighlightRect[],
     type: "pixels" | "percent",
     align: "start" | "center" = "start",
@@ -42,7 +42,6 @@ export const usePdfJump = () => {
   ) => {
     if (!virtualizer) return;
 
-    setHighlight(rects);
     const firstPage = Math.min(...rects.map((rect) => rect.pageNumber));
 
     // Get the start offset of the page in the viewport
@@ -103,5 +102,18 @@ export const usePdfJump = () => {
     });
   };
 
-  return { jumpToPage, jumpToOffset, jumpToHighlightRects };
+  const jumpToHighlightRects = (
+    rects: HighlightRect[],
+    type: "pixels" | "percent",
+    align: "start" | "center" = "start",
+    additionalOffset: number = 0,
+  ) => {
+    if (!virtualizer) return;
+
+    setHighlight(rects);
+    
+    scrollToHighlightRects(rects, type, align, additionalOffset);
+  };
+
+  return { jumpToPage, jumpToOffset, jumpToHighlightRects, scrollToHighlightRects};
 };
