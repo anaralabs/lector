@@ -128,6 +128,7 @@ const PDFContent = ({
         <CanvasLayer />
         <TextLayer />
         <AnnotationHighlightLayer 
+          highlightClassName="dark:opacity-40 mix-blend-multiply transition-all duration-200 cursor-pointer"
           focusedAnnotationId={focusedAnnotationId}
           tooltipClassName="bg-white shadow-lg rounded-lg p-3 min-w-[200px]"
           onAnnotationClick={onAnnotationClick}

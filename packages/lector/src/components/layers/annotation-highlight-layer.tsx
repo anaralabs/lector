@@ -15,9 +15,11 @@ interface AnnotationHighlightLayerProps {
     onClose: () => void;
   }) => React.ReactNode;
   focusedAnnotationId?: string;
+  focusedHoverAnnotationId?: string;
   onAnnotationClick?: (annotation: Annotation) => void;
   tooltipClassName?: string;
   hoverTooltipClassName?: string;
+  highlightClassName?: string;
 }
 
 export const AnnotationHighlightLayer = ({
@@ -26,7 +28,9 @@ export const AnnotationHighlightLayer = ({
   renderTooltipContent,
   renderHoverTooltipContent,
   tooltipClassName,
+  highlightClassName,
   focusedAnnotationId,
+  focusedHoverAnnotationId,
   onAnnotationClick,
   hoverTooltipClassName
 }: AnnotationHighlightLayerProps) => {
@@ -46,6 +50,7 @@ export const AnnotationHighlightLayer = ({
           className={tooltipClassName}
           hoverClassName={hoverTooltipClassName}
           isOpen={focusedAnnotationId === annotation.id}
+          hoverIsOpen={focusedHoverAnnotationId === annotation.id}
           onOpenChange={(open) => {
             if (open && onAnnotationClick) {
               onAnnotationClick(annotation);
@@ -73,16 +78,14 @@ export const AnnotationHighlightLayer = ({
             {annotation.highlights.map((highlight, index) => (
               <div
                 key={index}
+                className={highlightClassName}
                 style={{
                   position: "absolute",
                   top: highlight.top,
                   left: highlight.left,
                   width: highlight.width,
                   height: highlight.height,
-                  backgroundColor: annotation.color || "rgba(255, 255, 0, 0.3)",
-                  mixBlendMode: "multiply",
-                  transition: "all 0.2s ease",
-                  cursor: "pointer",
+                  backgroundColor: annotation.color,
                 }}
                 data-highlight-id={annotation.id}
               />
