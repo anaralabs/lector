@@ -1,3 +1,4 @@
+export type { AnnotationTooltipContentProps } from "./components/annotation-tooltip";
 export { AnnotationTooltip } from "./components/annotation-tooltip";
 export { AnnotationHighlightLayer } from "./components/layers/annotation-highlight-layer";
 export { AnnotationLayer } from "./components/layers/annotation-layer";
