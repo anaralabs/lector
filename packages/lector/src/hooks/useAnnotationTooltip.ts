@@ -17,6 +17,7 @@ interface UseAnnotationTooltipProps {
   annotation: Annotation;
   onOpenChange?: (open: boolean) => void;
   position?: "top" | "bottom" | "left" | "right";
+  isOpen?: boolean;
 }
 
 interface UseAnnotationTooltipReturn {
@@ -43,12 +44,17 @@ export const useAnnotationTooltip = ({
   annotation,
   onOpenChange,
   position = "top",
+  isOpen: controlledIsOpen,
 }: UseAnnotationTooltipProps): UseAnnotationTooltipReturn => {
   // Show tooltip immediately if it's a new annotation
   const isNewAnnotation = Date.now() - new Date(annotation.createdAt).getTime() < 1000;
-  const [isOpen, setIsOpen] = useState(isNewAnnotation);
+  const [isPositionCalculated, setIsPositionCalculated] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
   const viewportRef = usePdf((state) => state.viewportRef);
   const scale = usePdf((state) => state.zoom);
+
+  // Only show if position is calculated or externally controlled
+  const effectiveIsOpen = ((isOpen && isPositionCalculated) || controlledIsOpen) ?? false;
 
   const {
     refs,
@@ -56,7 +62,7 @@ export const useAnnotationTooltip = ({
     context,
   } = useFloating({
     placement: position,
-    open: isOpen,
+    open: effectiveIsOpen,
     onOpenChange: (open) => {
       setIsOpen(open);
       onOpenChange?.(open);
@@ -77,7 +83,10 @@ export const useAnnotationTooltip = ({
   const { getReferenceProps, getFloatingProps } = useInteractions([dismiss]);
 
   const updateTooltipPosition = useCallback(() => {
-    if (!annotation.highlights.length) return;
+    if (!annotation.highlights.length) {
+      setIsPositionCalculated(false);
+      return;
+    }
 
     const highlightRects = annotation.highlights;
     let minLeft = Infinity;
@@ -85,14 +94,20 @@ export const useAnnotationTooltip = ({
     let minTop = Infinity;
     let maxBottom = -Infinity;
 
+    const viewportElement = viewportRef.current;
+    if (!viewportElement) {
+      setIsPositionCalculated(false);
+      return;
+    }
+
+    const pageElement = viewportElement.querySelector(`[data-page-number="${annotation.pageNumber}"]`);
+    if (!pageElement) {
+      setIsPositionCalculated(false);
+      return;
+    }
+
     refs.setReference({
       getBoundingClientRect() {
-        const viewportElement = viewportRef.current;
-        if (!viewportElement) return defaultRect;
-
-        const pageElement = viewportElement.querySelector(`[data-page-number="${annotation.pageNumber}"]`);
-        if (!pageElement) return defaultRect;
-
         const pageRect = pageElement.getBoundingClientRect();
 
         // Calculate the bounding box in viewport coordinates using the PDF scale
@@ -136,11 +151,25 @@ export const useAnnotationTooltip = ({
       },
       contextElement: viewportRef.current || undefined,
     });
-  }, [annotation.highlights, annotation.pageNumber, refs, viewportRef, scale]);
+
+    setIsPositionCalculated(true);
+
+    // If it's a new annotation, show it once position is calculated
+    if (isNewAnnotation) {
+      setIsOpen(true);
+    }
+  }, [annotation.highlights, annotation.pageNumber, refs, viewportRef, scale, isNewAnnotation]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
-    updateTooltipPosition();
+
+    // Reset position calculated state when scale changes
+    setIsPositionCalculated(false);
+
+    // Update position with RAF to ensure DOM is ready
+    requestAnimationFrame(() => {
+      updateTooltipPosition();
+    });
 
     const handleScroll = () => {
       requestAnimationFrame(updateTooltipPosition);
@@ -164,10 +193,10 @@ export const useAnnotationTooltip = ({
       }
       window.removeEventListener("resize", handleResize);
     };
-  }, [updateTooltipPosition, viewportRef]);
+  }, [updateTooltipPosition, viewportRef, scale, controlledIsOpen]);
 
   return {
-    isOpen,
+    isOpen: effectiveIsOpen,
     setIsOpen,
     refs,
     floatingStyles,
