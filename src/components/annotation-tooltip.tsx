@@ -48,6 +48,7 @@ export const AnnotationTooltip = ({
   } = useAnnotationTooltip({
     annotation,
     onOpenChange,
+    isOpen: controlledIsOpen,
   });
 
   const {
@@ -61,6 +62,7 @@ export const AnnotationTooltip = ({
   } = useAnnotationTooltip({
     position: "bottom",
     annotation,
+    isOpen: controlledHoverIsOpen,
   });
 
   const isOpen = controlledIsOpen ?? uncontrolledIsOpen;
