@@ -1,15 +1,13 @@
 import type { Annotation } from "../../hooks/useAnnotations";
 import { useAnnotations } from "../../hooks/useAnnotations";
 import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
-import { AnnotationTooltip } from "../annotation-tooltip";
+import { AnnotationTooltip, type AnnotationTooltipContentProps } from "../annotation-tooltip";
+
 
 interface AnnotationHighlightLayerProps {
   className?: string;
   style?: React.CSSProperties;
-  renderTooltipContent: (props: {
-    annotation: Annotation;
-    onClose: () => void;
-  }) => React.ReactNode;
+  renderTooltipContent: (props: AnnotationTooltipContentProps) => React.ReactNode;
   renderHoverTooltipContent: (props: {
     annotation: Annotation;
     onClose: () => void;
@@ -59,12 +57,8 @@ export const AnnotationHighlightLayer = ({
               onAnnotationClick(annotation);
             }
           }}
-          tooltipContent={(
-              renderTooltipContent({
-                annotation,
-                onClose: () => {},
-              })
-            ) 
+          renderTooltipContent={
+              renderTooltipContent
           }
           hoverTooltipContent={(
             renderHoverTooltipContent({

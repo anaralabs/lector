@@ -1,14 +1,21 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { Annotation } from "../hooks/useAnnotations";
 import { useAnnotationTooltip } from "../hooks/useAnnotationTooltip";
 import { usePdf } from "../internal";
 
+
+export type AnnotationTooltipContentProps = {
+  annotation: Annotation;
+  onClose: () => void;
+  setPosition?: (position: 'top' | 'bottom' | undefined) => void;
+};
+
 interface AnnotationTooltipProps {
   annotation: Annotation;
   children: React.ReactNode;
-  tooltipContent: React.ReactNode;
+  renderTooltipContent: (props: AnnotationTooltipContentProps) => React.ReactNode;
   hoverTooltipContent?: React.ReactNode;
   onOpenChange?: (open: boolean) => void;
   isOpen?: boolean;
@@ -25,7 +32,7 @@ interface AnnotationTooltipProps {
 export const AnnotationTooltip = ({
   annotation,
   children,
-  tooltipContent,
+  renderTooltipContent,
   hoverTooltipContent,
   onOpenChange,
   className,
@@ -37,6 +44,7 @@ export const AnnotationTooltip = ({
   const viewportRef = usePdf((state) => state.viewportRef);
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isMouseInTooltipRef = useRef(false);
+  const [triggeredPosition, setTriggeredPosition] = useState<'top' | 'bottom' | undefined>();
   
   const {
     isOpen: uncontrolledIsOpen,
@@ -48,6 +56,7 @@ export const AnnotationTooltip = ({
   } = useAnnotationTooltip({
     annotation,
     onOpenChange,
+    position: triggeredPosition,
     isOpen: controlledIsOpen,
   });
 
@@ -152,7 +161,11 @@ export const AnnotationTooltip = ({
           }}
           {...getFloatingProps()}
         >
-          {tooltipContent}
+          {renderTooltipContent({
+            annotation,
+            onClose: () => setIsOpen(false),
+            setPosition: (position: 'top' | 'bottom' | undefined) => setTriggeredPosition(position)
+          })}
         </div>,
         viewportRef.current
       )}
