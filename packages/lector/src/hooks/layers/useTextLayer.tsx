@@ -4,6 +4,12 @@ import { useEffect, useRef } from "react";
 import { usePdf } from "../../internal";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
+// Add custom property declarations
+interface TextLayerDivElement extends HTMLDivElement {
+  _textSelectionBound?: boolean;
+  _cleanupTextSelection?: () => void;
+}
+
 const createTextSelectionManager = () => {
   const textLayers = new Map<HTMLDivElement, HTMLElement>();
   let selectionChangeAbortController: AbortController | null = null;
@@ -118,15 +124,17 @@ const createTextSelectionManager = () => {
         }
 
         prevRange = range.cloneRange();
-      } catch (_) {}
+      } catch {
+        // ignore
+      }
     }, { signal });
   };
 
-  const bindMouseEvents = (textLayerDiv: HTMLDivElement, endOfContent: HTMLElement) => {
-    if ((textLayerDiv as any)._textSelectionBound) {
+  const bindMouseEvents = (textLayerDiv: TextLayerDivElement, endOfContent: HTMLElement) => {
+    if (textLayerDiv._textSelectionBound) {
       return;
     }
-    (textLayerDiv as any)._textSelectionBound = true;
+    textLayerDiv._textSelectionBound = true;
 
     textLayers.set(textLayerDiv, endOfContent);
     enableGlobalSelectionListener();
@@ -136,11 +144,10 @@ const createTextSelectionManager = () => {
     };
 
     textLayerDiv.addEventListener('mousedown', handleMouseDown);
-
-    (textLayerDiv as any)._cleanupTextSelection = () => {
+    textLayerDiv._cleanupTextSelection = () => {
       textLayerDiv.removeEventListener('mousedown', handleMouseDown);
       removeGlobalSelectionListener(textLayerDiv);
-      delete (textLayerDiv as any)._textSelectionBound;
+      delete textLayerDiv._textSelectionBound;
     };
   };
 
@@ -150,7 +157,7 @@ const createTextSelectionManager = () => {
 const bindMouseEvents = createTextSelectionManager();
 
 export const useTextLayer = () => {
-  const textContainerRef = useRef<HTMLDivElement>(null);
+  const textContainerRef = useRef<TextLayerDivElement>(null);
   const textLayerRef = useRef<TextLayer | null>(null);
   const isRenderingRef = useRef(false);
 
@@ -206,9 +213,9 @@ export const useTextLayer = () => {
         textLayerRef.current = null;
       }
       
-      if (textContainerRef.current && (textContainerRef.current as any)._cleanupTextSelection) {
-        (textContainerRef.current as any)._cleanupTextSelection();
-        delete (textContainerRef.current as any)._cleanupTextSelection;
+      if (textContainerRef.current?._cleanupTextSelection) {
+        textContainerRef.current._cleanupTextSelection();
+        delete textContainerRef.current._cleanupTextSelection;
       }
     };
   }, [pdfPageProxy.pageNumber]);

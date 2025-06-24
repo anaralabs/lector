@@ -39,7 +39,7 @@ const consolidateRects = (rects: HighlightRect[]): HighlightRect[] => {
     const currentRect = rects[i];
     if (!currentRect) continue;
     
-    let currentGroup = [currentRect];
+    const currentGroup = [currentRect];
     visited.add(i);
     
     // Find all rects that should be merged with the current one
