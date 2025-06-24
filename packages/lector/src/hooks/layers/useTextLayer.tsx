@@ -165,13 +165,14 @@ export const useTextLayer = () => {
   const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 
   useEffect(() => {
-    if (!textContainerRef.current || isRenderingRef.current) {
+    const textContainer = textContainerRef.current;
+    if (!textContainer || isRenderingRef.current) {
       return;
     }
 
     isRenderingRef.current = true;
 
-    textContainerRef.current.innerHTML = '';
+    textContainer.innerHTML = '';
 
     if (textLayerRef.current) {
       textLayerRef.current.cancel();
@@ -180,7 +181,7 @@ export const useTextLayer = () => {
 
     const textLayer = new TextLayer({
       textContentSource: pdfPageProxy.streamTextContent(),
-      container: textContainerRef.current,
+      container: textContainer,
       viewport: pdfPageProxy.getViewport({ scale: 1 }),
     });
 
@@ -188,12 +189,12 @@ export const useTextLayer = () => {
 
     textLayer.render()
       .then(() => {
-        if (textLayerRef.current === textLayer && textContainerRef.current) {
+        if (textLayerRef.current === textLayer && textContainer) {
           const endOfContent = document.createElement('div');
           endOfContent.className = 'endOfContent';
-          textContainerRef.current.appendChild(endOfContent);
+          textContainer.appendChild(endOfContent);
 
-          bindMouseEvents(textContainerRef.current, endOfContent);
+          bindMouseEvents(textContainer, endOfContent);
         }
       })
       .catch((error) => {
@@ -213,9 +214,9 @@ export const useTextLayer = () => {
         textLayerRef.current = null;
       }
       
-      if (textContainerRef.current?._cleanupTextSelection) {
-        textContainerRef.current._cleanupTextSelection();
-        delete textContainerRef.current._cleanupTextSelection;
+      if (textContainer?._cleanupTextSelection) {
+        textContainer._cleanupTextSelection();
+        delete textContainer._cleanupTextSelection;
       }
     };
   }, [pdfPageProxy.pageNumber]);
