@@ -27,23 +27,6 @@ const shouldMergeRects = (
   return verticalOverlap && horizontallyClose;
 };
 
-const mergeRects = (
-  rect1: HighlightRect,
-  rect2: HighlightRect,
-): HighlightRect => {
-  return {
-    left: Math.min(rect1.left, rect2.left),
-    top: Math.min(rect1.top, rect2.top),
-    width:
-      Math.max(rect1.left + rect1.width, rect2.left + rect2.width) -
-      Math.min(rect1.left, rect2.left),
-    height:
-      Math.max(rect1.top + rect1.height, rect2.top + rect2.height) -
-      Math.min(rect1.top, rect2.top),
-    pageNumber: rect1.pageNumber,
-  };
-};
-
 const consolidateRects = (rects: HighlightRect[]): HighlightRect[] => {
   if (rects.length <= 1) return rects;
 
