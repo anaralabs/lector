@@ -27,55 +27,94 @@ const shouldMergeRects = (
   return verticalOverlap && horizontallyClose;
 };
 
-const mergeRects = (
-  rect1: HighlightRect,
-  rect2: HighlightRect,
-): HighlightRect => {
-  return {
-    left: Math.min(rect1.left, rect2.left),
-    top: Math.min(rect1.top, rect2.top),
-    width:
-      Math.max(rect1.left + rect1.width, rect2.left + rect2.width) -
-      Math.min(rect1.left, rect2.left),
-    height:
-      Math.max(rect1.top + rect1.height, rect2.top + rect2.height) -
-      Math.min(rect1.top, rect2.top),
-    pageNumber: rect1.pageNumber,
-  };
-};
-
 const consolidateRects = (rects: HighlightRect[]): HighlightRect[] => {
   if (rects.length <= 1) return rects;
 
-  // Sort by vertical position primarily
-  const sortedRects = [...rects].sort((a, b) => a.top - b.top);
+  const result: HighlightRect[] = [];
+  const visited = new Set<number>();
 
-  // Keep merging until no more merges are possible
-  let hasChanges: boolean;
-  do {
-    hasChanges = false;
-    let currentRect = sortedRects[0];
-    const tempResult: HighlightRect[] = [];
-
-    for (let i = 1; i < sortedRects.length; i++) {
-      const sorted = sortedRects[i];
-      if (!currentRect || !sorted) continue;
-
-      if (shouldMergeRects(currentRect, sorted)) {
-        currentRect = mergeRects(currentRect, sorted);
-        hasChanges = true;
-      } else {
-        tempResult.push(currentRect);
-        currentRect = sorted;
+  for (let i = 0; i < rects.length; i++) {
+    if (visited.has(i)) continue;
+    
+    const currentRect = rects[i];
+    if (!currentRect) continue;
+    
+    const currentGroup = [currentRect];
+    visited.add(i);
+    
+    // Find all rects that should be merged with the current one
+    let foundNew = true;
+    while (foundNew) {
+      foundNew = false;
+      for (let j = 0; j < rects.length; j++) {
+        if (visited.has(j)) continue;
+        
+        const candidateRect = rects[j];
+        if (!candidateRect) continue;
+        
+        // Check if this rect overlaps with any rect in the current group
+        const shouldMergeWithGroup = currentGroup.some(groupRect => 
+          doRectsOverlap(groupRect, candidateRect)
+        );
+        
+        if (shouldMergeWithGroup) {
+          currentGroup.push(candidateRect);
+          visited.add(j);
+          foundNew = true;
+        }
       }
     }
-    if (currentRect) tempResult.push(currentRect);
+    
+    // Merge all rects in the current group into one
+    result.push(mergeRectGroup(currentGroup));
+  }
 
-    sortedRects.length = 0;
-    sortedRects.push(...tempResult);
-  } while (hasChanges);
+  return result;
+};
 
-  return sortedRects;
+const doRectsOverlap = (rect1: HighlightRect, rect2: HighlightRect): boolean => {
+  // Check if rectangles overlap (not just touch)
+  const horizontalOverlap = rect1.left < rect2.left + rect2.width && 
+                           rect2.left < rect1.left + rect1.width;
+  const verticalOverlap = rect1.top < rect2.top + rect2.height && 
+                         rect2.top < rect1.top + rect1.height;
+  
+  // Also consider if they are very close (within threshold)
+  const closeEnough = shouldMergeRects(rect1, rect2);
+  
+  return (horizontalOverlap && verticalOverlap) || closeEnough;
+};
+
+const mergeRectGroup = (rects: HighlightRect[]): HighlightRect => {
+  if (rects.length === 1) {
+    const rect = rects[0];
+    if (!rect) throw new Error('Invalid rect in group');
+    return rect;
+  }
+  
+  const firstRect = rects[0];
+  if (!firstRect) throw new Error('Invalid first rect in group');
+  
+  let minLeft = firstRect.left;
+  let minTop = firstRect.top;
+  let maxRight = firstRect.left + firstRect.width;
+  let maxBottom = firstRect.top + firstRect.height;
+  
+  rects.forEach(rect => {
+    if (!rect) return;
+    minLeft = Math.min(minLeft, rect.left);
+    minTop = Math.min(minTop, rect.top);
+    maxRight = Math.max(maxRight, rect.left + rect.width);
+    maxBottom = Math.max(maxBottom, rect.top + rect.height);
+  });
+  
+  return {
+    left: minLeft,
+    top: minTop,
+    width: maxRight - minLeft,
+    height: maxBottom - minTop,
+    pageNumber: firstRect.pageNumber,
+  };
 };
 
 export const useSelectionDimensions = () => {
@@ -126,7 +165,8 @@ export const useSelectionDimensions = () => {
 
     textLayerMap.forEach((rects) => {
       if (rects.length > 0) {
-        highlights.push(...consolidateRects(rects));
+        const consolidated = consolidateRects(rects);
+        highlights.push(...consolidated);
       }
     });
 
