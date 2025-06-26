@@ -41,10 +41,12 @@ const consolidateHighlightRects = (rects: HighlightRect[]): HighlightRect[] => {
     return Math.abs(topDiff) < 2 ? a.left - b.left : topDiff;
   });
 
-  let current = sorted[0]!;
+  let current = sorted[0];
+  if (!current) return rects; 
   
   for (let i = 1; i < sorted.length; i++) {
-    const next = sorted[i]!;
+    const next = sorted[i];
+    if (!next) continue; 
     
     // Check if highlights are on same page and same line (with tolerance)
     const samePageAndLine = current.pageNumber === next.pageNumber && 
@@ -81,7 +83,11 @@ const consolidateHighlightRects = (rects: HighlightRect[]): HighlightRect[] => {
     }
   }
   
-  consolidated.push(current);
+  // Don't forget to add the last rectangle
+  if (current) {
+    consolidated.push(current);
+  }
+  
   return consolidated;
 };
 
@@ -324,18 +330,27 @@ export const useSelectionDimensions = () => {
       }
     });
 
-    // Process highlight rectangles
+    // Process highlight rectangles - use original consolidation for now
     textLayerMapHighlight.forEach((rects) => {
       if (rects.length > 0) {
-        const consolidated = consolidateHighlightRects(rects);
-        highlightRects.push(...consolidated);
+        // For single rects, just add directly. For multiple, consolidate.
+        if (rects.length === 1) {
+          highlightRects.push(...rects);
+        } else {
+          const consolidated = consolidateHighlightRects(rects);
+          highlightRects.push(...consolidated);
+        }
       }
     });
 
-    // Apply a final consolidation pass to catch any remaining overlaps across pages
-    const finalHighlights = consolidateHighlightRects(highlightRects);
-    highlightRects.length = 0; // Clear array
-    highlightRects.push(...finalHighlights);
+
+    // Skip final consolidation for now to debug
+    // if (highlightRects.length > 1) {
+    //   const finalHighlights = consolidateHighlightRects(highlightRects);
+    //   console.log('After final consolidation:', finalHighlights.length, 'rects');
+    //   highlightRects.length = 0; // Clear array
+    //   highlightRects.push(...finalHighlights);
+    // }
 
     // Process underline rectangles
     textLayerMapUnderline.forEach((rects) => {
