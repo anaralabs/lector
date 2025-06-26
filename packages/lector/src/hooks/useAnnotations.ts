@@ -1,21 +1,26 @@
 import { create } from "zustand";
 
+export interface HighlightRect {
+  height: number;
+  left: number;
+  top: number;
+  width: number;
+  pageNumber: number;
+}
+
+
 export interface Annotation {
   id: string;
   pageNumber: number;
-  highlights: Array<{
-    height: number;
-    left: number;
-    top: number;
-    width: number;
-    pageNumber: number;
-  }>;
+  highlights: HighlightRect[];
+  underlines?: HighlightRect[];
   color: string;
   borderColor: string;
+  comment?: string;
   createdAt: Date;
   updatedAt: Date;
-  comment?: string;
   metadata?: Record<string, unknown>;
+  isCommentPending?: boolean;
 }
 
 interface AnnotationState {
