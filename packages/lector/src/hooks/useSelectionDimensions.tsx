@@ -28,51 +28,61 @@ const shouldMergeRects = (
   return verticalOverlap && horizontallyConnected;
 };
 
-// New function to consolidate highlights more conservatively
+// New function to consolidate highlights more aggressively to prevent overlaps
 const consolidateHighlightRects = (rects: HighlightRect[]): HighlightRect[] => {
   if (rects.length <= 1) return rects;
 
-  // Sort by top position first, then by left position
+  // Use a more aggressive approach similar to underline consolidation
+  const consolidated: HighlightRect[] = [];
   const sorted = [...rects].sort((a, b) => {
+    const pageCompare = a.pageNumber - b.pageNumber;
+    if (pageCompare !== 0) return pageCompare;
     const topDiff = a.top - b.top;
     return Math.abs(topDiff) < 2 ? a.left - b.left : topDiff;
   });
 
-  const result: HighlightRect[] = [];
-  let currentGroup: HighlightRect[] = [sorted[0]!];
-
+  let current = sorted[0]!;
+  
   for (let i = 1; i < sorted.length; i++) {
-    const currentRect = sorted[i]!;
-    const lastInGroup = currentGroup[currentGroup.length - 1]!;
-
-    // Only merge if rectangles are on the same line and actually adjacent/overlapping
-    const sameLineThreshold = Math.max(lastInGroup.height, currentRect.height) * 0.5;
-    const onSameLine = Math.abs(lastInGroup.top - currentRect.top) < sameLineThreshold;
-    const adjacent = Math.abs(lastInGroup.left + lastInGroup.width - currentRect.left) <= MERGE_THRESHOLD;
-    const overlapping = lastInGroup.left < currentRect.left + currentRect.width && 
-                       currentRect.left < lastInGroup.left + lastInGroup.width;
-
-    if (onSameLine && (adjacent || overlapping)) {
-      currentGroup.push(currentRect);
+    const next = sorted[i]!;
+    
+    // Check if highlights are on same page and same line (with tolerance)
+    const samePageAndLine = current.pageNumber === next.pageNumber && 
+                           Math.abs(current.top - next.top) < Math.max(current.height, next.height) * 0.5;
+    
+    // Check if they're horizontally adjacent, overlapping, or very close
+    const horizontallyConnected = samePageAndLine && (
+      // Adjacent (touching or very close)
+      Math.abs(current.left + current.width - next.left) <= MERGE_THRESHOLD ||
+      Math.abs(next.left + next.width - current.left) <= MERGE_THRESHOLD ||
+      // Overlapping
+      (current.left < next.left + next.width && next.left < current.left + current.width) ||
+      // Very close (small gap)
+      Math.abs(current.left + current.width - next.left) <= current.height * 0.2
+    );
+    
+    if (horizontallyConnected) {
+      // Merge the highlights
+      const newLeft = Math.min(current.left, next.left);
+      const newRight = Math.max(current.left + current.width, next.left + next.width);
+      const newTop = Math.min(current.top, next.top);
+      const newBottom = Math.max(current.top + current.height, next.top + next.height);
+      
+      current = {
+        left: newLeft,
+        top: newTop,
+        width: newRight - newLeft,
+        height: newBottom - newTop,
+        pageNumber: current.pageNumber,
+      };
     } else {
-      // Finalize current group and start new one
-      if (currentGroup.length === 1) {
-        result.push(currentGroup[0]!);
-      } else {
-        result.push(mergeRectGroup(currentGroup));
-      }
-      currentGroup = [currentRect];
+      consolidated.push(current);
+      current = next;
     }
   }
-
-  // Handle the last group
-  if (currentGroup.length === 1) {
-    result.push(currentGroup[0]!);
-  } else {
-    result.push(mergeRectGroup(currentGroup));
-  }
-
-  return result;
+  
+  consolidated.push(current);
+  return consolidated;
 };
 
 const consolidateRects = (rects: HighlightRect[]): HighlightRect[] => {
@@ -322,6 +332,11 @@ export const useSelectionDimensions = () => {
       }
     });
 
+    // Apply a final consolidation pass to catch any remaining overlaps across pages
+    const finalHighlights = consolidateHighlightRects(highlightRects);
+    highlightRects.length = 0; // Clear array
+    highlightRects.push(...finalHighlights);
+
     // Process underline rectangles
     textLayerMapUnderline.forEach((rects) => {
       if (rects.length > 0) {
@@ -366,10 +381,9 @@ export const useSelectionDimensions = () => {
             }
             
             // Create underline rectangle with consistent thickness
-            const zoom = store.getState().zoom;
             const lineRect: HighlightRect = {
               width: endRect.left + endRect.width - startRect.left,
-              height: 2 / zoom, // Fixed 2px thickness
+              height: 1.5, 
               top: startRect.top,
               left: startRect.left,
               pageNumber: startRect.pageNumber,

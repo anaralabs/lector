@@ -161,9 +161,8 @@ export const AnnotationHighlightLayer = ({
                     top: rect.top,
                     left: rect.left,
                     width: rect.width,
-                    height: rect.height,
+                    height: 1.1,
                     backgroundColor: annotation.borderColor,
-                    borderBottom: '1.5px',
                   }}
                   data-comment-id={annotation.id}
                 />
