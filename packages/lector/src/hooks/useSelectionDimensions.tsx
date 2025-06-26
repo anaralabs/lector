@@ -385,7 +385,6 @@ export const useSelectionDimensions = () => {
     // Fallback: If no underlines were created but we have highlights, 
     // create underlines from highlights (for mathematical content, etc.)
     if (underlineRects.length === 0 && highlightRects.length > 0) {
-      const zoom = store.getState().zoom;
       highlightRects.forEach(highlightRect => {
         const baselineOffset = highlightRect.height * 0.85;
         const underlineHeight = 1.5; // Fixed 2px thickness accounting for zoom

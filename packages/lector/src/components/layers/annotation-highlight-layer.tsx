@@ -1,8 +1,9 @@
+import React from "react";
+
 import type { Annotation } from "../../hooks/useAnnotations";
 import { useAnnotations } from "../../hooks/useAnnotations";
 import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
 import { AnnotationTooltip, type AnnotationTooltipContentProps } from "../annotation-tooltip";
-import React from "react";
 
 interface AnnotationHighlightLayerProps {
   className?: string;
