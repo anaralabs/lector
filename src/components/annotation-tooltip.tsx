@@ -19,6 +19,7 @@ interface AnnotationTooltipProps {
   hoverTooltipContent?: React.ReactNode;
   onOpenChange?: (open: boolean) => void;
   isOpen?: boolean;
+  focusedOpenId?: string;
   className?: string;
   hoverClassName?: string;
   hoverIsOpen?: boolean;
@@ -35,6 +36,7 @@ export const AnnotationTooltip = ({
   hoverTooltipContent,
   onOpenChange,
   className,
+  focusedOpenId,
   hoverClassName,
   isOpen: controlledIsOpen, 
   hoverIsOpen: controlledHoverIsOpen,
@@ -82,6 +84,8 @@ export const AnnotationTooltip = ({
   }, [controlledIsOpen, isOpen, setIsOpen]);
 
   const handleMouseEnter = useCallback(() => {
+    if (focusedOpenId && focusedOpenId!== annotation.id) return;
+
     if (hoverTooltipContent) {
       if (closeTimeoutRef.current) {
         clearTimeout(closeTimeoutRef.current);
