@@ -20,6 +20,7 @@ interface AnnotationTooltipProps {
   onOpenChange?: (open: boolean) => void;
   isOpen?: boolean;
   focusedOpenId?: string;
+  focusedHoverOpenId?: string;
   className?: string;
   hoverClassName?: string;
   hoverIsOpen?: boolean;
@@ -37,6 +38,7 @@ export const AnnotationTooltip = ({
   onOpenChange,
   className,
   focusedOpenId,
+  focusedHoverOpenId,
   hoverClassName,
   isOpen: controlledIsOpen, 
   hoverIsOpen: controlledHoverIsOpen,
@@ -85,6 +87,7 @@ export const AnnotationTooltip = ({
 
   const handleMouseEnter = useCallback(() => {
     if (focusedOpenId && focusedOpenId!== annotation.id) return;
+    if (focusedHoverOpenId && focusedHoverOpenId!== annotation.id) return;
 
     if (hoverTooltipContent) {
       if (closeTimeoutRef.current) {
@@ -109,6 +112,9 @@ export const AnnotationTooltip = ({
   }, [hoverTooltipContent, closeTooltip]);
 
   const handleTooltipMouseEnter = useCallback(() => {
+    if (focusedOpenId && focusedOpenId!== annotation.id) return;
+    if (focusedHoverOpenId && focusedHoverOpenId!== annotation.id) return;
+
     isMouseInTooltipRef.current = true;
     if (closeTimeoutRef.current) {
       clearTimeout(closeTimeoutRef.current);
