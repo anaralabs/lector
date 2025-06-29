@@ -14,7 +14,6 @@ import {
   useSelectionDimensions,
   usePdfJump,
   type HighlightRect,
-  usePdf,
 } from "@anaralabs/lector";
 import React, { useCallback, useEffect, useState } from "react";
 import "pdfjs-dist/web/pdf_viewer.css";
@@ -57,8 +56,7 @@ const PDFContent = ({
   onAnnotationsChange, 
   focusedAnnotationId,
   onAnnotationClick,
-  isQuickHighlightMode,
-}: PDFContentProps & { isQuickHighlightMode: boolean }) => {
+}: PDFContentProps) => {
   const { addAnnotation, annotations, updateAnnotation, deleteAnnotation } = useAnnotations();
   const { getAnnotationDimension } = useSelectionDimensions();
   const { jumpToHighlightRects } = usePdfJump();
@@ -69,7 +67,6 @@ const PDFContent = ({
     pageNumber: number;
   } | null>(null);
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
-  const zoom = usePdf(state => state.zoom);
 
   useEffect(() => {
     onAnnotationsChange(annotations);
@@ -244,59 +241,6 @@ const PDFContent = ({
     setPendingSelection(null);
   }, [editingAnnotationId, deleteAnnotation]);
 
-  // Add handler for quick highlight mode selection
-  const handleSelectionChange = useCallback(() => {
-    if (!isQuickHighlightMode) return;
-    
-    const selection = getAnnotationDimension();
-    if (!selection || !selection.highlights.length || selection.isCollapsed) return;
-
-    // Make sure we have a valid zoom value
-    if (!zoom) return; // Skip if PDF isn't loaded yet
-
-    const newAnnotation = {
-      pageNumber: selection.highlights[0].pageNumber,
-      highlights: selection.highlights,
-      underlines: selection.underlines,
-      color: "rgba(255, 255, 0, 0.3)", 
-      borderColor: "rgba(255, 255, 0, 0.9)",
-      text: selection.text,
-      id: uuidv4(),
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } as Annotation;
-
-    addAnnotation(newAnnotation);
-    window.getSelection()?.removeAllRanges();
-  }, [isQuickHighlightMode, addAnnotation, getAnnotationDimension, zoom]);
-
-  // Add effect to listen for selection changes
-  useEffect(() => {
-    if (!isQuickHighlightMode) return;
-    
-    // Only add the listener if we have a valid zoom value
-    if (!zoom) return;
-
-    document.addEventListener('mouseup', handleSelectionChange);
-    return () => {
-      document.removeEventListener('mouseup', handleSelectionChange);
-    };
-  }, [isQuickHighlightMode, handleSelectionChange, zoom]);
-
-  // Add effect to cleanup pending annotations when editing state changes
-  // useEffect(() => {
-  //   if (!editingAnnotationId) {
-  //     // When editing state is cleared, check for and remove any pending annotations that don't have comments
-  //     const pendingAnnotation = annotations.find(a => 
-  //       a.type === 'highlight' && // It's still just a highlight
-  //       !a.comment && // No comment added yet
-  //       Date.now() - new Date(a.createdAt).getTime() < 5000 // Created in the last 5 seconds
-  //     );
-  //     if (pendingAnnotation) {
-  //       deleteAnnotation(pendingAnnotation.id);
-  //     }
-  //   }
-  // }, [editingAnnotationId, annotations, deleteAnnotation]);
 
   return (
     <Pages 
@@ -319,14 +263,12 @@ const PDFContent = ({
           renderTooltipContent={renderTooltipContent}
           renderHoverTooltipContent={renderTooltipContent}
         />
-        {!isQuickHighlightMode && (
-          <SelectionTooltip>
-            <SelectionTooltipContent 
-              onHighlight={handleCreateAnnotation}
-              onComment={handleCreateComment}
-            />
-          </SelectionTooltip>
-        )}
+        <SelectionTooltip>
+          <SelectionTooltipContent 
+            onHighlight={handleCreateAnnotation}
+            onComment={handleCreateComment}
+          />
+        </SelectionTooltip>
       </Page>
     </Pages>
   );
@@ -335,7 +277,6 @@ const PDFContent = ({
 export const AnaraViewer = () => {
   const [savedAnnotations, setSavedAnnotations] = React.useState<Annotation[]>([]);
   const [focusedAnnotationId, setFocusedAnnotationId] = useState<string>();
-  const [isQuickHighlightMode, setIsQuickHighlightMode] = useState(false);
   const { setAnnotations } = useAnnotations();
 
   // Load saved annotations and ensure backward compatibility
@@ -376,16 +317,6 @@ export const AnaraViewer = () => {
         <div className="p-1 relative flex justify-between border-b">
         <ZoomMenu />
         <PageNavigation />
-        <button
-          onClick={() => setIsQuickHighlightMode(!isQuickHighlightMode)}
-          className={`px-3 py-1.5 rounded text-sm transition-colors ${
-            isQuickHighlightMode 
-              ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200' 
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-        >
-          Quick Highlight Mode {isQuickHighlightMode ? 'On' : 'Off'}
-        </button>
         <DocumentMenu documentUrl={fileUrl} />
       </div>
       {/* <div className="flex-1 relative"> */}
@@ -394,7 +325,6 @@ export const AnaraViewer = () => {
             onAnnotationsChange={handleAnnotationsChange}
             focusedAnnotationId={focusedAnnotationId}
             onAnnotationClick={handleAnnotationClick}
-            isQuickHighlightMode={isQuickHighlightMode}
           />
       {/* </div> */}
         </Root>
