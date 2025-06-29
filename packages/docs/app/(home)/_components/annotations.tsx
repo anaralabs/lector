@@ -1,19 +1,31 @@
-
-
 import { 
   type Annotation,
   useAnnotations,
 } from "@anaralabs/lector";
 import React, { useCallback, useState } from "react";
 
-export const SelectionTooltipContent = ({ onHighlight }: { onHighlight: () => void }) => {
+export const SelectionTooltipContent = ({ 
+  onHighlight, 
+  onComment 
+}: { 
+  onHighlight: () => void;
+  onComment: () => void;
+}) => {
   return (
-    <button
-      className="bg-white shadow-lg rounded-md px-3 py-1 hover:bg-yellow-200/70"
-      onClick={onHighlight}
-    >
-      Add Annotation
-    </button>
+    <div className="flex gap-2 bg-background rounded-lg p-2 border-border border">
+      <button
+        onClick={onHighlight}
+        className="text-yellow-600 hover:text-yellow-800 text-sm"
+      >
+        Highlight
+      </button>
+      <button
+        onClick={onComment}
+        className="text-blue-600 hover:text-blue-800 text-sm"
+      >
+        Comment
+      </button>
+    </div>
   );
 };
 
@@ -46,10 +58,10 @@ export const AnnotationList = ({ annotations, focusedAnnotationId, onAnnotationC
                 />
                 <div className="flex-grow">
                   <div className="text-sm">
-                    {annotation.comment || 'No comment'}
+                    {annotation.comment  ? 'Highlight' : 'No comment'}
                   </div>
-                  <div className="text-xs text-gray-500">
-                    Page {annotation.pageNumber}
+                  <div className="text-xs text-gray-500 flex gap-2">
+                    <span>Page {annotation.pageNumber}</span>
                   </div>
                 </div>
               </div>
@@ -64,23 +76,33 @@ export const AnnotationList = ({ annotations, focusedAnnotationId, onAnnotationC
 export interface TooltipContentProps {
   annotation: Annotation;
   onClose: () => void;
+  onAddComment?: (highlight: Annotation) => void;
 }
 
 export const TooltipContent = ({ annotation, onClose }: TooltipContentProps) => {
   const { updateAnnotation, deleteAnnotation } = useAnnotations();
   const [comment, setComment] = useState(annotation.comment || "");
   const [isEditing, setIsEditing] = useState(false);
+  
 
   const handleSaveComment = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    updateAnnotation(annotation.id, { comment });
+    const updates: Partial<Annotation> = { comment };
+    
+
+    
+    updateAnnotation(annotation.id, updates);
     setIsEditing(false);
     onClose?.();
   }, [annotation.id, comment, updateAnnotation, onClose]);
 
   const handleColorChange = useCallback((e: React.MouseEvent, color: string) => {
     e.stopPropagation();
-    updateAnnotation(annotation.id, { color });
+    const updates: Partial<Annotation> = { color };
+    
+   
+    
+    updateAnnotation(annotation.id, updates);
     onClose?.();
   }, [annotation.id, updateAnnotation, onClose]);
 
@@ -112,9 +134,9 @@ export const TooltipContent = ({ annotation, onClose }: TooltipContentProps) => 
   }, []);
 
   return (
-    <div className="flex flex-col gap-2" onClick={handleTooltipClick}>
-      {/* Color picker and delete button */}
-      <div className="flex items-center justify-center gap-2">
+    <div className="flex flex-col gap-2 bg-white rounded-lg p-2" onClick={handleTooltipClick}>
+      {/* Color picker - only show for highlights */}
+        <div className="flex items-center justify-center gap-2">
           {colors.map((color) => (
             <button
               key={color}
@@ -123,7 +145,7 @@ export const TooltipContent = ({ annotation, onClose }: TooltipContentProps) => 
               onClick={(e) => handleColorChange(e, color)}
             />
           ))}
-      </div>
+        </div>
 
       {/* Comment section */}
       {isEditing ? (
@@ -152,26 +174,34 @@ export const TooltipContent = ({ annotation, onClose }: TooltipContentProps) => 
           </div>
         </div>
       ) : (
-        <div className="flex flex-row gap-2">
+        <div className="flex flex-col gap-2 bg-white rounded-lg p-2">
+          {/* Comment display/edit */}
           {annotation.comment ? (
-            <div className="text-sm text-gray-700">{annotation.comment}</div>
+            <div className="flex flex-col gap-2">
+              <div className="text-sm text-gray-700">{annotation.comment}</div>
+              <button
+                onClick={handleStartEditing}
+                className="text-xs text-blue-500 hover:text-blue-600 self-start"
+              >
+                Edit comment
+              </button>
+            </div>
           ) : (
-            <>
             <button
               onClick={handleStartEditing}
-              className="text-sm text-blue-500 hover:text-blue-600"
+              className="text-sm text-blue-500 hover:text-blue-600 self-start"
             >
               Add comment
             </button>
-            
-        <button
-        onClick={handleDelete}
-        className="text-sm text-red-500 hover:text-red-600"
-      >
-        Delete
-      </button>
-            </>
           )}
+          
+          {/* Delete button */}
+          <button
+            onClick={handleDelete}
+            className="text-sm text-red-500 hover:text-red-600 self-start"
+          >
+            Delete
+          </button>
         </div>
       )}
     </div>
