@@ -119,6 +119,7 @@ export const AnnotationHighlightLayer = ({
             className={tooltipClassName}
             hoverClassName={hoverTooltipClassName}
             focusedOpenId={focusedAnnotationId}
+            focusedHoverOpenId={focusedHoverAnnotationId}
             isOpen={focusedAnnotationId === annotation.id}
             hoverIsOpen={focusedHoverAnnotationId === annotation.id}
             onOpenChange={(open) => {
