@@ -41,7 +41,7 @@ export function Footer(): React.ReactElement {
           <div className="flex items-center gap-1">
             Powered by{" "}
             <a
-              href="https://anara.so"
+              href="https://anara.com"
               target="_blank"
               rel="noreferrer"
               className="font-medium text-[#ff7a00] hover:text-[#ff7a00]/80 transition-colors inline-flex items-center gap-1"
@@ -55,7 +55,7 @@ export function Footer(): React.ReactElement {
 
           <div className="flex gap-6 text-sm">
             <a
-              href="https://anara.so/careers"
+              href="https://anara.com/careers"
               target="_blank"
               rel="noreferrer"
               className="hover:text-foreground transition-colors"
@@ -63,7 +63,7 @@ export function Footer(): React.ReactElement {
               Careers
             </a>
             <a
-              href="https://anara.so"
+              href="https://anara.com"
               target="_blank"
               rel="noreferrer"
               className="hover:text-foreground transition-colors"
