@@ -15,8 +15,25 @@ export const Page = ({
 }) => {
   const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 
-  const width = (pdfPageProxy.view[2] ?? 0) - (pdfPageProxy.view[0] ?? 0);
-  const height = (pdfPageProxy.view[3] ?? 0) - (pdfPageProxy.view[1] ?? 0);
+  /**
+   * When the PDF has some rotation, creating the div with width/height dimensions
+   * directly from the "view" array attribute can lead to incorrect rectangle,
+   * and so possible wrong layer positioning (i.e., highlighting).
+   * Instead, we have to use the width/height from the page viewport that are
+   * build taking into consideration the possible PDF rotation
+   */
+  const viewports = usePdf((state) => state.viewports);
+  let width:number;
+  let height:number;
+
+  const pageViewport = viewports[pageNumber];
+  if(pageViewport) {
+    width = pageViewport.width;
+    height = pageViewport.height;
+  } else {
+    width = (pdfPageProxy.view[2] ?? 0) - (pdfPageProxy.view[0] ?? 0);
+    height = (pdfPageProxy.view[3] ?? 0) - (pdfPageProxy.view[1] ?? 0);
+  }
 
   return (
     <PDFPageNumberContext.Provider value={pdfPageProxy.pageNumber}>
