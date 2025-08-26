@@ -6,7 +6,7 @@ import {
 } from "react";
 
 import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
-import { type HighlightRect,usePdf } from "../../internal";
+import { type HighlightRect, usePdf } from "../../internal";
 
 interface HighlightLayerProps extends ComponentPropsWithoutRef<"div"> {
   asChild?: boolean;
@@ -43,12 +43,14 @@ export const HighlightLayer = forwardRef<
   return (
     <>
       {rects.map((rect, index) => {
-        const { pageNumber, type, ...coordinates } = rect;
+        const { pageNumber, type, style: customStyle, ...coordinates } = rect;
 
         let dimensions: Dimensions = coordinates;
         if (type === "percent") {
           dimensions = convertToPercentString(rect);
         }
+
+        const customStyles = customStyle ? customStyle(rect) : {};
 
         return (
           <Comp
@@ -61,6 +63,7 @@ export const HighlightLayer = forwardRef<
               pointerEvents: "none",
               zIndex: 30,
               ...style,
+              ...customStyles,
             }}
             {...props}
           >

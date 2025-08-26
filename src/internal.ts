@@ -1,6 +1,6 @@
 import { Virtualizer } from "@tanstack/react-virtual";
 import type { PageViewport, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
-import { createRef } from "react";
+import React, { createRef } from "react";
 import { createStore, useStore } from "zustand";
 
 import { clamp } from "./lib/clamp";
@@ -19,6 +19,7 @@ export type HighlightRect = {
   height: number;
   width: number;
   type?: "pixels" | "percent";
+  style?: (rect: HighlightRect) => React.CSSProperties;
 };
 
 export interface ZoomOptions {
