@@ -28,6 +28,14 @@ export interface usePDFDocumentParams {
   isZoomFitWidth?: boolean;
   zoom?: number;
   zoomOptions?: ZoomOptions;
+  /**
+   * An arbitrary value between 1 and 4
+   * @description 1 it's the fastest render (but the lowest quality) and 4 is the slowest render (but the highest quality)
+   * @important If you set it to a very high value, it will cause the PDF to render very slowly and even freeze the browser.
+   * @note In some browsers and devices like Safari in Mac, setting resolution to 1 will generate blurry PDFs.
+   * @default 1
+  */
+  resolution?: InitialPDFState["resolution"];
 }
 
 export type Source =
@@ -44,6 +52,7 @@ export const usePDFDocumentContext = ({
   isZoomFitWidth,
   zoom = 1,
   zoomOptions,
+  resolution = 1,
 }: usePDFDocumentParams) => {
   const [_, setProgress] = useState(0);
 
@@ -81,6 +90,7 @@ export const usePDFDocumentContext = ({
         pdfDocumentProxy: pdf,
         zoom,
         zoomOptions,
+        resolution,
       }));
     };
 

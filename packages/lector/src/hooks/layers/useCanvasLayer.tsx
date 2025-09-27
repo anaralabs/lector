@@ -10,7 +10,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
   const pageNumber = usePDFPageNumber();
 
   const dpr = useDpr();
-
+  const resolution = usePdf((state) => state.resolution);
   const bouncyZoom = usePdf((state) => state.zoom);
   const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 
@@ -28,7 +28,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
     const canvas = canvasRef.current;
 
-    const scale = dpr * zoom;
+    const scale = dpr * zoom * resolution;
 
     canvas.height = viewport.height * scale;
     canvas.width = viewport.width * scale;
@@ -56,7 +56,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
     return () => {
       void renderingTask.cancel();
     };
-  }, [pdfPageProxy, dpr, zoom]);
+  }, [pdfPageProxy, dpr, zoom, resolution]);
 
   return {
     canvasRef,

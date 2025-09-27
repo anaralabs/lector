@@ -77,6 +77,16 @@ interface PDFState {
   coloredHighlights: ColoredHighlight[];
   addColoredHighlight: (value: ColoredHighlight) => void;
   deleteColoredHighlight: (uuid: string) => void;
+
+  /**
+   * An arbitrary value between 1 and 4
+   * @description 1 it's the fastest render (but the lowest quality) and 4 is the slowest render (but the highest quality)
+   * @important If you set it to a very high value, it will cause the PDF to render very slowly and even freeze the browser.
+   * @note In some browsers and devices like Safari in Mac, setting resolution to 1 will generate blurry PDFs.
+   * @default 1
+   */
+  resolution: number;
+  setResolution: (val: number) => void;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -89,6 +99,7 @@ export interface InitialPDFState {
   zoom: number;
   isZoomFitWidth?: boolean;
   zoomOptions?: ZoomOptions;
+  resolution?: PDFState["resolution"];
 }
 
 export const PDFStore = createZustandContext(
@@ -198,6 +209,13 @@ export const PDFStore = createZustandContext(
             (rect) => rect.uuid !== uuid,
           ),
         })),
+
+      resolution: Math.min(initialState.resolution ?? 1, 4),
+      setResolution: (val) => {
+        set({
+          resolution: Math.min(Math.max(val, 1), 4),
+        });
+      },
     }));
   },
 );

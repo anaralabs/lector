@@ -1,0 +1,64 @@
+---
+title: Resolution
+description: Control the sharpness and quality of the PDF rendering
+---
+
+import ResolutionComparison from "@/components/resolution-comparison.tsx";
+
+
+
+<ResolutionComparison />
+
+## Usage
+### Using the `resolution` prop
+```tsx
+"use client";
+
+import {
+  CanvasLayer,
+  Page,
+  Pages,
+  Root,
+  TextLayer,
+} from "@anaralabs/lector";
+
+const ViewerResolution = () => {
+  return (
+    <Root
+      source="/pdf/document.pdf"
+      //          v------ Default is 1, but 2 is a good balance between speed and quality
+      resolution={2}
+    >
+      <Pages className="p-4 h-full">
+        <Page>
+          <CanvasLayer />
+          <TextLayer />
+        </Page>
+      </Pages>
+    </Root>
+  );
+};
+
+export default ViewerResolution;
+```
+
+### Using the `usePdf` hook
+Remember to use the `usePdf` hook inside the `Root` component.
+
+```tsx
+const resolution = usePdf((state) => state.resolution);
+const setResolution = usePdf((state) => state.setResolution);
+```
+
+## Features
+
+- Control the sharpness and quality of the PDF rendering at the cost of heavier rendering tasks.
+  - 1 is the fastest render (but the lowest quality)
+  - 4 is the slowest render (but the highest quality)
+- Configurable through the `resolution` prop on the `Root` component or the `usePdf` hook
+- Limited values from 1 to 4 to avoid freezing the browser.
+
+## Best Practices
+
+- Use 2 as a default value for the `resolution` prop. It's a good balance between speed and quality.
+- For mobile devices, do not use a value higher than 2.
