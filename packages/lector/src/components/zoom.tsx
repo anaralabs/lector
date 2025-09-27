@@ -65,3 +65,20 @@ export const CurrentZoom = ({ ...props }: HTMLProps<HTMLInputElement>) => {
     />
   );
 };
+
+export const ZoomToFit = ({
+  onClick,
+  ...props
+}: HTMLProps<HTMLButtonElement>) => {
+  const zoomFitWidth = usePdf((state) => state.zoomFitWidth);
+
+  return (
+    <Primitive.button
+      {...props}
+      onClick={(e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
+        onClick?.(e);
+        zoomFitWidth();
+      }}
+    />
+  );
+};

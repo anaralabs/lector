@@ -1,4 +1,4 @@
-"use client";
+'use client'
 
 import {
   CanvasLayer,
@@ -9,11 +9,12 @@ import {
   TextLayer,
   ZoomIn,
   ZoomOut,
-} from "@anaralabs/lector";
+  ZoomToFit
+} from '@anaralabs/lector'
 
-import "@/lib/setup";
+import '@/lib/setup'
 
-const fileUrl = "/pdf/large.pdf";
+const fileUrl = '/pdf/large.pdf'
 
 const ViewerZoomControl = () => {
   return (
@@ -22,20 +23,21 @@ const ViewerZoomControl = () => {
       className="bg-gray-100 border rounded-md overflow-hidden relative h-[500px] flex flex-col justify-stretch"
       loader={<div className="p-4">Loading...</div>}
     >
-      <div className="bg-gray-100 border-b p-1 flex items-center justify-center text-sm text-gray-600 gap-2">
+      <div className="flex items-center justify-center gap-2 p-1 text-sm text-gray-600 bg-gray-100 border-b">
         Zoom
         <ZoomOut className="px-3 py-1 -mr-2 text-gray-900">-</ZoomOut>
-        <CurrentZoom className="bg-white rounded-full px-3 py-1 border text-center w-16" />
+        <CurrentZoom className="w-16 px-3 py-1 text-center bg-white border rounded-full" />
         <ZoomIn className="px-3 py-1 -ml-2 text-gray-900">+</ZoomIn>
+        <ZoomToFit className="px-3 py-1 -ml-2 text-gray-900">Fit</ZoomToFit>
       </div>
-      <Pages className="p-4 h-full">
+      <Pages className="h-full p-4">
         <Page>
           <CanvasLayer />
           <TextLayer />
         </Page>
       </Pages>
     </Root>
-  );
-};
+  )
+}
 
-export default ViewerZoomControl;
+export default ViewerZoomControl
