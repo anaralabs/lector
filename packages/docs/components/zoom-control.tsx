@@ -9,6 +9,7 @@ import {
   TextLayer,
   ZoomIn,
   ZoomOut,
+  ZoomToFit,
 } from "@anaralabs/lector";
 
 import "@/lib/setup";
@@ -27,6 +28,7 @@ const ViewerZoomControl = () => {
         <ZoomOut className="px-3 py-1 -mr-2 text-gray-900">-</ZoomOut>
         <CurrentZoom className="bg-white rounded-full px-3 py-1 border text-center w-16" />
         <ZoomIn className="px-3 py-1 -ml-2 text-gray-900">+</ZoomIn>
+        <ZoomToFit className="px-3 py-1 -ml-2 text-gray-900">Fit</ZoomToFit>
       </div>
       <Pages className="p-4 h-full">
         <Page>
