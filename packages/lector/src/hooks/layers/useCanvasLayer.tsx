@@ -32,80 +32,46 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
     const canvas = canvasRef.current;
     const canvasContext = canvas.getContext("2d")!;
-    
-    // Safari-specific fix for canvas rendering
+    const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
+    const scale = dpr * zoom;
+
+    // Safari-specific canvas setup
     if (isSafari()) {
-      // Reset any previous transformations
       canvasContext.setTransform(1, 0, 0, 1, 0, 0);
-      
-      // For Safari, use a different approach to prevent blurriness
-      const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
-      const renderScale = dpr * zoom;
-      
-      // Set canvas dimensions to actual pixel size
-      canvas.width = Math.floor(baseViewport.width * renderScale);
-      canvas.height = Math.floor(baseViewport.height * renderScale);
-      
-      // Set CSS size to displayed size
+      canvas.width = Math.floor(baseViewport.width * scale);
+      canvas.height = Math.floor(baseViewport.height * scale);
       canvas.style.width = `${baseViewport.width}px`;
       canvas.style.height = `${baseViewport.height}px`;
       
-      // Configure canvas context for crisp rendering
       canvasContext.imageSmoothingEnabled = false;
-      // Safari-specific properties for image smoothing
-      (canvasContext as any).mozImageSmoothingEnabled = false;
       (canvasContext as any).webkitImageSmoothingEnabled = false;
-      (canvasContext as any).msImageSmoothingEnabled = false;
-      
-      // Use the scaled viewport directly for Safari
-      const scaledViewport = pdfPageProxy.getViewport({ scale: renderScale });
-      
-      const renderingTask = pdfPageProxy.render({
-        canvasContext: canvasContext,
-        viewport: scaledViewport,
-        background,
-      });
-
-      renderingTask.promise.catch((error) => {
-        if (error.name === "RenderingCancelledException") {
-          return;
-        }
-        throw error;
-      });
-
-      return () => {
-        void renderingTask.cancel();
-      };
     } else {
-      // Original approach for other browsers
-      const viewport = pdfPageProxy.getViewport({ scale: 1 });
-      const scale = dpr * zoom;
-
-      canvas.height = viewport.height * scale;
-      canvas.width = viewport.width * scale;
-
-      canvas.style.height = `${viewport.height}px`;
-      canvas.style.width = `${viewport.width}px`;
-
+      canvas.width = baseViewport.width * scale;
+      canvas.height = baseViewport.height * scale;
+      canvas.style.width = `${baseViewport.width}px`;
+      canvas.style.height = `${baseViewport.height}px`;
+      
       canvasContext.scale(scale, scale);
-
-      const renderingTask = pdfPageProxy.render({
-        canvasContext: canvasContext,
-        viewport,
-        background,
-      });
-
-      renderingTask.promise.catch((error) => {
-        if (error.name === "RenderingCancelledException") {
-          return;
-        }
-        throw error;
-      });
-
-      return () => {
-        void renderingTask.cancel();
-      };
     }
+
+    // Render with appropriate viewport
+    const viewport = isSafari() ? pdfPageProxy.getViewport({ scale }) : baseViewport;
+    const renderingTask = pdfPageProxy.render({
+      canvasContext,
+      viewport,
+      background,
+    });
+
+    renderingTask.promise.catch((error) => {
+      if (error.name === "RenderingCancelledException") {
+        return;
+      }
+      throw error;
+    });
+
+    return () => {
+      void renderingTask.cancel();
+    };
   }, [pdfPageProxy, dpr, zoom]);
 
   return {
