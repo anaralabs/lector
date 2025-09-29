@@ -5,7 +5,6 @@ import { usePdf } from "../../internal";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
-// Detect Safari browser
 const isSafari = () => {
   if (typeof window === "undefined") return false;
   return /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
@@ -22,8 +21,6 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
   const [zoom] = useDebounce(bouncyZoom, 100);
 
-  // const { visible } = useVisibility({ elementRef: canvasRef });
-  // const debouncedVisible = useDebounce(visible, 100);
 
   useLayoutEffect(() => {
     if (!canvasRef.current) {
@@ -35,7 +32,6 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
     const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
     const scale = dpr * zoom;
 
-    // Safari-specific canvas setup
     if (isSafari()) {
       canvasContext.setTransform(1, 0, 0, 1, 0, 0);
       canvas.width = Math.floor(baseViewport.width * scale);
@@ -54,7 +50,6 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
       canvasContext.scale(scale, scale);
     }
 
-    // Render with appropriate viewport
     const viewport = isSafari() ? pdfPageProxy.getViewport({ scale }) : baseViewport;
     const renderingTask = pdfPageProxy.render({
       canvasContext,
