@@ -21,7 +21,6 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
   const [zoom] = useDebounce(bouncyZoom, 100);
 
-
   useLayoutEffect(() => {
     if (!canvasRef.current) {
       return;
@@ -30,27 +29,35 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
     const canvas = canvasRef.current;
     const canvasContext = canvas.getContext("2d")!;
     const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
-    const scale = dpr * zoom;
 
-    if (isSafari()) {
-      canvasContext.setTransform(1, 0, 0, 1, 0, 0);
-      canvas.width = Math.floor(baseViewport.width * scale);
-      canvas.height = Math.floor(baseViewport.height * scale);
-      canvas.style.width = `${baseViewport.width}px`;
-      canvas.style.height = `${baseViewport.height}px`;
-      
+    // Use PDF.js OutputScale approach (same as their official viewer)
+    const pixelRatio = window.devicePixelRatio || 1;
+    const outputScale = {
+      sx: pixelRatio,
+      sy: pixelRatio,
+    };
+
+    // Calculate canvas dimensions using outputScale
+    const width = baseViewport.width * zoom;
+    const height = baseViewport.height * zoom;
+    
+    canvas.width = Math.floor(width * outputScale.sx);
+    canvas.height = Math.floor(height * outputScale.sy);
+    
+    // Set CSS display size (visible size)
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+
+    // Get viewport at zoom scale (not DPR scale)
+    const viewport = pdfPageProxy.getViewport({ scale: zoom });
+
+    // Apply transform using outputScale (PDF.js approach)
+    canvasContext.setTransform(outputScale.sx, 0, 0, outputScale.sy, 0, 0);
+    
+    // Disable image smoothing for crisp PDF rendering
+    if (canvasContext.imageSmoothingEnabled !== undefined) {
       canvasContext.imageSmoothingEnabled = false;
-      (canvasContext as any).webkitImageSmoothingEnabled = false;
-    } else {
-      canvas.width = baseViewport.width * scale;
-      canvas.height = baseViewport.height * scale;
-      canvas.style.width = `${baseViewport.width}px`;
-      canvas.style.height = `${baseViewport.height}px`;
-      
-      canvasContext.scale(scale, scale);
     }
-
-    const viewport = isSafari() ? pdfPageProxy.getViewport({ scale }) : baseViewport;
     const renderingTask = pdfPageProxy.render({
       canvasContext,
       viewport,
