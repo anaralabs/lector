@@ -14,12 +14,11 @@ export const CanvasLayer = ({
   return (
     <canvas
       style={{
-        ...style,
         position: "absolute",
         top: 0,
         left: 0,
-        width: "100%",
-        height: "100%",
+        // Don't override width/height - let useCanvasLayer control dimensions
+        ...style,
       }}
       {...props}
       ref={canvasRef}
