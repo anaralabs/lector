@@ -9,7 +9,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const pageNumber = usePDFPageNumber();
 
-	const _dpr = useDpr();
+	const dpr = useDpr();
 
 	const bouncyZoom = usePdf((state) => state.zoom);
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
@@ -28,7 +28,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 		const canvas = canvasRef.current;
 
-		const scale = 2 * zoom;
+		const scale = dpr * zoom;
 
 		// Check Safari canvas size limits
 		// Safari has a max canvas area of ~16,777,216 pixels (4096x4096)
@@ -75,7 +75,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		return () => {
 			void renderingTask.cancel();
 		};
-	}, [pdfPageProxy, zoom, background]);
+	}, [pdfPageProxy, zoom, background, dpr]);
 
 	return {
 		canvasRef,
