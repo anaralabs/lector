@@ -10,7 +10,7 @@
     },
     "lint": {
       "dependsOn": ["^build"],
-      "inputs": ["../../.prettierrc", "src/**", "package.json"],
+      "inputs": ["../../biome.json", "src/**", "package.json"],
       "outputs": []
     },
     "format": {

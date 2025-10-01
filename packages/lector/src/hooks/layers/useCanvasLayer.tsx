@@ -6,59 +6,78 @@ import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
 export const useCanvasLayer = ({ background }: { background?: string }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const pageNumber = usePDFPageNumber();
+	const canvasRef = useRef<HTMLCanvasElement>(null);
+	const pageNumber = usePDFPageNumber();
 
-  const dpr = useDpr();
+	const _dpr = useDpr();
 
-  const bouncyZoom = usePdf((state) => state.zoom);
-  const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
+	const bouncyZoom = usePdf((state) => state.zoom);
+	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 
-  const [zoom] = useDebounce(bouncyZoom, 100);
+	const [zoom] = useDebounce(bouncyZoom, 100);
 
-  // const { visible } = useVisibility({ elementRef: canvasRef });
-  // const debouncedVisible = useDebounce(visible, 100);
+	// const { visible } = useVisibility({ elementRef: canvasRef });
+	// const debouncedVisible = useDebounce(visible, 100);
 
-  useLayoutEffect(() => {
-    if (!canvasRef.current) {
-      return;
-    }
+	useLayoutEffect(() => {
+		if (!canvasRef.current) {
+			return;
+		}
 
-    const viewport = pdfPageProxy.getViewport({ scale: 1 });
+		const viewport = pdfPageProxy.getViewport({ scale: 1 });
 
-    const canvas = canvasRef.current;
+		const canvas = canvasRef.current;
 
-    const scale = dpr * zoom;
+		const scale = 2 * zoom;
 
-    canvas.height = viewport.height * scale;
-    canvas.width = viewport.width * scale;
+		// Check Safari canvas size limits
+		// Safari has a max canvas area of ~16,777,216 pixels (4096x4096)
+		// and max dimension of ~32,767 pixels per side
+		const MAX_CANVAS_PIXELS = 16777216;
+		const MAX_CANVAS_DIMENSION = 32767;
 
-    canvas.style.height = `${viewport.height}px`;
-    canvas.style.width = `${viewport.width}px`;
+		const proposedHeight = viewport.height * scale;
+		const proposedWidth = viewport.width * scale;
+		const proposedArea = proposedHeight * proposedWidth;
 
-    const canvasContext = canvas.getContext("2d")!;
-    canvasContext.scale(scale, scale);
+		// Clamp scale if we exceed Safari's limits
+		if (
+			proposedArea > MAX_CANVAS_PIXELS ||
+			proposedHeight > MAX_CANVAS_DIMENSION ||
+			proposedWidth > MAX_CANVAS_DIMENSION
+		) {
+			console.log("Safari canvas size limits exceeded");
+		}
 
-    const renderingTask = pdfPageProxy.render({
-      canvasContext: canvasContext,
-      viewport,
-      background,
-    });
+		canvas.height = viewport.height * scale;
+		canvas.width = viewport.width * scale;
 
-    renderingTask.promise.catch((error) => {
-      if (error.name === "RenderingCancelledException") {
-        return;
-      }
+		canvas.style.height = `${viewport.height}px`;
+		canvas.style.width = `${viewport.width}px`;
 
-      throw error;
-    });
+		const canvasContext = canvas.getContext("2d")!;
+		canvasContext.scale(scale, scale);
 
-    return () => {
-      void renderingTask.cancel();
-    };
-  }, [pdfPageProxy, dpr, zoom]);
+		const renderingTask = pdfPageProxy.render({
+			canvasContext: canvasContext,
+			viewport,
+			background,
+		});
 
-  return {
-    canvasRef,
-  };
+		renderingTask.promise.catch((error) => {
+			if (error.name === "RenderingCancelledException") {
+				return;
+			}
+
+			throw error;
+		});
+
+		return () => {
+			void renderingTask.cancel();
+		};
+	}, [pdfPageProxy, zoom, background]);
+
+	return {
+		canvasRef,
+	};
 };
