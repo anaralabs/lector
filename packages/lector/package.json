@@ -1,111 +1,103 @@
 {
-  "name": "@anaralabs/lector",
-  "version": "0.0.0-semantically-released",
-  "description": "Headless PDF viewer for React",
-  "author": "andrewdr (https://github.com/andrewdoro)",
-  "license": "MIT",
-  "type": "module",
-  "sideEffects": false,
-  "module": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./esm-only.cjs"
-    }
-  },
-  "files": [
-    "dist"
-  ],
-  "publishConfig": {
-    "access": "public"
-  },
-  "scripts": {
-    "dev": "tsup --watch --onSuccess 'yalc push'",
-    "prebuild": "rm -rf dist",
-    "build": "tsup",
-    "lint": "eslint .",
-    "postbuild": "size-limit --json > size.json",
-    "test": "pnpm run '/^test:/'",
-    "test:unit": "vitest run",
-    "test:size": "size-limit",
-    "prepack": "./scripts/prepack.sh"
-  },
-  "devDependencies": {
-    "@eslint/js": "^9.6.0",
-    "@microsoft/api-extractor": "^7.48.1",
-    "@size-limit/preset-small-lib": "^11.1.6",
-    "@testing-library/react": "^16.0.0",
-    "@types/eslint__js": "^8.42.3",
-    "@types/node": "^22.9.0",
-    "@types/react": "^19.0.1",
-    "@types/react-dom": "^19.0.2",
-    "@use-gesture/react": "^10.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
-    "@vitest/browser": "^2.0.4",
-    "clsx": "^2.1.1",
-    "eslint": "9.17.0",
-    "eslint-config-prettier": "^9.1.0",
-    "eslint-plugin-react": "^7.37.2",
-    "eslint-plugin-react-hooks": "^5.1.0",
-    "eslint-plugin-simple-import-sort": "^12.1.1",
-    "pdfjs-dist": "^5.0.375",
-    "playwright": "^1.45.3",
-    "prettier": "^3.3.2",
-    "react": "^18.3.1",
-    "size-limit": "^11.1.6",
-    "tsc-alias": "^1.8.10",
-    "tslib": "^2.6.3",
-    "tsup": "^8.3.5",
-    "typescript": "^5.5.3",
-    "typescript-eslint": "^7.16.0",
-    "vite": "^5.3.3",
-    "vitest": "^2.0.4",
-    "webdriverio": "^8.39.1"
-  },
-  "peerDependencies": {
-    "pdfjs-dist": "^4.9",
-    "react": ">=18"
-  },
-  "dependencies": {
-    "@floating-ui/react": "^0.26.28",
-    "@radix-ui/react-slot": "^1.1.0",
-    "@tanstack/react-virtual": "^3.10.9",
-    "react-dom": "18.3.1",
-    "use-debounce": "^10.0.4",
-    "uuid": "^11.1.0",
-    "zustand": "^5.0.2"
-  },
-  "optionalDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "^4.28.1"
-  },
-  "keywords": [
-    "pdf",
-    "react",
-    "headless",
-    "viewer",
-    "react-pdf",
-    "anaralabs",
-    "typescript"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/anaralabs/lector.git",
-    "directory": "packages/nuqs"
-  },
-  "bugs": {
-    "url": "https://github.com/anaralabs/lector/issues"
-  },
-  "homepage": "https://github.com/anaralabs/lector",
-  "size-limit": [
-    {
-      "name": "Client",
-      "path": "dist/index.js",
-      "limit": "150 kB",
-      "ignore": [
-        "react"
-      ]
-    }
-  ]
+	"name": "@anaralabs/lector",
+	"version": "0.0.0-semantically-released",
+	"description": "Headless PDF viewer for React",
+	"author": "andrewdr (https://github.com/andrewdoro)",
+	"license": "MIT",
+	"type": "module",
+	"sideEffects": false,
+	"module": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"require": "./esm-only.cjs"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"dev": "tsup --watch --onSuccess 'yalc push'",
+		"prebuild": "rm -rf dist",
+		"build": "tsup",
+		"lint": "biome check .",
+		"format": "biome format --write .",
+		"postbuild": "size-limit --json > size.json",
+		"test": "pnpm run '/^test:/'",
+		"test:unit": "vitest run",
+		"test:size": "size-limit",
+		"prepack": "./scripts/prepack.sh"
+	},
+	"devDependencies": {
+		"@microsoft/api-extractor": "^7.48.1",
+		"@size-limit/preset-small-lib": "^11.1.6",
+		"@testing-library/react": "^16.0.0",
+		"@types/node": "^22.9.0",
+		"@types/react": "^19.0.1",
+		"@types/react-dom": "^19.0.2",
+		"@use-gesture/react": "^10.3.1",
+		"@vitejs/plugin-react": "^4.3.4",
+		"@vitest/browser": "^2.0.4",
+		"clsx": "^2.1.1",
+		"pdfjs-dist": "^4.10.38",
+		"playwright": "^1.45.3",
+		"react": "^18.3.1",
+		"size-limit": "^11.1.6",
+		"tsc-alias": "^1.8.10",
+		"tslib": "^2.6.3",
+		"tsup": "^8.3.5",
+		"typescript": "^5.5.3",
+		"vite": "^5.3.3",
+		"vitest": "^2.0.4",
+		"webdriverio": "^8.39.1"
+	},
+	"peerDependencies": {
+		"pdfjs-dist": "^4.9",
+		"react": ">=18"
+	},
+	"dependencies": {
+		"@floating-ui/react": "^0.26.28",
+		"@radix-ui/react-slot": "^1.1.0",
+		"@tanstack/react-virtual": "^3.10.9",
+		"react-dom": "18.3.1",
+		"use-debounce": "^10.0.4",
+		"uuid": "^11.1.0",
+		"zustand": "^5.0.2"
+	},
+	"optionalDependencies": {
+		"@rollup/rollup-linux-x64-gnu": "^4.28.1"
+	},
+	"keywords": [
+		"pdf",
+		"react",
+		"headless",
+		"viewer",
+		"react-pdf",
+		"anaralabs",
+		"typescript"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/anaralabs/lector.git",
+		"directory": "packages/nuqs"
+	},
+	"bugs": {
+		"url": "https://github.com/anaralabs/lector/issues"
+	},
+	"homepage": "https://github.com/anaralabs/lector",
+	"size-limit": [
+		{
+			"name": "Client",
+			"path": "dist/index.js",
+			"limit": "150 kB",
+			"ignore": [
+				"react"
+			]
+		}
+	]
 }

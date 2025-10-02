@@ -3,11 +3,11 @@ import type { JSX } from "react";
 import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
 
 export const CustomLayer = ({
-  children,
+	children,
 }: {
-  children: (pageNumber: number) => JSX.Element;
+	children: (pageNumber: number) => JSX.Element;
 }) => {
-  const pageNumber = usePDFPageNumber();
+	const pageNumber = usePDFPageNumber();
 
-  return children(pageNumber);
+	return children(pageNumber);
 };
