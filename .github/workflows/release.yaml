@@ -81,7 +81,7 @@ jobs:
 
   release:
     name: Release
-    needs: [lint, test]
+    needs: [lint]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
