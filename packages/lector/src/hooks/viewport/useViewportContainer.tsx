@@ -56,6 +56,7 @@ export const useViewportContainer = ({
 			const { zoom, translateX, translateY } = transformations.current;
 
 			elementRef.current.style.transform = `scale3d(${zoom}, ${zoom}, 1)`;
+			elementRef.current.style.willChange = "scale3d";
 
 			const elementBoundingBox = elementRef.current.getBoundingClientRect();
 

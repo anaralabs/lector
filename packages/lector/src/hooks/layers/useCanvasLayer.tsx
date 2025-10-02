@@ -1,12 +1,15 @@
-import { useLayoutEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
+const MAX_CANVAS_PIXELS = 16777216;
+const MAX_CANVAS_DIMENSION = 32767;
+
 export const useCanvasLayer = ({ background }: { background?: string }) => {
-	const canvasRef = useRef<HTMLCanvasElement>(null);
+	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const pageNumber = usePDFPageNumber();
 
 	const dpr = useDpr();
@@ -16,50 +19,66 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 	const [zoom] = useDebounce(bouncyZoom, 100);
 
-	// const { visible } = useVisibility({ elementRef: canvasRef });
-	// const debouncedVisible = useDebounce(visible, 100);
+	const clampScaleForPage = useCallback(
+		(targetScale: number, pageWidth: number, pageHeight: number) => {
+			if (!targetScale) {
+				return 0;
+			}
+
+			const areaLimit = Math.sqrt(
+				MAX_CANVAS_PIXELS / Math.max(pageWidth * pageHeight, 1),
+			);
+			const widthLimit = MAX_CANVAS_DIMENSION / Math.max(pageWidth, 1);
+			const heightLimit = MAX_CANVAS_DIMENSION / Math.max(pageHeight, 1);
+
+			const safeScale = Math.min(
+				targetScale,
+				Number.isFinite(areaLimit) ? areaLimit : targetScale,
+				Number.isFinite(widthLimit) ? widthLimit : targetScale,
+				Number.isFinite(heightLimit) ? heightLimit : targetScale,
+			);
+
+			return Math.max(safeScale, 0);
+		},
+		[],
+	);
 
 	useLayoutEffect(() => {
 		if (!canvasRef.current) {
 			return;
 		}
 
-		const viewport = pdfPageProxy.getViewport({ scale: 1 });
+		const baseCanvas = canvasRef.current;
+		const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
+		const pageWidth = baseViewport.width;
+		const pageHeight = baseViewport.height;
 
-		const canvas = canvasRef.current;
+		const targetBaseScale = dpr * Math.min(zoom, 1);
+		const baseScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
 
-		const scale = dpr * zoom;
+		baseCanvas.width = Math.floor(pageWidth * baseScale);
+		baseCanvas.height = Math.floor(pageHeight * baseScale);
+		baseCanvas.style.position = "absolute";
+		baseCanvas.style.top = "0";
+		baseCanvas.style.left = "0";
+		baseCanvas.style.width = `${pageWidth}px`;
+		baseCanvas.style.height = `${pageHeight}px`;
+		baseCanvas.style.transform = "translate(0px, 0px)";
+		baseCanvas.style.zIndex = "0";
+		baseCanvas.style.pointerEvents = "none";
 
-		// Check Safari canvas size limits
-		// Safari has a max canvas area of ~16,777,216 pixels (4096x4096)
-		// and max dimension of ~32,767 pixels per side
-		const MAX_CANVAS_PIXELS = 16777216;
-		const MAX_CANVAS_DIMENSION = 32767;
-
-		const proposedHeight = viewport.height * scale;
-		const proposedWidth = viewport.width * scale;
-		const proposedArea = proposedHeight * proposedWidth;
-
-		// Clamp scale if we exceed Safari's limits
-		if (
-			proposedArea > MAX_CANVAS_PIXELS ||
-			proposedHeight > MAX_CANVAS_DIMENSION ||
-			proposedWidth > MAX_CANVAS_DIMENSION
-		) {
-			console.log("Safari canvas size limits exceeded");
+		const context = baseCanvas.getContext("2d");
+		if (!context) {
+			return;
 		}
 
-		canvas.height = viewport.height * scale;
-		canvas.width = viewport.width * scale;
+		context.setTransform(1, 0, 0, 1, 0, 0);
+		context.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
 
-		canvas.style.height = `${viewport.height}px`;
-		canvas.style.width = `${viewport.width}px`;
-
-		const canvasContext = canvas.getContext("2d")!;
-		canvasContext.scale(scale, scale);
+		const viewport = pdfPageProxy.getViewport({ scale: baseScale });
 
 		const renderingTask = pdfPageProxy.render({
-			canvasContext: canvasContext,
+			canvasContext: context,
 			viewport,
 			background,
 		});
@@ -75,7 +94,9 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		return () => {
 			void renderingTask.cancel();
 		};
-	}, [pdfPageProxy, zoom, background, dpr]);
+		// We intentionally omit baseScale dependencies derived from zoom to avoid redundant renders
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [pdfPageProxy, background, dpr, zoom, clampScaleForPage]);
 
 	return {
 		canvasRef,

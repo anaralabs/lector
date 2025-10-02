@@ -23,7 +23,7 @@ const EXTRA_HEIGHT = 0;
 export const Pages = ({
 	children,
 	gap = 10,
-	virtualizerOptions = { overscan: 3 },
+	virtualizerOptions = { overscan: 2 },
 	initialOffset,
 	onOffsetChange,
 	...props
