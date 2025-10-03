@@ -5,8 +5,8 @@ import { usePdf } from "../../internal";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
-const MAX_CANVAS_PIXELS = 16777216 * 2;
-const MAX_CANVAS_DIMENSION = 32767 * 2;
+const MAX_CANVAS_PIXELS = 16777216;
+const MAX_CANVAS_DIMENSION = 32767;
 
 export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
