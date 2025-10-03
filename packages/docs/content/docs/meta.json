@@ -1,16 +1,16 @@
 {
-  "title": "Lector Documentation",
-  "description": "A composable, headless PDF viewer toolkit for React applications",
-  "root": true,
-  "pages": [
-    "---Getting Started---",
-    "installation",
-    "basic-usage",
-    "---Components---",
-    "code/basic",
-    "code/thumbnails",
-    "---Advanced---",
-    "code",
-    "dark-mode"
-  ]
+	"title": "Lector Documentation",
+	"description": "A composable, headless PDF viewer toolkit for React applications",
+	"root": true,
+	"pages": [
+		"---Getting Started---",
+		"installation",
+		"basic-usage",
+		"---Components---",
+		"code/basic",
+		"code/thumbnails",
+		"---Advanced---",
+		"code",
+		"dark-mode"
+	]
 }

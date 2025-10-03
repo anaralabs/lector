@@ -1,30 +1,30 @@
 import { useEffect, useState } from "react";
 
 export const useDpr = () => {
-  const [dpr, setDPR] = useState(
-    !window ? 1 : Math.min(window.devicePixelRatio, 2),
-  );
+	const [dpr, setDPR] = useState(
+		!window ? 1 : Math.min(window.devicePixelRatio, 2),
+	);
 
-  useEffect(() => {
-    if (!window) {
-      return;
-    }
+	useEffect(() => {
+		if (!window) {
+			return;
+		}
 
-    const handleDPRChange = () => {
-      setDPR(window.devicePixelRatio);
-    };
+		const handleDPRChange = () => {
+			setDPR(window.devicePixelRatio);
+		};
 
-    const windowMatch = window.matchMedia(
-      `screen and (min-resolution: ${dpr}dppx)`,
-    );
+		const windowMatch = window.matchMedia(
+			`screen and (min-resolution: ${dpr}dppx)`,
+		);
 
-    windowMatch.addEventListener("change", handleDPRChange);
+		windowMatch.addEventListener("change", handleDPRChange);
 
-    return () => {
-      windowMatch.removeEventListener("change", handleDPRChange);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+		return () => {
+			windowMatch.removeEventListener("change", handleDPRChange);
+		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [dpr]);
 
-  return dpr;
+	return dpr;
 };

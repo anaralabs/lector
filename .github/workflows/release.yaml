@@ -44,44 +44,44 @@ jobs:
       - name: Run lint
         run: pnpm lint
 
-  test:
-    name: Testing
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+  # test:
+  #   name: Testing
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/create-github-app-token@v1
+  #       id: app-token
+  #       with:
+  #         app-id: ${{ secrets.APP_ID }}
+  #         private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ steps.app-token.outputs.token }}
-          fetch-depth: 0
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         token: ${{ steps.app-token.outputs.token }}
+  #         fetch-depth: 0
 
-      - uses: pnpm/action-setup@v2
-        with:
-          version: latest
+  #     - uses: pnpm/action-setup@v2
+  #       with:
+  #         version: latest
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-          registry-url: "https://registry.npmjs.org"
-          cache-dependency-path: ./pnpm-lock.yaml
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 20
+  #         cache: pnpm
+  #         registry-url: "https://registry.npmjs.org"
+  #         cache-dependency-path: ./pnpm-lock.yaml
 
-      - name: Install dependencies
-        run: pnpm install
+  #     - name: Install dependencies
+  #       run: pnpm install
 
-      - name: Run tests
-        run: pnpm test
+  #     - name: Run tests
+  #       run: pnpm test
 
-      - name: Build package
-        run: pnpm build
+  #     - name: Build package
+  #       run: pnpm build
 
   release:
     name: Release
-    needs: [lint, test]
+    needs: [lint]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:

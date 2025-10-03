@@ -1,119 +1,137 @@
+import { useCallback } from "react";
 import { type HighlightRect, usePdf } from "../../internal";
 
 export const usePdfJump = () => {
-  const virtualizer = usePdf((state) => state.virtualizer);
-  const setHighlight = usePdf((state) => state.setHighlight);
+	const virtualizer = usePdf((state) => state.virtualizer);
+	const setHighlight = usePdf((state) => state.setHighlight);
 
-  const jumpToPage = (
-    pageIndex: number,
-    options?: {
-      align?: "start" | "center" | "end" | "auto";
-      behavior?: "auto" | "smooth";
-    },
-  ) => {
-    if (!virtualizer) return;
+	const jumpToPage = useCallback(
+		(
+			pageIndex: number,
+			options?: {
+				align?: "start" | "center" | "end" | "auto";
+				behavior?: "auto" | "smooth";
+			},
+		) => {
+			if (!virtualizer) return;
 
-    // Define default options
-    const defaultOptions = {
-      align: "start",
-      behavior: "smooth",
-    };
+			// Define default options
+			const defaultOptions = {
+				align: "start",
+				behavior: "smooth",
+			};
 
-    // Merge default options with any provided options
+			// Merge default options with any provided options
 
-    const finalOptions = { ...defaultOptions, ...options };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    virtualizer.scrollToIndex(pageIndex - 1, finalOptions as any);
-  };
+			const finalOptions = { ...defaultOptions, ...options };
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			virtualizer.scrollToIndex(pageIndex - 1, finalOptions as any);
+		},
+		[virtualizer],
+	);
 
-  const jumpToOffset = (offset: number) => {
-    if (!virtualizer) return;
-    virtualizer.scrollToOffset(offset, {
-      align: "start",
-      behavior: "smooth",
-    });
-  };
+	const jumpToOffset = useCallback(
+		(offset: number) => {
+			if (!virtualizer) return;
+			virtualizer.scrollToOffset(offset, {
+				align: "start",
+				behavior: "smooth",
+			});
+		},
+		[virtualizer],
+	);
 
-  const scrollToHighlightRects = (
-    rects: HighlightRect[],
-    type: "pixels" | "percent",
-    align: "start" | "center" = "start",
-    additionalOffset: number = 0,
-  ) => {
-    if (!virtualizer) return;
+	const scrollToHighlightRects = useCallback(
+		(
+			rects: HighlightRect[],
+			type: "pixels" | "percent",
+			align: "start" | "center" = "start",
+			additionalOffset: number = 0,
+		) => {
+			if (!virtualizer) return;
 
-    const firstPage = Math.min(...rects.map((rect) => rect.pageNumber));
+			const firstPage = Math.min(...rects.map((rect) => rect.pageNumber));
 
-    // Get the start offset of the page in the viewport
-    const pageOffset = virtualizer.getOffsetForIndex(firstPage - 1, "start");
+			// Get the start offset of the page in the viewport
+			const pageOffset = virtualizer.getOffsetForIndex(firstPage - 1, "start");
 
-    if (pageOffset === null) return;
+			if (pageOffset === null) return;
 
-    // Find the target highlight rect (usually the first one)
-    const targetRect = rects.find((rect) => rect.pageNumber === firstPage);
+			// Find the target highlight rect (usually the first one)
+			const targetRect = rects.find((rect) => rect.pageNumber === firstPage);
 
-    if (!targetRect) return;
+			if (!targetRect) return;
 
-    const isNumber = pageOffset?.[0] != null;
-    if (!isNumber) return;
+			const isNumber = pageOffset?.[0] != null;
+			if (!isNumber) return;
 
-    const pageStart = pageOffset[0] ?? 0;
+			const pageStart = pageOffset[0] ?? 0;
 
-    // Calculate the rect position and height
-    let rectTop: number;
-    let rectHeight: number;
+			// Calculate the rect position and height
+			let rectTop: number;
+			let rectHeight: number;
 
-    if (type === "percent") {
-      const estimatePageHeight = virtualizer.options.estimateSize(
-        firstPage - 1,
-      );
-      rectTop = (targetRect.top / 100) * estimatePageHeight;
-      rectHeight = (targetRect.height / 100) * estimatePageHeight;
-    } else {
-      rectTop = targetRect.top;
-      rectHeight = targetRect.height;
-    }
+			if (type === "percent") {
+				const estimatePageHeight = virtualizer.options.estimateSize(
+					firstPage - 1,
+				);
+				rectTop = (targetRect.top / 100) * estimatePageHeight;
+				rectHeight = (targetRect.height / 100) * estimatePageHeight;
+			} else {
+				rectTop = targetRect.top;
+				rectHeight = targetRect.height;
+			}
 
-    // Calculate the scroll offset based on alignment
-    let scrollOffset: number;
+			// Calculate the scroll offset based on alignment
+			let scrollOffset: number;
 
-    if (align === "center") {
-      // When centering in the viewport, we need the viewport height
-      const viewportHeight = virtualizer.scrollElement?.clientHeight || 0;
+			if (align === "center") {
+				// When centering in the viewport, we need the viewport height
+				const viewportHeight = virtualizer.scrollElement?.clientHeight || 0;
 
-      // The target position is the rect's center minus half the viewport height
-      // This places the rect in the center of the viewport
-      const rectCenter = pageStart + rectTop + rectHeight / 2;
-      scrollOffset = rectCenter - viewportHeight / 2;
-    } else {
-      // Use the top of the highlight rect
-      scrollOffset = pageStart + rectTop;
-    }
+				// The target position is the rect's center minus half the viewport height
+				// This places the rect in the center of the viewport
+				const rectCenter = pageStart + rectTop + rectHeight / 2;
+				scrollOffset = rectCenter - viewportHeight / 2;
+			} else {
+				// Use the top of the highlight rect
+				scrollOffset = pageStart + rectTop;
+			}
 
-    // Apply the additional offset
-    scrollOffset += additionalOffset;
+			// Apply the additional offset
+			scrollOffset += additionalOffset;
 
-    // Ensure we don't scroll to a negative offset
-    const adjustedOffset = Math.max(0, scrollOffset);
+			// Ensure we don't scroll to a negative offset
+			const adjustedOffset = Math.max(0, scrollOffset);
 
-    virtualizer.scrollToOffset(adjustedOffset, {
-      align: "start", // Always use start when we've calculated our own centering
-      behavior: "smooth",
-    });
-  };
+			virtualizer.scrollToOffset(adjustedOffset, {
+				align: "start", // Always use start when we've calculated our own centering
+				behavior: "smooth",
+			});
+		},
+		[virtualizer],
+	);
 
-  const jumpToHighlightRects = (
-    rects: HighlightRect[],
-    type: "pixels" | "percent",
-    align: "start" | "center" = "start",
-    additionalOffset: number = 0,
-  ) => {
-    if (!virtualizer) return;
+	const jumpToHighlightRects = useCallback(
+		(
+			rects: HighlightRect[],
+			type: "pixels" | "percent",
+			align: "start" | "center" = "start",
+			additionalOffset: number = 0,
+		) => {
+			if (!virtualizer) return;
 
-    setHighlight(rects);
-    
-    scrollToHighlightRects(rects, type, align, additionalOffset);
-  };
+			setHighlight(rects);
 
-  return { jumpToPage, jumpToOffset, jumpToHighlightRects, scrollToHighlightRects};
+			scrollToHighlightRects(rects, type, align, additionalOffset);
+		},
+		[virtualizer, setHighlight, scrollToHighlightRects],
+	);
+
+	return {
+		jumpToPage,
+		jumpToOffset,
+		jumpToHighlightRects,
+		scrollToHighlightRects,
+	};
 };
