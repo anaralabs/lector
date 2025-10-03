@@ -30,7 +30,7 @@ import DocumentMenu from "./document-menu";
 import { PageNavigation } from "./page-navigation";
 import ZoomMenu from "./zoom-menu";
 
-const fileUrl = "/pdf/pathways.pdf";
+const fileUrl = "/pdf/test2.pdf";
 const STORAGE_KEY = "pdf-annotations";
 
 GlobalWorkerOptions.workerSrc = new URL(
