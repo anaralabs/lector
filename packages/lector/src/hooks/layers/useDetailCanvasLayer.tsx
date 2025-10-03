@@ -145,7 +145,6 @@ export const useDetailCanvasLayer = ({
 		const baseScale = clampScaleForPage(baseTargetScale, pageWidth, pageHeight);
 		const needsDetail = zoom > 1 && targetDetailScale - baseScale > 1e-3;
 
-		// TODO: here mby disable this shit
 		if (!needsDetail || visibleWidth <= 0 || visibleHeight <= 0) {
 			detailCanvas.style.display = "none";
 			detailCanvas.width = 0;
