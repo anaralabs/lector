@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, Github } from "lucide-react";
+import { ArrowRight, Github } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
@@ -8,8 +8,6 @@ import { GithubStarsButton } from "./_components/github-stars-button";
 export default function Home() {
 	return (
 		<div className="flex flex-col gap-8 px-4 max-w-7xl w-full mx-auto py-16">
-
-
 			<div className="flex flex-col lg:flex-row gap-8">
 				<div className="flex flex-col lg:w-1/2 gap-6 justify-center">
 					<div className="flex flex-col gap-4">
