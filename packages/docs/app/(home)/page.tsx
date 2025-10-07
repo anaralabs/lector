@@ -8,26 +8,7 @@ import { GithubStarsButton } from "./_components/github-stars-button";
 export default function Home() {
 	return (
 		<div className="flex flex-col gap-8 px-4 max-w-7xl w-full mx-auto py-16">
-			<div className="w-full bg-amber-50 border border-amber-300 rounded-lg p-4 flex items-start gap-3 text-amber-800">
-				<Icon as={AlertTriangle} className="h-5 w-5 flex-shrink-0 mt-0.5" />
-				<div className="flex flex-col gap-2">
-					<h2 className="font-semibold">
-						Breaking Change: Repository Name Update
-					</h2>
-					<p className="text-sm">
-						We&apos;ve changed our name from <strong>unriddle-ai</strong> to{" "}
-						<strong>anaralabs</strong>. Please update your dependencies from{" "}
-						<code className="bg-amber-100 px-1.5 py-0.5 rounded text-amber-900">
-							@unriddle-ai/lector
-						</code>{" "}
-						to{" "}
-						<code className="bg-amber-100 px-1.5 py-0.5 rounded text-amber-900">
-							@anaralabs/lector
-						</code>
-						.
-					</p>
-				</div>
-			</div>
+
 
 			<div className="flex flex-col lg:flex-row gap-8">
 				<div className="flex flex-col lg:w-1/2 gap-6 justify-center">
