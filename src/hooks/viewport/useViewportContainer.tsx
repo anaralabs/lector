@@ -12,6 +12,9 @@ import { clamp } from "../../lib/clamp";
 import { firstMemo } from "../../lib/memo";
 
 const WHEEL_ZOOM_SENSITIVITY = 0.01;
+// Heuristics for suppressing trackpad inertia after a CTRL+wheel zoom.
+const WHEEL_INERTIA_GAP_MS = 140;
+const WHEEL_INERTIA_ESCAPE_FACTOR = 1.35;
 
 export const useViewportContainer = ({
 	containerRef,
@@ -23,6 +26,17 @@ export const useViewportContainer = ({
 	elementRef: RefObject<HTMLDivElement | null>;
 }) => {
 	const [origin, setOrigin] = useState<[number, number]>([0, 0]);
+	const wheelInertia = useRef<{
+		active: boolean;
+		lastTime: number;
+		lastAbsDeltaY: number;
+		lastSign: -1 | 0 | 1;
+	}>({
+		active: false,
+		lastTime: 0,
+		lastAbsDeltaY: 0,
+		lastSign: 0,
+	});
 
 	const { maxZoom, minZoom } = usePdf((state) => state.zoomOptions);
 	const zoom = usePdf((state) => state.zoom);
@@ -117,6 +131,68 @@ export const useViewportContainer = ({
 			document.removeEventListener("gesturechange", preventDefault);
 		};
 	}, []);
+
+	// Prevent scroll when CTRL is held (zoom mode) and suppress the inertial tail
+	// after releasing CTRL so the PDF doesn't "keep scrolling" from trackpad velocity.
+	useEffect(() => {
+		const container = containerRef.current;
+		if (!container) return;
+
+		const sign = (n: number): -1 | 0 | 1 => (n === 0 ? 0 : n > 0 ? 1 : -1);
+
+		const handleWheelCapture = (event: WheelEvent) => {
+			const st = wheelInertia.current;
+			const now = Date.now();
+			const ctrl = event.ctrlKey || event.metaKey;
+			const abs = Math.abs(event.deltaY);
+			const s = sign(event.deltaY);
+
+			if (ctrl) {
+				st.active = true;
+				st.lastTime = now;
+				st.lastAbsDeltaY = abs;
+				st.lastSign = s;
+				event.preventDefault();
+				return;
+			}
+
+			if (!st.active) {
+				return;
+			}
+
+			if (now - st.lastTime > WHEEL_INERTIA_GAP_MS) {
+				st.active = false;
+				return;
+			}
+
+			if (st.lastSign !== 0 && s !== 0 && s !== st.lastSign) {
+				st.active = false;
+				return;
+			}
+			if (
+				st.lastAbsDeltaY > 0 &&
+				abs > st.lastAbsDeltaY * WHEEL_INERTIA_ESCAPE_FACTOR + 1
+			) {
+				st.active = false;
+				return;
+			}
+
+			st.lastTime = now;
+			st.lastAbsDeltaY = abs;
+			st.lastSign = s;
+			event.preventDefault();
+		};
+
+		container.addEventListener("wheel", handleWheelCapture, {
+			passive: false,
+			capture: true,
+		});
+		return () => {
+			container.removeEventListener("wheel", handleWheelCapture, {
+				capture: true,
+			} as AddEventListenerOptions);
+		};
+	}, [containerRef]);
 
 	useGesture(
 		{
