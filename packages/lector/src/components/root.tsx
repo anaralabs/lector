@@ -4,6 +4,10 @@ import {
 	usePDFDocumentContext,
 	type usePDFDocumentParams,
 } from "../hooks/document/document";
+import {
+	PDFLinkServiceContext,
+	useCreatePDFLinkService,
+} from "../hooks/usePDFLinkService";
 import { PDFStore } from "../internal";
 import { Primitive } from "./primitive";
 
@@ -32,11 +36,17 @@ export const Root = forwardRef(
 			zoomOptions,
 		});
 
+		const linkService = useCreatePDFLinkService(
+			initialState?.pdfDocumentProxy ?? null,
+		);
+
 		return (
 			<Primitive.div ref={ref} {...props}>
 				{initialState ? (
 					<PDFStore.Provider initialValue={initialState}>
-						{children}
+						<PDFLinkServiceContext.Provider value={linkService}>
+							{children}
+						</PDFLinkServiceContext.Provider>
 					</PDFStore.Provider>
 				) : (
 					loader || "Loading..."
