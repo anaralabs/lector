@@ -30,7 +30,12 @@ export {
 export { calculateHighlightRects } from "./hooks/search/useSearchPosition";
 export type { Annotation } from "./hooks/useAnnotations";
 export { useAnnotations } from "./hooks/useAnnotations";
-export { LinkService } from "./hooks/usePDFLinkService";
+export {
+	LinkService,
+	PDFLinkServiceContext,
+	useCreatePDFLinkService,
+	usePDFLinkService,
+} from "./hooks/usePDFLinkService";
 export { usePDFPageNumber } from "./hooks/usePdfPageNumber";
 export { useSelectionDimensions } from "./hooks/useSelectionDimensions";
 export { type ColoredHighlight, type HighlightRect, usePdf } from "./internal";
