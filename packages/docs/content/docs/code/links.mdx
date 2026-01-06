@@ -1,0 +1,200 @@
+---
+title: PDF Links
+description: Enable clickable links in PDFs for internal navigation and external URLs
+---
+
+import LinkDemo from "@/components/link-demo";
+
+<LinkDemo />
+
+## Basic Usage
+
+The `AnnotationLayer` component automatically handles clickable links in PDFs, including both internal page references and external URLs:
+
+```tsx
+"use client";
+
+import {
+  Root,
+  Pages,
+  Page,
+  CanvasLayer,
+  TextLayer,
+  AnnotationLayer,
+} from "@anaralabs/lector";
+
+export default function MyPdfViewer() {
+  return (
+    <Root source="/my-document.pdf">
+      <Pages>
+        <Page>
+          <CanvasLayer />
+          <TextLayer />
+          <AnnotationLayer />
+        </Page>
+      </Pages>
+    </Root>
+  );
+}
+```
+
+## Configuration Options
+
+The `AnnotationLayer` component accepts several props to customize link behavior:
+
+### External Links
+
+Control whether external links (http/https) should be clickable:
+
+```tsx
+<AnnotationLayer
+  externalLinksEnabled={true} // default: true
+/>
+```
+
+When `externalLinksEnabled` is `false`, external links will not be clickable.
+
+### Navigation Options
+
+Customize how internal page links navigate:
+
+```tsx
+<AnnotationLayer
+  jumpOptions={{
+    behavior: "smooth", // or "auto"
+    align: "start",     // or "center", "end"
+  }}
+/>
+```
+
+#### Jump Options
+
+- **behavior**: `"smooth"` | `"auto"`
+  - `"smooth"`: Animated scroll to the target page
+  - `"auto"`: Instant jump to the target page
+  
+- **align**: `"start"` | `"center"` | `"end"`
+  - `"start"`: Aligns the target page to the top of the viewport
+  - `"center"`: Centers the target page in the viewport
+  - `"end"`: Aligns the target page to the bottom of the viewport
+
+## How It Works
+
+The link functionality is powered by PDF.js's `AnnotationLayer` and Lector's `LinkService`:
+
+1. **Link Detection**: The `AnnotationLayer` automatically detects all link annotations in the PDF
+2. **Internal Links**: Links to other pages in the same PDF are handled internally using the `LinkService`
+3. **External Links**: Links to external URLs open in a new browser tab
+4. **Navigation**: Internal navigation uses the `usePdfJump` hook for smooth scrolling
+
+## Complete Example
+
+Here's a complete example with all options:
+
+```tsx
+"use client";
+
+import {
+  Root,
+  Pages,
+  Page,
+  CanvasLayer,
+  TextLayer,
+  AnnotationLayer,
+  CurrentPage,
+  TotalPages,
+} from "@anaralabs/lector";
+import { GlobalWorkerOptions } from "pdfjs-dist";
+import "pdfjs-dist/web/pdf_viewer.css";
+
+GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.mjs",
+  import.meta.url
+).toString();
+
+export default function PdfWithLinks() {
+  return (
+    <div className="flex flex-col h-screen">
+      <Root
+        source="/document-with-links.pdf"
+        className="flex-1 flex flex-col border rounded-lg overflow-hidden"
+        isZoomFitWidth={true}
+      >
+        <div className="bg-white border-b p-3">
+          <span className="text-sm">
+            Page <CurrentPage /> of <TotalPages />
+          </span>
+        </div>
+
+        <Pages className="flex-1 p-4 overflow-auto">
+          <Page>
+            <CanvasLayer />
+            <TextLayer />
+            <AnnotationLayer
+              externalLinksEnabled={true}
+              jumpOptions={{
+                behavior: "smooth",
+                align: "start",
+              }}
+            />
+          </Page>
+        </Pages>
+      </Root>
+    </div>
+  );
+}
+```
+
+## Link Service API
+
+For advanced use cases, you can access the `LinkService` directly:
+
+```tsx
+import { usePDFLinkService } from "@anaralabs/lector";
+
+function MyComponent() {
+  const linkService = usePDFLinkService();
+
+  // Navigate to a specific page programmatically
+  const goToPage = (pageNumber: number) => {
+    linkService.page = pageNumber;
+  };
+
+  // Navigate to a destination
+  const goToDestination = async (dest: string) => {
+    await linkService.goToDestination(dest);
+  };
+
+  // Enable/disable external links
+  linkService.externalLinkEnabled = true;
+
+  return (
+    // Your component JSX
+  );
+}
+```
+
+## Styling Link Hovers
+
+Links are automatically styled with hover effects. You can customize this with CSS:
+
+```css
+.annotationLayer .linkAnnotation > a:hover {
+  opacity: 0.2;
+  background: rgba(255, 255, 0, 1);
+  box-shadow: 0 2px 10px rgba(255, 255, 0, 1);
+}
+```
+
+## Form Fields
+
+The `AnnotationLayer` also supports interactive form fields. To enable form rendering:
+
+```tsx
+<AnnotationLayer
+  renderForms={true} // default: true
+/>
+```
+
+This allows users to fill out PDF forms directly in the viewer.
+

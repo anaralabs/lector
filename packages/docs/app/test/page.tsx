@@ -1,9 +1,9 @@
-import { AnaraViewer } from "../(home)/_components/anara";
+import LinkDemo from "@/components/link-demo";
 
 export default function TestPage() {
 	return (
-		<div className="lg:w-full">
-			<AnaraViewer fullHeight />
+		<div className="w-full h-screen">
+			<LinkDemo />
 		</div>
 	);
 }
