@@ -1,9 +1,10 @@
 import { useCallback } from "react";
-import { type HighlightRect, usePdf } from "../../internal";
+import { type HighlightRect, PDFStore, usePdf } from "../../internal";
 
 export const usePdfJump = () => {
 	const virtualizer = usePdf((state) => state.virtualizer);
 	const setHighlight = usePdf((state) => state.setHighlight);
+	const store = PDFStore.useContext();
 
 	const jumpToPage = useCallback(
 		(
@@ -50,6 +51,8 @@ export const usePdfJump = () => {
 		) => {
 			if (!virtualizer) return;
 
+			const zoom = store.getState().zoom;
+
 			const firstPage = Math.min(...rects.map((rect) => rect.pageNumber));
 
 			// Get the start offset of the page in the viewport
@@ -87,7 +90,9 @@ export const usePdfJump = () => {
 
 			if (align === "center") {
 				// When centering in the viewport, we need the viewport height
-				const viewportHeight = virtualizer.scrollElement?.clientHeight || 0;
+				// Divide by zoom to convert screen pixels to document coordinates
+				const viewportHeight =
+					(virtualizer.scrollElement?.clientHeight || 0) / zoom;
 
 				// The target position is the rect's center minus half the viewport height
 				// This places the rect in the center of the viewport
@@ -109,7 +114,7 @@ export const usePdfJump = () => {
 				behavior: "smooth",
 			});
 		},
-		[virtualizer],
+		[virtualizer, store.getState],
 	);
 
 	const jumpToHighlightRects = useCallback(
