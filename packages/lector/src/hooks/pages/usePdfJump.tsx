@@ -50,8 +50,11 @@ export const usePdfJump = () => {
 			additionalOffset: number = 0,
 		) => {
 			if (!virtualizer) return;
+			if (rects.length === 0) return;
 
 			const zoom = store.getState().zoom;
+
+			if (zoom === null || zoom <= 0) return;
 
 			const firstPage = Math.min(...rects.map((rect) => rect.pageNumber));
 
@@ -85,36 +88,64 @@ export const usePdfJump = () => {
 				rectHeight = targetRect.height;
 			}
 
+			let rectLeft: number;
+			let rectWidth: number;
+
+			if (type === "percent") {
+				const pdfPageProxy = store.getState().getPdfPageProxy(firstPage);
+				if (!pdfPageProxy) return;
+				const pageViewport = pdfPageProxy.getViewport({ scale: 1 });
+				const pageWidth = pageViewport.width;
+				rectLeft = (targetRect.left / 100) * pageWidth;
+				rectWidth = (targetRect.width / 100) * pageWidth;
+			} else {
+				rectLeft = targetRect.left;
+				rectWidth = targetRect.width;
+			}
+
 			// Calculate the scroll offset based on alignment
 			let scrollOffset: number;
+			let scrollLeftOffset: number | null = null;
 
 			if (align === "center") {
-				// When centering in the viewport, we need the viewport height
+				// When centering in the viewport, we need the viewport dimensions
 				// Divide by zoom to convert screen pixels to document coordinates
 				const viewportHeight =
 					(virtualizer.scrollElement?.clientHeight || 0) / zoom;
+				const viewportWidth =
+					(virtualizer.scrollElement?.clientWidth || 0) / zoom;
 
-				// The target position is the rect's center minus half the viewport height
-				// This places the rect in the center of the viewport
-				const rectCenter = pageStart + rectTop + rectHeight / 2;
-				scrollOffset = rectCenter - viewportHeight / 2;
+				// Vertical centering: rect's center minus half the viewport height
+				const rectCenterY = pageStart + rectTop + rectHeight / 2;
+				scrollOffset = rectCenterY - viewportHeight / 2;
+
+				// Horizontal centering: rect's center minus half the viewport width
+				const rectCenterX = rectLeft + rectWidth / 2;
+				scrollLeftOffset = rectCenterX - viewportWidth / 2;
 			} else {
 				// Use the top of the highlight rect
 				scrollOffset = pageStart + rectTop;
 			}
 
-			// Apply the additional offset
-			scrollOffset += additionalOffset;
+			// Apply the additional offset (convert from screen pixels to PDF space)
+			// This ensures additionalOffset remains constant in screen space regardless of zoom
+			scrollOffset += additionalOffset / zoom;
 
 			// Ensure we don't scroll to a negative offset
 			const adjustedOffset = Math.max(0, scrollOffset);
 
 			virtualizer.scrollToOffset(adjustedOffset, {
-				align: "start", // Always use start when we've calculated our own centering
-				behavior: "smooth",
+				align: "start",
+				behavior: "auto",
 			});
+
+			// Apply horizontal scroll if needed (virtualizer only handles vertical)
+			if (scrollLeftOffset !== null && virtualizer.scrollElement) {
+				const adjustedScrollLeft = Math.max(0, scrollLeftOffset * zoom);
+				virtualizer.scrollElement.scrollLeft = adjustedScrollLeft;
+			}
 		},
-		[virtualizer, store.getState],
+		[virtualizer, store],
 	);
 
 	const jumpToHighlightRects = useCallback(
