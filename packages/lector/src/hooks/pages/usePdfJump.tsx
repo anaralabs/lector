@@ -1,9 +1,12 @@
 import { useCallback } from "react";
-import { type HighlightRect, usePdf } from "../../internal";
+import { type HighlightRect, PDFStore, usePdf } from "../../internal";
+import { useScrollFn } from "./useScrollFn";
 
 export const usePdfJump = () => {
 	const virtualizer = usePdf((state) => state.virtualizer);
 	const setHighlight = usePdf((state) => state.setHighlight);
+	const store = PDFStore.useContext();
+	const { smoothScrollLeft } = useScrollFn();
 
 	const jumpToPage = useCallback(
 		(
@@ -49,6 +52,11 @@ export const usePdfJump = () => {
 			additionalOffset: number = 0,
 		) => {
 			if (!virtualizer) return;
+			if (rects.length === 0) return;
+
+			const zoom = store.getState().zoom;
+
+			if (zoom === null || zoom <= 0) return;
 
 			const firstPage = Math.min(...rects.map((rect) => rect.pageNumber));
 
@@ -67,49 +75,69 @@ export const usePdfJump = () => {
 
 			const pageStart = pageOffset[0] ?? 0;
 
-			// Calculate the rect position and height
+			// Calculate the rect position and dimensions
 			let rectTop: number;
 			let rectHeight: number;
+			let rectLeft: number;
+			let rectWidth: number;
 
 			if (type === "percent") {
-				const estimatePageHeight = virtualizer.options.estimateSize(
-					firstPage - 1,
-				);
-				rectTop = (targetRect.top / 100) * estimatePageHeight;
-				rectHeight = (targetRect.height / 100) * estimatePageHeight;
+				const pageViewport = store.getState().viewports[firstPage - 1];
+				if (!pageViewport) return;
+				rectTop = (targetRect.top / 100) * pageViewport.height;
+				rectHeight = (targetRect.height / 100) * pageViewport.height;
+				rectLeft = (targetRect.left / 100) * pageViewport.width;
+				rectWidth = (targetRect.width / 100) * pageViewport.width;
 			} else {
 				rectTop = targetRect.top;
 				rectHeight = targetRect.height;
+				rectLeft = targetRect.left;
+				rectWidth = targetRect.width;
 			}
 
 			// Calculate the scroll offset based on alignment
 			let scrollOffset: number;
+			let scrollLeftOffset: number | null = null;
 
 			if (align === "center") {
-				// When centering in the viewport, we need the viewport height
-				const viewportHeight = virtualizer.scrollElement?.clientHeight || 0;
+				// When centering in the viewport, we need the viewport dimensions
+				// Divide by zoom to convert screen pixels to document coordinates
+				const viewportHeight =
+					(virtualizer.scrollElement?.clientHeight || 0) / zoom;
+				const viewportWidth =
+					(virtualizer.scrollElement?.clientWidth || 0) / zoom;
 
-				// The target position is the rect's center minus half the viewport height
-				// This places the rect in the center of the viewport
-				const rectCenter = pageStart + rectTop + rectHeight / 2;
-				scrollOffset = rectCenter - viewportHeight / 2;
+				// Vertical centering: rect's center minus half the viewport height
+				const rectCenterY = pageStart + rectTop + rectHeight / 2;
+				scrollOffset = rectCenterY - viewportHeight / 2;
+
+				// Horizontal centering: rect's center minus half the viewport width
+				const rectCenterX = rectLeft + rectWidth / 2;
+				scrollLeftOffset = rectCenterX - viewportWidth / 2;
 			} else {
 				// Use the top of the highlight rect
 				scrollOffset = pageStart + rectTop;
 			}
 
-			// Apply the additional offset
-			scrollOffset += additionalOffset;
+			// Apply the additional offset (convert from screen pixels to PDF space)
+			// This ensures additionalOffset remains constant in screen space regardless of zoom
+			scrollOffset += additionalOffset / zoom;
 
 			// Ensure we don't scroll to a negative offset
 			const adjustedOffset = Math.max(0, scrollOffset);
 
 			virtualizer.scrollToOffset(adjustedOffset, {
-				align: "start", // Always use start when we've calculated our own centering
+				align: "start",
 				behavior: "smooth",
 			});
+
+			// Apply horizontal scroll if needed (virtualizer only handles vertical)
+			if (scrollLeftOffset !== null && virtualizer.scrollElement) {
+				const adjustedScrollLeft = Math.max(0, scrollLeftOffset * zoom);
+				smoothScrollLeft(virtualizer.scrollElement, adjustedScrollLeft);
+			}
 		},
-		[virtualizer],
+		[virtualizer, store, smoothScrollLeft],
 	);
 
 	const jumpToHighlightRects = useCallback(
