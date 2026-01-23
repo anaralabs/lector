@@ -126,7 +126,7 @@ export const usePdfJump = () => {
 
 			virtualizer.scrollToOffset(adjustedOffset, {
 				align: "start",
-				behavior: "auto",
+				behavior: "smooth",
 			});
 
 			// Apply horizontal scroll if needed (virtualizer only handles vertical)
