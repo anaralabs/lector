@@ -17,6 +17,7 @@ const easeInOutSmooth = (t: number): number => {
 
 export const useScrollFn = () => {
 	const scrollingRef = useRef<number | null>(null);
+	const horizontalScrollRef = useRef<number | null>(null);
 	const store = PDFStore.useContext();
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -59,5 +60,32 @@ export const useScrollFn = () => {
 		},
 		[store],
 	);
-	return { scrollToFn };
+
+	const smoothScrollLeft = useCallback(
+		(scrollElement: HTMLElement, targetLeft: number) => {
+			const duration = 300;
+			const start = scrollElement.scrollLeft;
+			const startTime = Date.now();
+			horizontalScrollRef.current = startTime;
+
+			const run = () => {
+				if (horizontalScrollRef.current !== startTime) return;
+				const elapsed = Date.now() - startTime;
+				const progress = easeInOutSmooth(Math.min(elapsed / duration, 1));
+				const interpolated = start + (targetLeft - start) * progress;
+
+				if (elapsed < duration) {
+					scrollElement.scrollLeft = interpolated;
+					requestAnimationFrame(run);
+				} else {
+					scrollElement.scrollLeft = targetLeft;
+				}
+			};
+
+			requestAnimationFrame(run);
+		},
+		[],
+	);
+
+	return { scrollToFn, smoothScrollLeft };
 };

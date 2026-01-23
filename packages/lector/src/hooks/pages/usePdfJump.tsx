@@ -1,10 +1,12 @@
 import { useCallback } from "react";
 import { type HighlightRect, PDFStore, usePdf } from "../../internal";
+import { useScrollFn } from "./useScrollFn";
 
 export const usePdfJump = () => {
 	const virtualizer = usePdf((state) => state.virtualizer);
 	const setHighlight = usePdf((state) => state.setHighlight);
 	const store = PDFStore.useContext();
+	const { smoothScrollLeft } = useScrollFn();
 
 	const jumpToPage = useCallback(
 		(
@@ -132,10 +134,10 @@ export const usePdfJump = () => {
 			// Apply horizontal scroll if needed (virtualizer only handles vertical)
 			if (scrollLeftOffset !== null && virtualizer.scrollElement) {
 				const adjustedScrollLeft = Math.max(0, scrollLeftOffset * zoom);
-				virtualizer.scrollElement.scrollLeft = adjustedScrollLeft;
+				smoothScrollLeft(virtualizer.scrollElement, adjustedScrollLeft);
 			}
 		},
-		[virtualizer, store],
+		[virtualizer, store, smoothScrollLeft],
 	);
 
 	const jumpToHighlightRects = useCallback(
