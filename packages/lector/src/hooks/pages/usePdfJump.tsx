@@ -73,32 +73,22 @@ export const usePdfJump = () => {
 
 			const pageStart = pageOffset[0] ?? 0;
 
-			// Calculate the rect position and height
+			// Calculate the rect position and dimensions
 			let rectTop: number;
 			let rectHeight: number;
-
-			if (type === "percent") {
-				const estimatePageHeight = virtualizer.options.estimateSize(
-					firstPage - 1,
-				);
-				rectTop = (targetRect.top / 100) * estimatePageHeight;
-				rectHeight = (targetRect.height / 100) * estimatePageHeight;
-			} else {
-				rectTop = targetRect.top;
-				rectHeight = targetRect.height;
-			}
-
 			let rectLeft: number;
 			let rectWidth: number;
 
 			if (type === "percent") {
-				const pdfPageProxy = store.getState().getPdfPageProxy(firstPage);
-				if (!pdfPageProxy) return;
-				const pageViewport = pdfPageProxy.getViewport({ scale: 1 });
-				const pageWidth = pageViewport.width;
-				rectLeft = (targetRect.left / 100) * pageWidth;
-				rectWidth = (targetRect.width / 100) * pageWidth;
+				const pageViewport = store.getState().viewports[firstPage - 1];
+				if (!pageViewport) return;
+				rectTop = (targetRect.top / 100) * pageViewport.height;
+				rectHeight = (targetRect.height / 100) * pageViewport.height;
+				rectLeft = (targetRect.left / 100) * pageViewport.width;
+				rectWidth = (targetRect.width / 100) * pageViewport.width;
 			} else {
+				rectTop = targetRect.top;
+				rectHeight = targetRect.height;
 				rectLeft = targetRect.left;
 				rectWidth = targetRect.width;
 			}
