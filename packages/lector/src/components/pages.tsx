@@ -65,7 +65,7 @@ VirtualizedPageItem.displayName = "VirtualizedPageItem";
 export const Pages = ({
 	children,
 	gap = 10,
-	virtualizerOptions = { overscan: 2 },
+	virtualizerOptions = { overscan: 1 },
 	initialOffset,
 	onOffsetChange,
 	...props
