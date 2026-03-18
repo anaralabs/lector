@@ -84,7 +84,7 @@
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/anaralabs/lector.git",
-		"directory": "packages/nuqs"
+		"directory": "packages/lector"
 	},
 	"bugs": {
 		"url": "https://github.com/anaralabs/lector/issues"
