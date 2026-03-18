@@ -14,9 +14,14 @@ export const Page = ({
 	pageNumber?: number;
 }) => {
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
+	const viewport = usePdf((state) => state.viewports[pageNumber - 1]);
 
-	const width = (pdfPageProxy.view[2] ?? 0) - (pdfPageProxy.view[0] ?? 0);
-	const height = (pdfPageProxy.view[3] ?? 0) - (pdfPageProxy.view[1] ?? 0);
+	const width =
+		viewport?.width ??
+		(pdfPageProxy.view[2] ?? 0) - (pdfPageProxy.view[0] ?? 0);
+	const height =
+		viewport?.height ??
+		(pdfPageProxy.view[3] ?? 0) - (pdfPageProxy.view[1] ?? 0);
 
 	return (
 		<PDFPageNumberContext.Provider value={pdfPageProxy.pageNumber}>
