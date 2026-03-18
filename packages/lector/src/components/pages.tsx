@@ -2,6 +2,7 @@ import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import {
 	cloneElement,
 	type HTMLProps,
+	memo,
 	type ReactElement,
 	useCallback,
 	useEffect,
@@ -19,6 +20,47 @@ import { Primitive } from "./primitive";
 
 const DEFAULT_HEIGHT = 600;
 const EXTRA_HEIGHT = 0;
+
+interface VirtualizedPageItemProps {
+	child: ReactElement;
+	virtualItem: VirtualItem;
+	innerBoxWidth: number;
+}
+
+const VirtualizedPageItem = memo(
+	({ child, virtualItem, innerBoxWidth }: VirtualizedPageItemProps) => {
+		return (
+			<div
+				style={{
+					width: innerBoxWidth,
+					height: "0px",
+				}}
+			>
+				<div
+					style={{
+						height: `${virtualItem.size}px`,
+						transform: `translateY(${virtualItem.start}px)`,
+					}}
+				>
+					{cloneElement(child, {
+						key: virtualItem.key,
+						//@ts-expect-error pageNumber is not a valid react key
+						pageNumber: virtualItem.index + 1,
+					})}
+				</div>
+			</div>
+		);
+	},
+	(prev, next) =>
+		prev.child === next.child &&
+		prev.innerBoxWidth === next.innerBoxWidth &&
+		prev.virtualItem.key === next.virtualItem.key &&
+		prev.virtualItem.index === next.virtualItem.index &&
+		prev.virtualItem.size === next.virtualItem.size &&
+		prev.virtualItem.start === next.virtualItem.start,
+);
+
+VirtualizedPageItem.displayName = "VirtualizedPageItem";
 
 export const Pages = ({
 	children,
@@ -121,7 +163,9 @@ export const Pages = ({
 
 	useFitWidth({ viewportRef: containerRef });
 	const largestPageWidth = usePdf((state) =>
-		Math.max(...state.viewports.map((v) => v.width)),
+		state.viewports.reduce((largestWidth, viewport) => {
+			return Math.max(largestWidth, viewport.width);
+		}, 0),
 	);
 
 	useEffect(() => {
@@ -205,26 +249,12 @@ export const Pages = ({
 						if (!innerBoxWidth) return null;
 
 						return (
-							<div
+							<VirtualizedPageItem
 								key={virtualItem.key}
-								style={{
-									width: innerBoxWidth,
-									height: `0px`,
-								}}
-							>
-								<div
-									style={{
-										height: `${virtualItem.size}px`,
-										transform: `translateY(${virtualItem.start}px)`,
-									}}
-								>
-									{cloneElement(children, {
-										key: virtualItem.key,
-										//@ts-expect-error pageNumber is not a valid react key
-										pageNumber: virtualItem.index + 1,
-									})}
-								</div>
-							</div>
+								child={children}
+								virtualItem={virtualItem}
+								innerBoxWidth={innerBoxWidth}
+							/>
 						);
 					})}
 				</div>
