@@ -42,6 +42,7 @@ export const Page = memo(
 								...style,
 								"--scale-factor": 1,
 								"--total-scale-factor": 1,
+								backgroundColor: "white",
 								position: "relative",
 								width,
 								height,

@@ -9,6 +9,7 @@ import { usePDFPageNumber } from "../usePdfPageNumber";
 
 const MAX_CANVAS_PIXELS = 16777216;
 const MAX_CANVAS_DIMENSION = 32767;
+const DETAIL_RENDER_IDLE_MS = 80;
 
 export const useDetailCanvasLayer = ({
 	background,
@@ -24,6 +25,7 @@ export const useDetailCanvasLayer = ({
 	const dpr = useDpr();
 
 	const bouncyZoom = usePdf((state) => state.zoom);
+	const isPinching = usePdf((state) => state.isPinching);
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const viewportRef = usePdf((state) => state.viewportRef);
 
@@ -39,10 +41,11 @@ export const useDetailCanvasLayer = ({
 		detailCanvas.style.top = "0";
 		detailCanvas.style.left = "0";
 		detailCanvas.style.pointerEvents = "none";
-		detailCanvas.style.zIndex = "0";
+		detailCanvas.style.zIndex = "1";
+		detailCanvas.style.backgroundColor = background ?? "white";
 
 		return detailCanvas;
-	}, []);
+	}, [background]);
 
 	const clampScaleForPage = useCallback(
 		(targetScale: number, pageWidth: number, pageHeight: number) => {
@@ -82,12 +85,12 @@ export const useDetailCanvasLayer = ({
 
 		let renderingTask: RenderTask | null = null;
 		let animationFrameId: number | null = null;
+		let renderTimeoutId: NodeJS.Timeout | null = null;
 
 		const hideDetailCanvas = () => {
 			renderingTask?.cancel();
-			detailCanvas.style.display = "none";
-			detailCanvas.width = 0;
-			detailCanvas.height = 0;
+			detailCanvas.style.display = "block";
+			detailCanvas.style.opacity = "0";
 			container.style.transform = "";
 			container.style.transformOrigin = "";
 		};
@@ -138,7 +141,12 @@ export const useDetailCanvasLayer = ({
 			);
 			const needsDetail = zoom > 1 && targetDetailScale - baseScale > 1e-3;
 
-			if (!needsDetail || visibleWidth <= 0 || visibleHeight <= 0) {
+			if (
+				isPinching ||
+				!needsDetail ||
+				visibleWidth <= 0 ||
+				visibleHeight <= 0
+			) {
 				hideDetailCanvas();
 				return;
 			}
@@ -146,6 +154,7 @@ export const useDetailCanvasLayer = ({
 			renderingTask?.cancel();
 
 			detailCanvas.style.display = "block";
+			detailCanvas.style.opacity = "0";
 
 			const pdfOffsetX = visibleLeft;
 			const pdfOffsetY = visibleTop;
@@ -184,31 +193,50 @@ export const useDetailCanvasLayer = ({
 				scale: effectiveScale,
 			});
 
-			renderingTask = pdfPageProxy.render({
+			const currentRenderingTask = pdfPageProxy.render({
 				canvasContext: context,
 				viewport: detailViewport,
 				background,
 				transform,
 			});
+			renderingTask = currentRenderingTask;
 
-			renderingTask.promise.catch((error) => {
-				if (error.name === "RenderingCancelledException") {
-					return;
-				}
+			currentRenderingTask.promise
+				.then(() => {
+					if (renderingTask === currentRenderingTask) {
+						detailCanvas.style.opacity = "1";
+					}
+				})
+				.catch((error) => {
+					if (error.name === "RenderingCancelledException") {
+						return;
+					}
 
-				throw error;
-			});
+					throw error;
+				})
+				.finally(() => {
+					if (renderingTask === currentRenderingTask) {
+						renderingTask = null;
+					}
+				});
 		};
 
-		const scheduleRender = () => {
+		const scheduleRender = (delay = DETAIL_RENDER_IDLE_MS) => {
+			if (renderTimeoutId !== null) {
+				clearTimeout(renderTimeoutId);
+			}
 			if (animationFrameId !== null) {
 				cancelAnimationFrame(animationFrameId);
 			}
 
-			animationFrameId = requestAnimationFrame(() => {
-				animationFrameId = null;
-				renderDetailCanvas();
-			});
+			hideDetailCanvas();
+
+			renderTimeoutId = setTimeout(() => {
+				animationFrameId = requestAnimationFrame(() => {
+					animationFrameId = null;
+					renderDetailCanvas();
+				});
+			}, delay);
 		};
 
 		const unsubscribe = subscribeToViewportInvalidation(
@@ -216,11 +244,14 @@ export const useDetailCanvasLayer = ({
 			scheduleRender,
 		);
 
-		scheduleRender();
+		scheduleRender(isPinching ? DETAIL_RENDER_IDLE_MS * 2 : 0);
 
 		return () => {
 			unsubscribe();
 
+			if (renderTimeoutId !== null) {
+				clearTimeout(renderTimeoutId);
+			}
 			if (animationFrameId !== null) {
 				cancelAnimationFrame(animationFrameId);
 			}
@@ -230,6 +261,7 @@ export const useDetailCanvasLayer = ({
 	}, [
 		pdfPageProxy,
 		zoom,
+		isPinching,
 		background,
 		dpr,
 		viewportRef,
