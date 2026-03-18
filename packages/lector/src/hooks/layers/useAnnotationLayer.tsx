@@ -2,6 +2,7 @@ import { AnnotationLayer } from "pdfjs-dist";
 import { useEffect, useMemo, useRef } from "react";
 
 import { usePdf } from "../../internal";
+import { ensureAnnotationLayerStyles } from "../../lib/annotation-layer-styles";
 import { cancellable } from "../../lib/cancellable";
 import { usePdfJump } from "../pages/usePdfJump";
 import { usePDFLinkService } from "../usePDFLinkService";
@@ -75,49 +76,8 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 		};
 	}, [jumpToPage, linkService, mergedParams.jumpOptions]);
 
-	// Add CSS for annotation layer
 	useEffect(() => {
-		const style = document.createElement("style");
-		style.textContent = `
-      .annotationLayer {
-        position: absolute;
-        left: 0;
-        top: 0;
-        right: 0;
-        bottom: 0;
-        overflow: hidden;
-        opacity: 1;
-        z-index: 3;
-      }
-      
-      .annotationLayer section {
-        position: absolute;
-      }
-      
-      .annotationLayer .linkAnnotation > a,
-      .annotationLayer .buttonWidgetAnnotation.pushButton > a {
-        position: absolute;
-        font-size: 1em;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: url("data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7") 0 0 repeat;
-        cursor: pointer;
-      }
-      
-      .annotationLayer .linkAnnotation > a:hover,
-      .annotationLayer .buttonWidgetAnnotation.pushButton > a:hover {
-        opacity: 0.2;
-        background: rgba(255, 255, 0, 1);
-        box-shadow: 0 2px 10px rgba(255, 255, 0, 1);
-      }
-    `;
-		document.head.appendChild(style);
-
-		return () => {
-			document.head.removeChild(style);
-		};
+		ensureAnnotationLayerStyles();
 	}, []);
 
 	// Add event handler for link clicks
