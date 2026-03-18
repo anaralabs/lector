@@ -11,7 +11,7 @@ export const useDpr = () => {
 		}
 
 		const handleDPRChange = () => {
-			setDPR(window.devicePixelRatio);
+			setDPR(Math.min(window.devicePixelRatio, 2));
 		};
 
 		const windowMatch = window.matchMedia(
