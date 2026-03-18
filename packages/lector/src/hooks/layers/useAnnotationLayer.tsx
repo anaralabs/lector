@@ -139,7 +139,9 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 		// Add necessary class for styling
 		annotationLayerRef.current.className = "annotationLayer";
 
-		const viewport = pdfPageProxy.getViewport({ scale: 1 });
+		const viewport = pdfPageProxy.getViewport({ scale: 1 }).clone({
+			dontFlip: true,
+		});
 
 		const annotationLayerConfig = {
 			div: annotationLayerRef.current,
