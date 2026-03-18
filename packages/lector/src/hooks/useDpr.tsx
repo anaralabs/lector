@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 
 export const useDpr = () => {
 	const [dpr, setDPR] = useState(
-		!window ? 1 : Math.min(window.devicePixelRatio, 2),
+		typeof window === "undefined" ? 1 : Math.min(window.devicePixelRatio, 2),
 	);
 
 	useEffect(() => {
-		if (!window) {
+		if (typeof window === "undefined") {
 			return;
 		}
 
