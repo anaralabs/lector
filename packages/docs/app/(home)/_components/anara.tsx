@@ -18,7 +18,6 @@ import React, { useCallback, useEffect, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import "pdfjs-dist/web/pdf_viewer.css";
 
-import { GlobalWorkerOptions } from "pdfjs-dist";
 import { cn } from "@/lib/utils";
 import {
 	SelectionTooltipContent,
@@ -32,11 +31,6 @@ import ZoomMenu from "./zoom-menu";
 
 const fileUrl = "/pdf/pathways.pdf";
 const STORAGE_KEY = "pdf-annotations";
-
-GlobalWorkerOptions.workerSrc = new URL(
-	"pdfjs-dist/build/pdf.worker.mjs",
-	import.meta.url,
-).toString();
 
 interface PDFContentProps {
 	onAnnotationsChange: (annotations: Annotation[]) => void;

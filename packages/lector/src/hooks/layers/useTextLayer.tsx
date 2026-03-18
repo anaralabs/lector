@@ -1,4 +1,3 @@
-import { TextLayer } from "pdfjs-dist";
 import { useEffect, useRef } from "react";
 
 import { usePdf } from "../../internal";
@@ -188,7 +187,10 @@ const bindMouseEvents = createTextSelectionManager();
 
 export const useTextLayer = () => {
 	const textContainerRef = useRef<TextLayerDivElement>(null);
-	const textLayerRef = useRef<TextLayer | null>(null);
+	const textLayerRef = useRef<{
+		cancel: () => void;
+		render: () => Promise<void>;
+	} | null>(null);
 	const isRenderingRef = useRef(false);
 
 	const pageNumber = usePDFPageNumber();
@@ -209,24 +211,25 @@ export const useTextLayer = () => {
 			textLayerRef.current = null;
 		}
 
-		const textLayer = new TextLayer({
-			textContentSource: pdfPageProxy.streamTextContent(),
-			container: textContainer,
-			viewport: pdfPageProxy.getViewport({ scale: 1 }),
-		});
+		import("pdfjs-dist/webpack.mjs")
+			.then(({ TextLayer }) => {
+				const textLayer = new TextLayer({
+					textContentSource: pdfPageProxy.streamTextContent(),
+					container: textContainer,
+					viewport: pdfPageProxy.getViewport({ scale: 1 }),
+				});
 
-		textLayerRef.current = textLayer;
+				textLayerRef.current = textLayer;
 
-		textLayer
-			.render()
-			.then(() => {
-				if (textLayerRef.current === textLayer && textContainer) {
-					const endOfContent = document.createElement("div");
-					endOfContent.className = "endOfContent";
-					textContainer.appendChild(endOfContent);
+				return textLayer.render().then(() => {
+					if (textLayerRef.current === textLayer && textContainer) {
+						const endOfContent = document.createElement("div");
+						endOfContent.className = "endOfContent";
+						textContainer.appendChild(endOfContent);
 
-					bindMouseEvents(textContainer, endOfContent);
-				}
+						bindMouseEvents(textContainer, endOfContent);
+					}
+				});
 			})
 			.catch((error) => {
 				if (error.name !== "AbortException") {

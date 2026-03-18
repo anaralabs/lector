@@ -1,4 +1,3 @@
-import { AnnotationLayer } from "pdfjs-dist";
 import { useEffect, useMemo, useRef } from "react";
 
 import { usePdf } from "../../internal";
@@ -41,7 +40,7 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 		return { ...defaultAnnotationLayerParams, ...params };
 	}, [params]);
 	const annotationLayerRef = useRef<HTMLDivElement>(null);
-	const annotationLayerObjectRef = useRef<AnnotationLayer | null>(null);
+	const annotationLayerObjectRef = useRef<unknown>(null);
 	const linkService = usePDFLinkService();
 	const { visible } = useVisibility({
 		elementRef: annotationLayerRef,
@@ -146,26 +145,28 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 			div: annotationLayerRef.current,
 			viewport: viewport,
 			page: pdfPageProxy,
-			linkService: linkService,
+			linkService: linkService as never,
+			annotationStorage: undefined,
 			accessibilityManager: undefined,
 			annotationCanvasMap: undefined,
 			annotationEditorUIManager: undefined,
 			structTreeLayer: undefined,
+			commentManager: undefined,
 		};
-
-		const annotationLayer = new AnnotationLayer(annotationLayerConfig);
-		annotationLayerObjectRef.current = annotationLayer;
 
 		const { cancel } = cancellable(
 			(async () => {
 				try {
+					const { AnnotationLayer } = await import("pdfjs-dist/webpack.mjs");
+					const annotationLayer = new AnnotationLayer(annotationLayerConfig);
+					annotationLayerObjectRef.current = annotationLayer;
 					const annotations = await pdfPageProxy.getAnnotations();
 
 					await annotationLayer.render({
 						...annotationLayerConfig,
 						...mergedParams,
 						annotations,
-						linkService,
+						linkService: linkService as never,
 					});
 				} catch (_error) {
 					// Silently handle rendering errors

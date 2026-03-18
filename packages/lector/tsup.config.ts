@@ -7,7 +7,7 @@ const commonConfig = {
 	format: ["esm"],
 	experimentalDts: true,
 	outDir: "dist",
-	external: ["react", "react-dom", "pdfjs-dist"],
+	external: ["react", "react-dom", "pdfjs-dist", "pdfjs-dist/webpack.mjs"],
 	splitting: true,
 	treeshake: true,
 	tsconfig: "tsconfig.build.json",

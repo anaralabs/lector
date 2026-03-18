@@ -8,7 +8,6 @@ import {
 	Root,
 	TextLayer,
 } from "@anaralabs/lector";
-import "@/lib/setup";
 import DocumentMenu from "../app/(home)/_components/document-menu";
 import { PageNavigation } from "../app/(home)/_components/page-navigation";
 import ZoomMenu from "../app/(home)/_components/zoom-menu";
