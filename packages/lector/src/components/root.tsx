@@ -1,4 +1,4 @@
-import { forwardRef, type HTMLProps, type ReactNode } from "react";
+import { forwardRef, type HTMLProps, type ReactNode, useEffect } from "react";
 
 import {
 	usePDFDocumentContext,
@@ -9,6 +9,7 @@ import {
 	useCreatePDFLinkService,
 } from "../hooks/usePDFLinkService";
 import { PDFStore } from "../internal";
+import { bitmapCache } from "../lib/bitmap-cache";
 import { Primitive } from "./primitive";
 
 export const Root = forwardRef(
@@ -39,6 +40,12 @@ export const Root = forwardRef(
 		const linkService = useCreatePDFLinkService(
 			initialState?.pdfDocumentProxy ?? null,
 		);
+
+		useEffect(() => {
+			if (initialState?.pdfDocumentProxy) {
+				bitmapCache.bindDocument(initialState.pdfDocumentProxy);
+			}
+		}, [initialState?.pdfDocumentProxy]);
 
 		return (
 			<Primitive.div ref={ref} {...props}>

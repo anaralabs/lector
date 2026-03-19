@@ -2,6 +2,7 @@ import { useCallback, useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
+import { bitmapCache } from "../../lib/bitmap-cache";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
@@ -66,9 +67,16 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		baseCanvas.style.transform = "translate(0px, 0px)";
 		baseCanvas.style.zIndex = "0";
 		baseCanvas.style.pointerEvents = "none";
+		baseCanvas.style.backgroundColor = background ?? "white";
 
 		const context = baseCanvas.getContext("2d");
 		if (!context) {
+			return;
+		}
+
+		const cached = bitmapCache.get(pageNumber, baseScale);
+		if (cached) {
+			context.drawImage(cached, 0, 0);
 			return;
 		}
 
@@ -83,20 +91,26 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			background,
 		});
 
-		renderingTask.promise.catch((error) => {
-			if (error.name === "RenderingCancelledException") {
-				return;
-			}
+		renderingTask.promise
+			.then(() => {
+				if (typeof createImageBitmap !== "undefined" && baseCanvas.width > 0) {
+					createImageBitmap(baseCanvas).then((bitmap) => {
+						bitmapCache.set(pageNumber, baseScale, bitmap);
+					});
+				}
+			})
+			.catch((error) => {
+				if (error.name === "RenderingCancelledException") {
+					return;
+				}
 
-			throw error;
-		});
+				throw error;
+			});
 
 		return () => {
 			void renderingTask.cancel();
 		};
-		// We intentionally omit baseScale dependencies derived from zoom to avoid redundant renders
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [pdfPageProxy, background, dpr, zoom, clampScaleForPage]);
+	}, [pdfPageProxy, background, dpr, zoom, clampScaleForPage, pageNumber]);
 
 	return {
 		canvasRef,

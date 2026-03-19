@@ -1,12 +1,15 @@
+import type { RenderTask } from "pdfjs-dist";
 import { useCallback, useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
+import { subscribeToViewportInvalidation } from "../../lib/viewport-invalidation";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
 const MAX_CANVAS_PIXELS = 16777216;
 const MAX_CANVAS_DIMENSION = 32767;
+const DETAIL_RENDER_IDLE_MS = 80;
 
 export const useDetailCanvasLayer = ({
 	background,
@@ -22,32 +25,27 @@ export const useDetailCanvasLayer = ({
 	const dpr = useDpr();
 
 	const bouncyZoom = usePdf((state) => state.zoom);
+	const isPinching = usePdf((state) => state.isPinching);
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const viewportRef = usePdf((state) => state.viewportRef);
 
 	const [zoom] = useDebounce(bouncyZoom, 200);
 
-	const ensureDetailCanvas = useCallback(() => {
-		let detailCanvas = detailCanvasRef.current;
+	const getDetailCanvas = useCallback(() => {
+		const detailCanvas = detailCanvasRef.current;
 		if (!detailCanvas) {
-			const parent = baseCanvasRef.current?.parentElement;
-			if (!parent) {
-				return null;
-			}
-
-			detailCanvas = document.createElement("canvas");
-			parent.appendChild(detailCanvas);
-			detailCanvasRef.current = detailCanvas;
+			return null;
 		}
 
 		detailCanvas.style.position = "absolute";
 		detailCanvas.style.top = "0";
 		detailCanvas.style.left = "0";
 		detailCanvas.style.pointerEvents = "none";
-		detailCanvas.style.zIndex = "0";
+		detailCanvas.style.zIndex = "1";
+		detailCanvas.style.backgroundColor = background ?? "white";
 
 		return detailCanvas;
-	}, [baseCanvasRef]);
+	}, [background]);
 
 	const clampScaleForPage = useCallback(
 		(targetScale: number, pageWidth: number, pageHeight: number) => {
@@ -73,167 +71,192 @@ export const useDetailCanvasLayer = ({
 		[],
 	);
 
-	const rafRef = useRef(0);
-	const renderTaskRef = useRef<ReturnType<typeof pdfPageProxy.render> | null>(
-		null,
-	);
-
-	const updateDetailCanvas = useCallback(() => {
+	useLayoutEffect(() => {
 		const scrollContainer = viewportRef?.current;
-		if (!scrollContainer) return;
+		if (!scrollContainer) {
+			return;
+		}
 
-		const detailCanvas = ensureDetailCanvas();
+		const detailCanvas = getDetailCanvas();
 		const container = containerRef.current;
-		if (!detailCanvas || !container) return;
-
-		const pageContainer = baseCanvasRef.current?.parentElement ?? null;
-		if (!pageContainer) {
-			detailCanvas.style.display = "none";
-			detailCanvas.width = 0;
-			detailCanvas.height = 0;
+		if (!detailCanvas || !container) {
 			return;
 		}
 
-		const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
-		const pageWidth = baseViewport.width;
-		const pageHeight = baseViewport.height;
+		let renderingTask: RenderTask | null = null;
+		let animationFrameId: number | null = null;
+		let renderTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
-		const targetDetailScale = dpr * zoom * 1.3;
-		const baseTargetScale = dpr * Math.min(zoom, 1);
-		const baseScale = clampScaleForPage(baseTargetScale, pageWidth, pageHeight);
-		const needsDetail = zoom > 1 && targetDetailScale - baseScale > 1e-3;
+		const hideDetailCanvas = () => {
+			renderingTask?.cancel();
+			detailCanvas.style.display = "block";
+			detailCanvas.style.opacity = "0";
+			container.style.transform = "";
+			container.style.transformOrigin = "";
+		};
 
-		if (!needsDetail) {
-			detailCanvas.style.display = "none";
-			detailCanvas.width = 0;
-			detailCanvas.height = 0;
-			return;
-		}
+		const renderDetailCanvas = () => {
+			const pageContainer = baseCanvasRef.current?.parentElement ?? null;
+			if (!pageContainer) {
+				hideDetailCanvas();
+				return;
+			}
 
-		const scrollX = scrollContainer.scrollLeft / zoom;
-		const scrollY = scrollContainer.scrollTop / zoom;
-		const viewportWidth = scrollContainer.clientWidth / zoom;
-		const viewportHeight = scrollContainer.clientHeight / zoom;
+			const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
+			const pageWidth = baseViewport.width;
+			const pageHeight = baseViewport.height;
 
-		const pageRect = pageContainer.getBoundingClientRect();
-		const containerRect = scrollContainer.getBoundingClientRect();
+			const targetDetailScale = dpr * zoom * 1.3;
+			const baseTargetScale = dpr * Math.min(zoom, 1);
+			const baseScale = clampScaleForPage(
+				baseTargetScale,
+				pageWidth,
+				pageHeight,
+			);
+			const needsDetail = zoom > 1 && targetDetailScale - baseScale > 1e-3;
 
-		const pageLeft = (pageRect.left - containerRect.left) / zoom + scrollX;
-		const pageTop = (pageRect.top - containerRect.top) / zoom + scrollY;
+			if (!needsDetail) {
+				hideDetailCanvas();
+				return;
+			}
 
-		const visibleLeft = Math.max(0, scrollX - pageLeft);
-		const visibleTop = Math.max(0, scrollY - pageTop);
-		const visibleRight = Math.min(
-			pageWidth,
-			scrollX + viewportWidth - pageLeft,
-		);
-		const visibleBottom = Math.min(
-			pageHeight,
-			scrollY + viewportHeight - pageTop,
-		);
+			const scrollX = scrollContainer.scrollLeft / zoom;
+			const scrollY = scrollContainer.scrollTop / zoom;
+			const viewportWidth = scrollContainer.clientWidth / zoom;
+			const viewportHeight = scrollContainer.clientHeight / zoom;
 
-		const visibleWidth = Math.max(0, visibleRight - visibleLeft);
-		const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+			const pageRect = pageContainer.getBoundingClientRect();
+			const containerRect = scrollContainer.getBoundingClientRect();
+			const pageLeft = (pageRect.left - containerRect.left) / zoom + scrollX;
+			const pageTop = (pageRect.top - containerRect.top) / zoom + scrollY;
 
-		if (visibleWidth <= 0 || visibleHeight <= 0) {
-			detailCanvas.style.display = "none";
-			detailCanvas.width = 0;
-			detailCanvas.height = 0;
-			return;
-		}
+			const visibleLeft = Math.max(0, scrollX - pageLeft);
+			const visibleTop = Math.max(0, scrollY - pageTop);
+			const visibleRight = Math.min(
+				pageWidth,
+				scrollX + viewportWidth - pageLeft,
+			);
+			const visibleBottom = Math.min(
+				pageHeight,
+				scrollY + viewportHeight - pageTop,
+			);
 
-		detailCanvas.style.display = "block";
+			const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+			const visibleHeight = Math.max(0, visibleBottom - visibleTop);
 
-		const pdfOffsetX = visibleLeft;
-		const pdfOffsetY = visibleTop;
+			if (visibleWidth <= 0 || visibleHeight <= 0) {
+				hideDetailCanvas();
+				return;
+			}
 
-		const effectiveScale = targetDetailScale;
-		const actualWidth = visibleWidth * effectiveScale;
-		const actualHeight = visibleHeight * effectiveScale;
+			detailCanvas.style.display = "block";
 
-		detailCanvas.width = actualWidth;
-		detailCanvas.height = actualHeight;
+			const effectiveScale = targetDetailScale;
+			const actualWidth = visibleWidth * effectiveScale;
+			const actualHeight = visibleHeight * effectiveScale;
 
-		detailCanvas.style.width = `${visibleWidth * zoom}px`;
-		detailCanvas.style.height = `${visibleHeight * zoom}px`;
+			if (renderingTask) {
+				void renderingTask.cancel();
+				renderingTask = null;
+			}
 
-		detailCanvas.style.transformOrigin = "center center";
-		detailCanvas.style.transform = `translate(${visibleLeft * zoom}px, ${visibleTop * zoom}px) `;
-		container.style.transform = `scale3d(${1 / zoom}, ${1 / zoom}, 1)`;
-		container.style.transformOrigin = `0 0`;
+			const offscreen = new OffscreenCanvas(
+				Math.ceil(actualWidth),
+				Math.ceil(actualHeight),
+			);
+			const offCtx = offscreen.getContext("2d");
+			if (!offCtx) return;
 
-		const context = detailCanvas.getContext("2d");
-		if (!context) return;
+			const detailViewport = pdfPageProxy.getViewport({
+				scale: effectiveScale,
+			});
+			renderingTask = pdfPageProxy.render({
+				canvasContext: offCtx as unknown as CanvasRenderingContext2D,
+				viewport: detailViewport,
+				background,
+				transform: [
+					1,
+					0,
+					0,
+					1,
+					-visibleLeft * effectiveScale,
+					-visibleTop * effectiveScale,
+				],
+			});
 
-		context.setTransform(1, 0, 0, 1, 0, 0);
-		context.clearRect(0, 0, detailCanvas.width, detailCanvas.height);
+			renderingTask.promise
+				.then(() => {
+					detailCanvas.width = Math.ceil(actualWidth);
+					detailCanvas.height = Math.ceil(actualHeight);
+					detailCanvas.style.width = `${visibleWidth * zoom}px`;
+					detailCanvas.style.height = `${visibleHeight * zoom}px`;
+					detailCanvas.style.transformOrigin = "center center";
+					detailCanvas.style.transform = `translate(${visibleLeft * zoom}px, ${visibleTop * zoom}px)`;
+					container.style.transform = `scale3d(${1 / zoom}, ${1 / zoom}, 1)`;
+					container.style.transformOrigin = "0 0";
 
-		if (renderTaskRef.current) {
-			void renderTaskRef.current.cancel();
-		}
+					const ctx = detailCanvas.getContext("2d");
+					if (ctx) {
+						const bitmap = offscreen.transferToImageBitmap();
+						ctx.drawImage(bitmap, 0, 0);
+						bitmap.close();
+					}
 
-		const detailViewport = pdfPageProxy.getViewport({ scale: effectiveScale });
-		renderTaskRef.current = pdfPageProxy.render({
-			canvasContext: context,
-			viewport: detailViewport,
-			background,
-			transform: [1, 0, 0, 1, -pdfOffsetX * effectiveScale, -pdfOffsetY * effectiveScale],
+					detailCanvas.style.opacity = "1";
+				})
+				.catch((error) => {
+					if (error.name === "RenderingCancelledException") return;
+					throw error;
+				});
+		};
+
+		const scheduleRender = (delayMs: number) => {
+			if (renderTimeoutId !== null) {
+				clearTimeout(renderTimeoutId);
+			}
+			if (animationFrameId !== null) {
+				cancelAnimationFrame(animationFrameId);
+			}
+
+			if (delayMs <= 0) {
+				animationFrameId = requestAnimationFrame(renderDetailCanvas);
+			} else {
+				renderTimeoutId = setTimeout(() => {
+					animationFrameId = requestAnimationFrame(renderDetailCanvas);
+				}, delayMs);
+			}
+		};
+
+		const unsubscribe = subscribeToViewportInvalidation(scrollContainer, () => {
+			hideDetailCanvas();
+			scheduleRender(DETAIL_RENDER_IDLE_MS);
 		});
 
-		renderTaskRef.current.promise.catch((error) => {
-			if (error.name === "RenderingCancelledException") return;
-			throw error;
-		});
+		scheduleRender(isPinching ? DETAIL_RENDER_IDLE_MS * 2 : 0);
+
+		return () => {
+			unsubscribe();
+
+			if (renderTimeoutId !== null) {
+				clearTimeout(renderTimeoutId);
+			}
+			if (animationFrameId !== null) {
+				cancelAnimationFrame(animationFrameId);
+			}
+
+			void renderingTask?.cancel();
+		};
 	}, [
 		pdfPageProxy,
 		zoom,
+		isPinching,
 		background,
 		dpr,
 		viewportRef,
-		ensureDetailCanvas,
+		getDetailCanvas,
 		clampScaleForPage,
 		baseCanvasRef,
 	]);
-
-	// Set up scroll-driven detail canvas updates outside React's render cycle.
-	// Only active when zoom > 1, completely skipped at zoom <= 1.
-	useLayoutEffect(() => {
-		const scrollContainer = viewportRef?.current;
-		if (!scrollContainer || zoom <= 1) {
-			const detailCanvas = detailCanvasRef.current;
-			if (detailCanvas) {
-				detailCanvas.style.display = "none";
-				detailCanvas.width = 0;
-				detailCanvas.height = 0;
-			}
-			return;
-		}
-
-		updateDetailCanvas();
-
-		let debounceTimer: ReturnType<typeof setTimeout>;
-		const handleScroll = () => {
-			clearTimeout(debounceTimer);
-			debounceTimer = setTimeout(() => {
-				cancelAnimationFrame(rafRef.current);
-				rafRef.current = requestAnimationFrame(updateDetailCanvas);
-			}, 20);
-		};
-
-		scrollContainer.addEventListener("scroll", handleScroll, {
-			passive: true,
-		});
-
-		return () => {
-			scrollContainer.removeEventListener("scroll", handleScroll);
-			clearTimeout(debounceTimer);
-			cancelAnimationFrame(rafRef.current);
-			if (renderTaskRef.current) {
-				void renderTaskRef.current.cancel();
-				renderTaskRef.current = null;
-			}
-		};
-	}, [zoom, viewportRef, updateDetailCanvas]);
 
 	return {
 		detailCanvasRef,

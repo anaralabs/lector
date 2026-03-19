@@ -15,6 +15,7 @@ import { useScrollFn } from "../hooks/pages/useScrollFn";
 import { useVisiblePage } from "../hooks/pages/useVisiblePage";
 import { useViewportContainer } from "../hooks/viewport/useViewportContainer";
 import { usePdf } from "../internal";
+import { cancelPrerender, prerenderPages } from "../lib/prerenderer";
 import { Primitive } from "./primitive";
 
 const DEFAULT_HEIGHT = 600;
@@ -123,6 +124,53 @@ export const Pages = ({
 	useVisiblePage({
 		items,
 	});
+
+	const isScrolling = usePdf((state) => state.isScrolling);
+	const zoom = usePdf((state) => state.zoom);
+	const pageProxies = usePdf((state) => state.pageProxies);
+
+	useEffect(() => {
+		if (isScrolling || isPinching) {
+			cancelPrerender();
+			return;
+		}
+
+		if (items.length === 0 || typeof OffscreenCanvas === "undefined") return;
+
+		const visibleIndices = items.map((i) => i.index);
+		const minIdx = Math.min(...visibleIndices);
+		const maxIdx = Math.max(...visibleIndices);
+
+		const adjacentPages: number[] = [];
+		for (let i = maxIdx + 1; i <= Math.min(maxIdx + 3, numPages - 1); i++) {
+			adjacentPages.push(i);
+		}
+		for (let i = minIdx - 1; i >= Math.max(minIdx - 2, 0); i--) {
+			adjacentPages.push(i);
+		}
+
+		const dpr = typeof window !== "undefined" ? window.devicePixelRatio : 1;
+		const scale = dpr * Math.min(zoom, 1);
+		const jobs = adjacentPages
+			.map((idx) => {
+				const proxy = pageProxies[idx];
+				if (!proxy) return null;
+				return { pageNumber: idx + 1, scale, pageProxy: proxy };
+			})
+			.filter(Boolean) as {
+			pageNumber: number;
+			scale: number;
+			pageProxy: (typeof pageProxies)[number];
+		}[];
+
+		if (jobs.length > 0) {
+			prerenderPages(jobs);
+		}
+
+		return () => {
+			cancelPrerender();
+		};
+	}, [isScrolling, isPinching, items, numPages, zoom, pageProxies]);
 
 	useFitWidth({ viewportRef: containerRef });
 	const largestPageWidth = usePdf((state) =>

@@ -25,7 +25,7 @@ function diffMetrics(before, after) {
     recalcStyleDurationMs: Math.round(((a.RecalcStyleDuration ?? 0) - (b.RecalcStyleDuration ?? 0)) * 1000 * 100) / 100,
     scriptDurationMs: Math.round(((a.ScriptDuration ?? 0) - (b.ScriptDuration ?? 0)) * 1000 * 100) / 100,
     taskDurationMs: Math.round(((a.TaskDuration ?? 0) - (b.TaskDuration ?? 0)) * 1000 * 100) / 100,
-    jsHeapMB: Math.round(((a.JSHeapUsedSize ?? 0) / 1024 / 1024) * 10) / 10,
+    jsHeapMB: Math.round((((a.JSHeapUsedSize ?? 0) - (b.JSHeapUsedSize ?? 0)) / 1024 / 1024) * 10) / 10,
   };
 }
 

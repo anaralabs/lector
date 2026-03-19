@@ -1,8 +1,7 @@
-import {
-	getDocument,
-	type OnProgressParameters,
-	type PDFDocumentProxy,
-	type PDFPageProxy,
+import type {
+	OnProgressParameters,
+	PDFDocumentProxy,
+	PDFPageProxy,
 } from "pdfjs-dist";
 import type {
 	DocumentInitParameters,
@@ -88,19 +87,23 @@ export const usePDFDocumentContext = ({
 		const loadDocument = () => {
 			setInitialState(null);
 			setProgress(0);
+			let loadingTask:
+				| ReturnType<typeof import("pdfjs-dist/webpack.mjs").getDocument>
+				| undefined;
 
-			const loadingTask = getDocument(source);
+			const loadingPromise = import("pdfjs-dist/webpack.mjs")
+				.then(({ getDocument }) => {
+					loadingTask = getDocument(source);
+					loadingTask.onProgress = (progressEvent: OnProgressParameters) => {
+						if (progressEvent.loaded === progressEvent.total) {
+							return;
+						}
 
-			loadingTask.onProgress = (progressEvent: OnProgressParameters) => {
-				// Added to dedupe state updates when the file is fully loaded
-				if (progressEvent.loaded === progressEvent.total) {
-					return;
-				}
+						setProgress(progressEvent.loaded / progressEvent.total);
+					};
 
-				setProgress(progressEvent.loaded / progressEvent.total);
-			};
-
-			const loadingPromise = loadingTask.promise
+					return loadingTask.promise;
+				})
 				.then((proxy) => {
 					onDocumentLoad?.({ proxy, source });
 					setProgress(1);
@@ -108,7 +111,7 @@ export const usePDFDocumentContext = ({
 					generateViewports(proxy);
 				})
 				.catch((error) => {
-					if (loadingTask.destroyed) {
+					if (loadingTask?.destroyed) {
 						return;
 					}
 
@@ -116,7 +119,7 @@ export const usePDFDocumentContext = ({
 				});
 
 			return () => {
-				loadingPromise.finally(() => loadingTask.destroy());
+				loadingPromise.finally(() => loadingTask?.destroy());
 			};
 		};
 		loadDocument();

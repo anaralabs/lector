@@ -21,9 +21,8 @@ export const useVisiblePage = ({ items }: UseVisiblePageProps) => {
 		if (!scrollElement) return;
 		cachedHeightRef.current = scrollElement.clientHeight;
 
-		const observer = new ResizeObserver((entries) => {
-			cachedHeightRef.current =
-				entries[0]?.contentRect.height ?? scrollElement.clientHeight;
+		const observer = new ResizeObserver(() => {
+			cachedHeightRef.current = scrollElement.clientHeight;
 		});
 		observer.observe(scrollElement);
 		return () => observer.disconnect();
