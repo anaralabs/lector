@@ -1,9 +1,8 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { RefProxy } from "pdfjs-dist/types/src/display/api";
-import type { IPDFLinkService } from "pdfjs-dist/types/web/interfaces";
 import { createContext, useContext, useEffect, useRef } from "react";
 
-export class LinkService implements IPDFLinkService {
+export class LinkService {
 	_pdfDocumentProxy?: PDFDocumentProxy;
 	externalLinkEnabled = true;
 	isInPresentationMode = false;
