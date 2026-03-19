@@ -67,6 +67,7 @@ export const useThumbnail = (
 				if (!context) return;
 
 				const renderTask = pageProxy.render({
+					canvas,
 					canvasContext: context,
 					viewport: scaledViewport,
 				});

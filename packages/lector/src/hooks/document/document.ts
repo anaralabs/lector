@@ -1,6 +1,7 @@
 import type {
 	OnProgressParameters,
 	PDFDocumentProxy,
+	PDFDocumentLoadingTask,
 	PDFPageProxy,
 } from "pdfjs-dist";
 import type {
@@ -10,6 +11,7 @@ import type {
 import { useEffect, useState } from "react";
 
 import type { InitialPDFState, ZoomOptions } from "../../internal";
+import { loadPdfJs } from "../../lib/pdfjs";
 
 export interface usePDFDocumentParams {
 	/**
@@ -87,15 +89,17 @@ export const usePDFDocumentContext = ({
 		const loadDocument = () => {
 			setInitialState(null);
 			setProgress(0);
-			let loadingTask:
-				| ReturnType<typeof import("pdfjs-dist/webpack.mjs").getDocument>
-				| undefined;
+			let loadingTask: PDFDocumentLoadingTask | null = null;
+			let isDisposed = false;
 
-			const loadingPromise = import("pdfjs-dist/webpack.mjs")
+			void loadPdfJs()
 				.then(({ getDocument }) => {
+					if (isDisposed) {
+						return;
+					}
+
 					loadingTask = getDocument(source);
 					loadingTask.onProgress = (progressEvent: OnProgressParameters) => {
-						// Added to dedupe state updates when the file is fully loaded
 						if (progressEvent.loaded === progressEvent.total) {
 							return;
 						}
@@ -103,24 +107,36 @@ export const usePDFDocumentContext = ({
 						setProgress(progressEvent.loaded / progressEvent.total);
 					};
 
-					return loadingTask.promise;
-				})
-				.then((proxy) => {
-					onDocumentLoad?.({ proxy, source });
-					setProgress(1);
+					return loadingTask.promise
+						.then((proxy) => {
+							if (isDisposed || loadingTask?.destroyed) {
+								return;
+							}
 
-					generateViewports(proxy);
+							onDocumentLoad?.({ proxy, source });
+							setProgress(1);
+
+							return generateViewports(proxy);
+						})
+						.catch((error) => {
+							if (isDisposed || loadingTask?.destroyed) {
+								return;
+							}
+
+							console.error("Error loading PDF document", error);
+						});
 				})
 				.catch((error) => {
-					if (loadingTask?.destroyed) {
+					if (isDisposed) {
 						return;
 					}
 
-					console.error("Error loading PDF document", error);
+					console.error("Error loading PDF.js", error);
 				});
 
 			return () => {
-				loadingPromise.finally(() => loadingTask?.destroy());
+				isDisposed = true;
+				void loadingTask?.destroy();
 			};
 		};
 		return loadDocument();

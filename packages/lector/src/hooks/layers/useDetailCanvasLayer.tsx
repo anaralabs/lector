@@ -193,6 +193,7 @@ export const useDetailCanvasLayer = ({
 			});
 
 			const currentRenderingTask = pdfPageProxy.render({
+				canvas: detailCanvas,
 				canvasContext: context,
 				viewport: detailViewport,
 				background,

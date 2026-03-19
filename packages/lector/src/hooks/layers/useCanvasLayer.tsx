@@ -79,6 +79,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const viewport = pdfPageProxy.getViewport({ scale: baseScale });
 
 		const renderingTask = pdfPageProxy.render({
+			canvas: baseCanvas,
 			canvasContext: context,
 			viewport,
 			background,

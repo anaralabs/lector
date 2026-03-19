@@ -16,7 +16,7 @@ import {
 } from "@anaralabs/lector";
 import React, { useCallback, useEffect, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
-import "pdfjs-dist/web/pdf_viewer.css";
+import "@/lib/setup";
 
 import { cn } from "@/lib/utils";
 import {

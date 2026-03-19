@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { usePdf } from "../../internal";
 import { ensureAnnotationLayerStyles } from "../../lib/annotation-layer-styles";
 import { cancellable } from "../../lib/cancellable";
+import { loadPdfJs } from "../../lib/pdfjs";
 import { usePdfJump } from "../pages/usePdfJump";
 import { usePDFLinkService } from "../usePDFLinkService";
 import { usePDFPageNumber } from "../usePdfPageNumber";
@@ -159,7 +160,7 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 		const { cancel } = cancellable(
 			(async () => {
 				try {
-					const { AnnotationLayer } = await import("pdfjs-dist/webpack.mjs");
+					const { AnnotationLayer } = await loadPdfJs();
 					const annotationLayer = new AnnotationLayer(annotationLayerConfig);
 					annotationLayerObjectRef.current = annotationLayer;
 					const annotations = await pdfPageProxy.getAnnotations();

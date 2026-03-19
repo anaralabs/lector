@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import { usePdf } from "../../internal";
+import { loadPdfJs } from "../../lib/pdfjs";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
 // Add custom property declarations
@@ -213,7 +214,7 @@ export const useTextLayer = () => {
 			textLayerRef.current = null;
 		}
 
-		import("pdfjs-dist/webpack.mjs")
+		void loadPdfJs()
 			.then(({ TextLayer }) => {
 				if (isCancelled || textContainerRef.current !== textContainer) {
 					return;
@@ -227,19 +228,23 @@ export const useTextLayer = () => {
 
 				textLayerRef.current = textLayer;
 
-				return textLayer.render().then(() => {
-					if (
-						!isCancelled &&
-						textLayerRef.current === textLayer &&
-						textContainerRef.current === textContainer
-					) {
-						const endOfContent = document.createElement("div");
-						endOfContent.className = "endOfContent";
-						textContainer.appendChild(endOfContent);
+				return textLayer.render();
+			})
+			.then(() => {
+				const textLayer = textLayerRef.current;
+				if (
+					!textLayer ||
+					isCancelled ||
+					textContainerRef.current !== textContainer
+				) {
+					return;
+				}
 
-						bindMouseEvents(textContainer, endOfContent);
-					}
-				});
+				const endOfContent = document.createElement("div");
+				endOfContent.className = "endOfContent";
+				textContainer.appendChild(endOfContent);
+
+				bindMouseEvents(textContainer, endOfContent);
 			})
 			.catch((error) => {
 				if (error.name !== "AbortException") {
