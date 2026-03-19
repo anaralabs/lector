@@ -58,17 +58,38 @@ Use this to instrument the page, run benchmarks, monkey-patch APIs (e.g. count `
 
 This project has a benchmark page at `/bench` (`packages/docs/app/bench/page.tsx`). It exposes `window.__bench` with:
 
-- `__bench.runScrollBench(steps, delayMs)` — scroll top→bottom→top, measures FPS/long tasks/CLS
-- `__bench.runZoomBench(steps, delayMs)` — zoom in/out via button clicks
-- `__bench.runPinchZoomBench(cycles, stepsPerCycle, delayMs)` — ctrl+wheel zoom simulation
-- `__bench.runFullSuite()` — runs all tests on all PDFs
-- `__bench.selectPdf(index)` — switch PDF (0=pathways, 1=large, 2=links, 3=form)
+- `__bench.pdfFiles` — array of available PDFs with `{ name, url }`
+- `__bench.selectPdf(index)` — switch PDF by index
+- `__bench.setDarkMode(on)` — toggle dark mode filters
+- `__bench.getScrollInfo()` — returns current `scrollTop`, `scrollHeight`, `clientHeight`, and `maxScroll`
+- `__bench.getTextLayerStatus()` — returns rendered text layer counts and per-page span counts
+- `__bench.startFrameRecording()` — begins a `requestAnimationFrame` timing capture
+- `__bench.stopFrameRecording()` — returns p50/p95/p99 frame timings and dropped/slow frame counts
+- `__bench.scrollTo(ratio)` — scrolls the pages container to a `0..1` relative position
 
-### Example: benchmark scroll on large.pdf
+### Example: benchmark manual scroll on large.pdf
 
 ```
 evaluate_script({
-  function: "async () => { __bench.selectPdf(1); await new Promise(r => setTimeout(r, 2500)); return await __bench.runScrollBench(30, 40); }"
+  function: `async () => {
+    __bench.selectPdf(1);
+    await new Promise((r) => setTimeout(r, 2500));
+
+    const info = __bench.getScrollInfo();
+    if (!info) return null;
+
+    __bench.startFrameRecording();
+    for (let i = 0; i <= 20; i++) {
+      __bench.scrollTo(i / 20);
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    const frames = __bench.stopFrameRecording();
+    return {
+      frames,
+      textLayers: __bench.getTextLayerStatus(),
+      scroll: __bench.getScrollInfo(),
+    };
+  }`
 })
 ```
 
