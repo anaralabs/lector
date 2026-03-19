@@ -171,7 +171,7 @@ async function scrollStopSelect(page, cdp) {
 }
 
 async function zoomCycle(page, cdp) {
-  const el = await page.locator("#bench-pages");
+  const el = await page.locator('[data-bench-id="pages"]');
   const box = await el.boundingBox();
   if (!box) return null;
 
@@ -233,7 +233,7 @@ async function run() {
 
   console.log(`\nNavigating to ${BASE_URL}/bench …\n`);
   await page.goto(`${BASE_URL}/bench`, { waitUntil: "networkidle" });
-  await page.waitForSelector("#bench-pages", { timeout: 15000 });
+  await page.waitForSelector('[data-bench-id="pages"]', { timeout: 15000 });
   await page.waitForTimeout(2000);
 
   const allRows = [];

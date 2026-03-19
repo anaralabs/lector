@@ -27,7 +27,10 @@ const DARK_MODE_FILTERS =
 function BenchViewer({
 	pdfUrl,
 	darkMode,
-}: { pdfUrl: string; darkMode: boolean }) {
+}: {
+	pdfUrl: string;
+	darkMode: boolean;
+}) {
 	return (
 		<Root
 			source={pdfUrl}
@@ -41,7 +44,7 @@ function BenchViewer({
 			</div>
 			<Pages
 				className={`p-2 h-full ${darkMode ? DARK_MODE_FILTERS : ""}`}
-				id="bench-pages"
+				data-bench-id="pages"
 			>
 				<Page>
 					<CanvasLayer />
@@ -78,13 +81,11 @@ export default function BenchPage() {
 			},
 
 			setDarkMode: (on: boolean) => {
-				window.dispatchEvent(
-					new CustomEvent("bench-set-dark", { detail: on }),
-				);
+				window.dispatchEvent(new CustomEvent("bench-set-dark", { detail: on }));
 			},
 
 			getScrollInfo: () => {
-				const el = document.querySelector("#bench-pages");
+				const el = document.querySelector('[data-bench-id="pages"]');
 				if (!el) return null;
 				return {
 					scrollTop: el.scrollTop,
@@ -131,7 +132,9 @@ export default function BenchPage() {
 				if (frameTimes.length < 2) {
 					return {
 						totalFrames: frameTimes.length,
-						p50: 0, p95: 0, p99: 0,
+						p50: 0,
+						p95: 0,
+						p99: 0,
 						droppedFrames: 0,
 						slowFrames: 0,
 						frameTimes: [],
@@ -154,7 +157,7 @@ export default function BenchPage() {
 			},
 
 			scrollTo: (ratio: number) => {
-				const el = document.querySelector("#bench-pages");
+				const el = document.querySelector('[data-bench-id="pages"]');
 				if (!el) return;
 				el.scrollTop = ratio * (el.scrollHeight - el.clientHeight);
 			},
@@ -207,10 +210,7 @@ export default function BenchPage() {
 				</div>
 			</div>
 			<div className="flex-1 min-h-0">
-				<BenchViewer
-					pdfUrl={PDF_FILES[selectedPdf]!.url}
-					darkMode={darkMode}
-				/>
+				<BenchViewer pdfUrl={PDF_FILES[selectedPdf]!.url} darkMode={darkMode} />
 			</div>
 		</div>
 	);

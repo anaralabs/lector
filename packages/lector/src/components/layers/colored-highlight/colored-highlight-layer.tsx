@@ -47,14 +47,11 @@ export const ColoredHighlightLayer = ({
 	return (
 		<div className="colored-highlights-layer">
 			{useMemo(
-			() => highlights.filter((s) => s.pageNumber === pageNumber),
-			[highlights, pageNumber],
-		).map((selection) => (
-					<ColoredHighlightComponent
-						key={selection.uuid}
-						selection={selection}
-					/>
-				))}
+				() => highlights.filter((s) => s.pageNumber === pageNumber),
+				[highlights, pageNumber],
+			).map((selection) => (
+				<ColoredHighlightComponent key={selection.uuid} selection={selection} />
+			))}
 			<ColorSelectionTool
 				onColorSelection={(colorItem) => handleHighlighting(colorItem.color)}
 			/>
