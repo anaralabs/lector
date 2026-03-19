@@ -1,7 +1,7 @@
 import type {
 	OnProgressParameters,
-	PDFDocumentProxy,
 	PDFDocumentLoadingTask,
+	PDFDocumentProxy,
 	PDFPageProxy,
 } from "pdfjs-dist";
 import type {
