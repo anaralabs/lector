@@ -202,6 +202,8 @@ export const useTextLayer = () => {
 			return;
 		}
 
+		let isCancelled = false;
+
 		isRenderingRef.current = true;
 
 		textContainer.innerHTML = "";
@@ -213,6 +215,10 @@ export const useTextLayer = () => {
 
 		import("pdfjs-dist/webpack.mjs")
 			.then(({ TextLayer }) => {
+				if (isCancelled || textContainerRef.current !== textContainer) {
+					return;
+				}
+
 				const textLayer = new TextLayer({
 					textContentSource: pdfPageProxy.streamTextContent(),
 					container: textContainer,
@@ -222,7 +228,11 @@ export const useTextLayer = () => {
 				textLayerRef.current = textLayer;
 
 				return textLayer.render().then(() => {
-					if (textLayerRef.current === textLayer && textContainer) {
+					if (
+						!isCancelled &&
+						textLayerRef.current === textLayer &&
+						textContainerRef.current === textContainer
+					) {
 						const endOfContent = document.createElement("div");
 						endOfContent.className = "endOfContent";
 						textContainer.appendChild(endOfContent);
@@ -241,6 +251,7 @@ export const useTextLayer = () => {
 			});
 
 		return () => {
+			isCancelled = true;
 			isRenderingRef.current = false;
 
 			if (textLayerRef.current) {

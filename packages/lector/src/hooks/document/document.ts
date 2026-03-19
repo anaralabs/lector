@@ -123,7 +123,7 @@ export const usePDFDocumentContext = ({
 				loadingPromise.finally(() => loadingTask?.destroy());
 			};
 		};
-		loadDocument();
+		return loadDocument();
 	}, [source]);
 
 	return {

@@ -18,3 +18,5 @@ export const ensurePdfJsWorker = () => {
 
 	return pdfJsWorkerPromise;
 };
+
+void ensurePdfJsWorker();

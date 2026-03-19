@@ -84,7 +84,6 @@ export const useDetailCanvasLayer = ({
 		}
 
 		let renderingTask: RenderTask | null = null;
-		let animationFrameId: number | null = null;
 		let renderTimeoutId: NodeJS.Timeout | null = null;
 
 		const hideDetailCanvas = () => {
@@ -225,17 +224,12 @@ export const useDetailCanvasLayer = ({
 			if (renderTimeoutId !== null) {
 				clearTimeout(renderTimeoutId);
 			}
-			if (animationFrameId !== null) {
-				cancelAnimationFrame(animationFrameId);
-			}
 
 			hideDetailCanvas();
 
 			renderTimeoutId = setTimeout(() => {
-				animationFrameId = requestAnimationFrame(() => {
-					animationFrameId = null;
-					renderDetailCanvas();
-				});
+				renderTimeoutId = null;
+				renderDetailCanvas();
 			}, delay);
 		};
 
@@ -251,9 +245,6 @@ export const useDetailCanvasLayer = ({
 
 			if (renderTimeoutId !== null) {
 				clearTimeout(renderTimeoutId);
-			}
-			if (animationFrameId !== null) {
-				cancelAnimationFrame(animationFrameId);
 			}
 
 			void renderingTask?.cancel();
