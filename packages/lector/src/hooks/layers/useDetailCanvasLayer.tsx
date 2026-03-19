@@ -77,6 +77,7 @@ export const useDetailCanvasLayer = ({
 	const renderTaskRef = useRef<ReturnType<typeof pdfPageProxy.render> | null>(
 		null,
 	);
+	const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
 	const updateDetailCanvas = useCallback(() => {
 		const scrollContainer = viewportRef?.current;
@@ -143,6 +144,8 @@ export const useDetailCanvasLayer = ({
 		}
 
 		detailCanvas.style.display = "block";
+		container.style.transform = `scale3d(${1 / zoom}, ${1 / zoom}, 1)`;
+		container.style.transformOrigin = `0 0`;
 
 		const pdfOffsetX = visibleLeft;
 		const pdfOffsetY = visibleTop;
@@ -151,22 +154,18 @@ export const useDetailCanvasLayer = ({
 		const actualWidth = visibleWidth * effectiveScale;
 		const actualHeight = visibleHeight * effectiveScale;
 
-		detailCanvas.width = actualWidth;
-		detailCanvas.height = actualHeight;
+		if (!offscreenCanvasRef.current) {
+			offscreenCanvasRef.current = document.createElement("canvas");
+		}
+		const offscreen = offscreenCanvasRef.current;
+		offscreen.width = actualWidth;
+		offscreen.height = actualHeight;
 
-		detailCanvas.style.width = `${visibleWidth * zoom}px`;
-		detailCanvas.style.height = `${visibleHeight * zoom}px`;
+		const offscreenCtx = offscreen.getContext("2d");
+		if (!offscreenCtx) return;
 
-		detailCanvas.style.transformOrigin = "center center";
-		detailCanvas.style.transform = `translate(${visibleLeft * zoom}px, ${visibleTop * zoom}px) `;
-		container.style.transform = `scale3d(${1 / zoom}, ${1 / zoom}, 1)`;
-		container.style.transformOrigin = `0 0`;
-
-		const context = detailCanvas.getContext("2d");
-		if (!context) return;
-
-		context.setTransform(1, 0, 0, 1, 0, 0);
-		context.clearRect(0, 0, detailCanvas.width, detailCanvas.height);
+		offscreenCtx.setTransform(1, 0, 0, 1, 0, 0);
+		offscreenCtx.clearRect(0, 0, offscreen.width, offscreen.height);
 
 		if (renderTaskRef.current) {
 			void renderTaskRef.current.cancel();
@@ -174,13 +173,25 @@ export const useDetailCanvasLayer = ({
 
 		const detailViewport = pdfPageProxy.getViewport({ scale: effectiveScale });
 		renderTaskRef.current = pdfPageProxy.render({
-			canvasContext: context,
+			canvasContext: offscreenCtx,
 			viewport: detailViewport,
 			background,
 			transform: [1, 0, 0, 1, -pdfOffsetX * effectiveScale, -pdfOffsetY * effectiveScale],
 		});
 
-		renderTaskRef.current.promise.catch((error) => {
+		renderTaskRef.current.promise.then(() => {
+			detailCanvas.width = actualWidth;
+			detailCanvas.height = actualHeight;
+			detailCanvas.style.width = `${visibleWidth * zoom}px`;
+			detailCanvas.style.height = `${visibleHeight * zoom}px`;
+			detailCanvas.style.transformOrigin = "center center";
+			detailCanvas.style.transform = `translate(${visibleLeft * zoom}px, ${visibleTop * zoom}px)`;
+
+			const ctx = detailCanvas.getContext("2d");
+			if (ctx) {
+				ctx.drawImage(offscreen, 0, 0);
+			}
+		}).catch((error) => {
 			if (error.name === "RenderingCancelledException") return;
 			throw error;
 		});
