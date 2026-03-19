@@ -32,7 +32,13 @@ type BenchResult = {
 	longTaskTotalMs: number;
 };
 
-function BenchViewer({ pdfUrl }: { pdfUrl: string }) {
+const DARK_MODE_FILTERS =
+	"invert-[91%] hue-rotate-180 brightness-[80%] contrast-[228%]";
+
+function BenchViewer({
+	pdfUrl,
+	darkMode,
+}: { pdfUrl: string; darkMode: boolean }) {
 	return (
 		<Root
 			source={pdfUrl}
@@ -44,7 +50,10 @@ function BenchViewer({ pdfUrl }: { pdfUrl: string }) {
 				<CurrentZoom className="bg-white dark:bg-gray-700 rounded-full px-3 py-1 border text-center w-16" />
 				<ZoomIn className="px-3 py-1 -ml-2">+</ZoomIn>
 			</div>
-			<Pages className="p-2 h-full" id="bench-pages">
+			<Pages
+				className={`p-2 h-full ${darkMode ? DARK_MODE_FILTERS : ""}`}
+				id="bench-pages"
+			>
 				<Page>
 					<CanvasLayer />
 					<TextLayer />
@@ -56,6 +65,7 @@ function BenchViewer({ pdfUrl }: { pdfUrl: string }) {
 
 export default function BenchPage() {
 	const [selectedPdf, setSelectedPdf] = useState(0);
+	const [darkMode, setDarkMode] = useState(false);
 	const [results, setResults] = useState<BenchResult[]>([]);
 	const [running, setRunning] = useState(false);
 	const resultsRef = useRef<BenchResult[]>([]);
@@ -298,37 +308,49 @@ export default function BenchPage() {
 				window.dispatchEvent(event);
 			},
 
-			// Full suite: run all tests on all PDFs
+			// Toggle dark mode CSS filters
+			setDarkMode: (on: boolean) => {
+				window.dispatchEvent(
+					new CustomEvent("bench-set-dark", { detail: on }),
+				);
+			},
+
+			// Full suite: run all tests on all PDFs, both light and dark mode
 			runFullSuite: async () => {
 				const allResults: BenchResult[] = [];
-				for (let pi = 0; pi < PDF_FILES.length; pi++) {
-					api.selectPdf(pi);
-					// Wait for PDF to load
-					await new Promise(r => setTimeout(r, 2000));
-
-					const pdfName = PDF_FILES[pi]!.name;
-
-					const scrollResult = await api.runScrollBench(30, 40);
-					if (scrollResult) {
-						allResults.push({ test: "fast-scroll", pdf: pdfName, ...scrollResult });
-					}
-
+				for (const mode of ["light", "dark"] as const) {
+					api.setDarkMode(mode === "dark");
 					await new Promise(r => setTimeout(r, 500));
 
-					const zoomResult = await api.runZoomBench(8, 80);
-					if (zoomResult && !("error" in zoomResult)) {
-						allResults.push({ test: "button-zoom", pdf: pdfName, layoutShifts: 0, ...zoomResult });
+					for (let pi = 0; pi < PDF_FILES.length; pi++) {
+						api.selectPdf(pi);
+						await new Promise(r => setTimeout(r, 2000));
+
+						const pdfName = `${PDF_FILES[pi]!.name}:${mode}`;
+
+						const scrollResult = await api.runScrollBench(30, 40);
+						if (scrollResult) {
+							allResults.push({ test: "fast-scroll", pdf: pdfName, ...scrollResult });
+						}
+
+						await new Promise(r => setTimeout(r, 500));
+
+						const zoomResult = await api.runZoomBench(8, 80);
+						if (zoomResult && !("error" in zoomResult)) {
+							allResults.push({ test: "button-zoom", pdf: pdfName, layoutShifts: 0, ...zoomResult });
+						}
+
+						await new Promise(r => setTimeout(r, 500));
+
+						const pinchResult = await api.runPinchZoomBench(2, 6, 60);
+						if (pinchResult && !("error" in pinchResult)) {
+							allResults.push({ test: "pinch-zoom", pdf: pdfName, layoutShifts: 0, ...pinchResult });
+						}
+
+						await new Promise(r => setTimeout(r, 500));
 					}
-
-					await new Promise(r => setTimeout(r, 500));
-
-					const pinchResult = await api.runPinchZoomBench(2, 6, 60);
-					if (pinchResult && !("error" in pinchResult)) {
-						allResults.push({ test: "pinch-zoom", pdf: pdfName, layoutShifts: 0, ...pinchResult });
-					}
-
-					await new Promise(r => setTimeout(r, 500));
 				}
+				api.setDarkMode(false);
 				return allResults;
 			},
 		};
@@ -341,8 +363,15 @@ export default function BenchPage() {
 				setSelectedPdf(idx);
 			}
 		};
+		const handleSetDark = (e: Event) => {
+			setDarkMode(!!(e as CustomEvent).detail);
+		};
 		window.addEventListener("bench-select-pdf", handleSelectPdf);
-		return () => window.removeEventListener("bench-select-pdf", handleSelectPdf);
+		window.addEventListener("bench-set-dark", handleSetDark);
+		return () => {
+			window.removeEventListener("bench-select-pdf", handleSelectPdf);
+			window.removeEventListener("bench-set-dark", handleSetDark);
+		};
 	}, []);
 
 	return (
@@ -360,12 +389,18 @@ export default function BenchPage() {
 						</button>
 					))}
 				</div>
+				<button
+					onClick={() => setDarkMode((d) => !d)}
+					className={`px-3 py-1 text-xs rounded ${darkMode ? "bg-yellow-500 text-black" : "bg-gray-700 text-white"}`}
+				>
+					{darkMode ? "Light" : "Dark"}
+				</button>
 				<div className="text-xs text-gray-500 ml-auto">
 					Open DevTools console → <code>__bench.runFullSuite()</code>
 				</div>
 			</div>
 			<div className="flex-1 min-h-0">
-				<BenchViewer pdfUrl={PDF_FILES[selectedPdf]!.url} />
+				<BenchViewer pdfUrl={PDF_FILES[selectedPdf]!.url} darkMode={darkMode} />
 			</div>
 			{results.length > 0 && (
 				<div className="border-t p-2 max-h-48 overflow-auto text-xs font-mono bg-gray-50 dark:bg-gray-900">
