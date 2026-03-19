@@ -18,6 +18,7 @@ const PDF_FILES = [
 	{ name: "large", url: "/pdf/large.pdf" },
 	{ name: "links", url: "/pdf/links.pdf" },
 	{ name: "form", url: "/pdf/form.pdf" },
+	{ name: "quantum", url: "/pdf/quantum.pdf" },
 ];
 
 type BenchResult = {

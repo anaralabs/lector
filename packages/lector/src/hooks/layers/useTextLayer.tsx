@@ -187,10 +187,20 @@ const createTextSelectionManager = () => {
 
 const bindMouseEvents = createTextSelectionManager();
 
+const scheduleIdle =
+	typeof requestIdleCallback === "function"
+		? requestIdleCallback
+		: (cb: () => void) => setTimeout(cb, 16) as unknown as number;
+const cancelIdle =
+	typeof cancelIdleCallback === "function"
+		? cancelIdleCallback
+		: (id: number) => clearTimeout(id);
+
 export const useTextLayer = () => {
 	const textContainerRef = useRef<TextLayerDivElement>(null);
 	const textLayerRef = useRef<TextLayer | null>(null);
 	const isRenderingRef = useRef(false);
+	const idleHandleRef = useRef(0);
 
 	const pageNumber = usePDFPageNumber();
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
@@ -211,44 +221,53 @@ export const useTextLayer = () => {
 				bindMouseEvents(textContainer, endOfContent);
 			}
 		} else if (!isRenderingRef.current) {
-			isRenderingRef.current = true;
-			textContainer.replaceChildren();
+			// Defer fresh text layer rendering until the browser is idle.
+			// During fast scroll the component unmounts before the callback
+			// fires, so the expensive span creation + measurement is skipped
+			// for pages that are only briefly in the virtualizer window.
+			idleHandleRef.current = scheduleIdle(() => {
+				if (!textContainerRef.current) return;
+				isRenderingRef.current = true;
+				textContainer.replaceChildren();
 
-			if (textLayerRef.current) {
-				textLayerRef.current.cancel();
-				textLayerRef.current = null;
-			}
+				if (textLayerRef.current) {
+					textLayerRef.current.cancel();
+					textLayerRef.current = null;
+				}
 
-			const textLayer = new TextLayer({
-				textContentSource: pdfPageProxy.streamTextContent(),
-				container: textContainer,
-				viewport: pdfPageProxy.getViewport({ scale: 1 }),
-			});
-
-			textLayerRef.current = textLayer;
-
-			textLayer
-				.render()
-				.then(() => {
-					if (textLayerRef.current === textLayer && textContainer) {
-						const endOfContent = document.createElement("div");
-						endOfContent.className = "endOfContent";
-						textContainer.appendChild(endOfContent);
-
-						bindMouseEvents(textContainer, endOfContent);
-					}
-				})
-				.catch((error) => {
-					if (error.name !== "AbortException") {
-						console.error("TextLayer rendering error:", error);
-					}
-				})
-				.finally(() => {
-					isRenderingRef.current = false;
+				const textLayer = new TextLayer({
+					textContentSource: pdfPageProxy.streamTextContent(),
+					container: textContainer,
+					viewport: pdfPageProxy.getViewport({ scale: 1 }),
 				});
+
+				textLayerRef.current = textLayer;
+
+				textLayer
+					.render()
+					.then(() => {
+						if (textLayerRef.current === textLayer && textContainer) {
+							const endOfContent = document.createElement("div");
+							endOfContent.className = "endOfContent";
+							textContainer.appendChild(endOfContent);
+
+							bindMouseEvents(textContainer, endOfContent);
+						}
+					})
+					.catch((error) => {
+						if (error.name !== "AbortException") {
+							console.error("TextLayer rendering error:", error);
+						}
+					})
+					.finally(() => {
+						isRenderingRef.current = false;
+					});
+			});
 		}
 
 		return () => {
+			cancelIdle(idleHandleRef.current);
+
 			if (isRenderingRef.current) {
 				isRenderingRef.current = false;
 				if (textLayerRef.current) {

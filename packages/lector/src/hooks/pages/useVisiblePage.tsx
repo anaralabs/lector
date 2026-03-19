@@ -55,11 +55,17 @@ export const useVisiblePage = ({ items }: UseVisiblePageProps) => {
 		[scrollElement, zoomLevel],
 	);
 
+	const rafRef = useRef(0);
+
 	useEffect(() => {
+		cancelAnimationFrame(rafRef.current);
 		if (!isPinching && items.length > 0) {
-			const mostVisibleIndex = calculateVisiblePageIndex(items);
-			setCurrentPage?.(mostVisibleIndex + 1);
+			rafRef.current = requestAnimationFrame(() => {
+				const mostVisibleIndex = calculateVisiblePageIndex(items);
+				setCurrentPage?.(mostVisibleIndex + 1);
+			});
 		}
+		return () => cancelAnimationFrame(rafRef.current);
 	}, [items, isPinching, calculateVisiblePageIndex, setCurrentPage]);
 
 	return null;
