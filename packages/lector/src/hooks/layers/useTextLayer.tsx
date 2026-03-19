@@ -187,23 +187,17 @@ const createTextSelectionManager = () => {
 
 const bindMouseEvents = createTextSelectionManager();
 
-const scheduleIdle =
-	typeof requestIdleCallback === "function"
-		? requestIdleCallback
-		: (cb: () => void) => setTimeout(cb, 16) as unknown as number;
-const cancelIdle =
-	typeof cancelIdleCallback === "function"
-		? cancelIdleCallback
-		: (id: number) => clearTimeout(id);
+const SCROLL_SETTLE_MS = 200;
 
 export const useTextLayer = () => {
 	const textContainerRef = useRef<TextLayerDivElement>(null);
 	const textLayerRef = useRef<TextLayer | null>(null);
 	const isRenderingRef = useRef(false);
-	const idleHandleRef = useRef(0);
+	const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	const pageNumber = usePDFPageNumber();
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
+	const isScrolling = usePdf((state) => state.isScrolling);
 
 	useEffect(() => {
 		const textContainer = textContainerRef.current;
@@ -220,53 +214,56 @@ export const useTextLayer = () => {
 			if (endOfContent) {
 				bindMouseEvents(textContainer, endOfContent);
 			}
-		} else if (!isRenderingRef.current) {
-			// Defer fresh text layer rendering until the browser is idle.
-			// During fast scroll the component unmounts before the callback
-			// fires, so the expensive span creation + measurement is skipped
-			// for pages that are only briefly in the virtualizer window.
-			idleHandleRef.current = scheduleIdle(() => {
-				if (!textContainerRef.current) return;
-				isRenderingRef.current = true;
-				textContainer.replaceChildren();
-
-				if (textLayerRef.current) {
-					textLayerRef.current.cancel();
-					textLayerRef.current = null;
-				}
-
-				const textLayer = new TextLayer({
-					textContentSource: pdfPageProxy.streamTextContent(),
-					container: textContainer,
-					viewport: pdfPageProxy.getViewport({ scale: 1 }),
-				});
-
-				textLayerRef.current = textLayer;
-
-				textLayer
-					.render()
-					.then(() => {
-						if (textLayerRef.current === textLayer && textContainer) {
-							const endOfContent = document.createElement("div");
-							endOfContent.className = "endOfContent";
-							textContainer.appendChild(endOfContent);
-
-							bindMouseEvents(textContainer, endOfContent);
-						}
-					})
-					.catch((error) => {
-						if (error.name !== "AbortException") {
-							console.error("TextLayer rendering error:", error);
-						}
-					})
-					.finally(() => {
-						isRenderingRef.current = false;
-					});
-			});
+			return;
 		}
 
+		if (isScrolling || isRenderingRef.current) return;
+
+		// Wait for scroll to actually settle before starting the expensive
+		// text layer render. Without this debounce, brief scrollend events
+		// between individual wheel ticks would trigger rendering mid-scroll.
+		if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+		settleTimerRef.current = setTimeout(() => {
+			if (!textContainerRef.current || isRenderingRef.current) return;
+			isRenderingRef.current = true;
+			textContainer.replaceChildren();
+
+			if (textLayerRef.current) {
+				textLayerRef.current.cancel();
+				textLayerRef.current = null;
+			}
+
+			const textLayer = new TextLayer({
+				textContentSource: pdfPageProxy.streamTextContent(),
+				container: textContainer,
+				viewport: pdfPageProxy.getViewport({ scale: 1 }),
+			});
+
+			textLayerRef.current = textLayer;
+
+			textLayer
+				.render()
+				.then(() => {
+					if (textLayerRef.current === textLayer && textContainer) {
+						const endOfContent = document.createElement("div");
+						endOfContent.className = "endOfContent";
+						textContainer.appendChild(endOfContent);
+
+						bindMouseEvents(textContainer, endOfContent);
+					}
+				})
+				.catch((error) => {
+					if (error.name !== "AbortException") {
+						console.error("TextLayer rendering error:", error);
+					}
+				})
+				.finally(() => {
+					isRenderingRef.current = false;
+				});
+		}, SCROLL_SETTLE_MS);
+
 		return () => {
-			cancelIdle(idleHandleRef.current);
+			if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
 
 			if (isRenderingRef.current) {
 				isRenderingRef.current = false;
@@ -292,7 +289,7 @@ export const useTextLayer = () => {
 				delete textContainer._cleanupTextSelection;
 			}
 		};
-	}, [pdfPageProxy]);
+	}, [pdfPageProxy, isScrolling]);
 
 	return {
 		textContainerRef,

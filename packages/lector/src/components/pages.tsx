@@ -53,6 +53,7 @@ export const Pages = ({
 	});
 
 	const setVirtualizer = usePdf((state) => state.setVirtualizer);
+	const setIsScrolling = usePdf((state) => state.setIsScrolling);
 
 	const { scrollToFn } = useScrollFn();
 	const { observeElementOffset } = useObserveElement();
@@ -74,6 +75,9 @@ export const Pages = ({
 		scrollToFn,
 		gap,
 		initialOffset: initialOffset,
+		onChange: (instance) => {
+			setIsScrolling(instance.isScrolling);
+		},
 	});
 
 	useEffect(() => {
@@ -86,24 +90,25 @@ export const Pages = ({
 	}, [setVirtualizer, virtualizer]);
 
 	useEffect(() => {
+		if (!virtualizer) return;
+
 		let timeout: NodeJS.Timeout;
-		const virtualized = virtualizer?.getVirtualItems();
+		const virtualized = virtualizer.getVirtualItems();
 
 		if (!isPinching) {
-			virtualizer?.measure();
+			virtualizer.measure();
 
 			timeout = setTimeout(() => {
 				setTempItems([]);
 			}, 200);
-		} else if (virtualized && virtualized?.length > 0) {
+		} else if (virtualized && virtualized.length > 0) {
 			setTempItems(virtualized);
 		}
 
 		return () => {
 			clearTimeout(timeout);
 		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [isPinching, virtualizer?.measure, virtualizer?.getVirtualItems]);
+	}, [isPinching, virtualizer]);
 
 	const virtualizerItems = virtualizer?.getVirtualItems() ?? [];
 	const items = tempItems.length ? tempItems : virtualizerItems;

@@ -1,9 +1,9 @@
 import clsx from "clsx";
-import type { HTMLProps } from "react";
+import { type HTMLProps, memo } from "react";
 
 import { useTextLayer } from "../../hooks/layers/useTextLayer";
 
-export const TextLayer = ({
+export const TextLayer = memo(({
 	className,
 	style,
 	...props
@@ -27,4 +27,6 @@ export const TextLayer = ({
 			ref={textContainerRef}
 		/>
 	);
-};
+});
+
+TextLayer.displayName = "TextLayer";

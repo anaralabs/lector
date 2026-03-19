@@ -1,4 +1,6 @@
 /** biome-ignore-all lint/suspicious/noArrayIndexKey: <index react> */
+import { useMemo } from "react";
+
 import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
 import { usePdf } from "../../internal";
 
@@ -15,8 +17,9 @@ export const CustomSelection = ({
 
 	const pageNumber = usePDFPageNumber();
 
-	const rects = customSelectionRects.filter(
-		(area) => area.pageNumber === pageNumber,
+	const rects = useMemo(
+		() => customSelectionRects.filter((area) => area.pageNumber === pageNumber),
+		[customSelectionRects, pageNumber],
 	);
 
 	if (!rects.length) return null;

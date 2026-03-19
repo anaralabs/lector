@@ -3,6 +3,7 @@ import {
 	type ComponentPropsWithoutRef,
 	type ElementRef,
 	forwardRef,
+	useMemo,
 } from "react";
 
 import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
@@ -36,7 +37,10 @@ export const HighlightLayer = forwardRef<
 
 	const Comp = asChild ? Slot : "div";
 
-	const rects = highlights.filter((area) => area.pageNumber === pageNumber);
+	const rects = useMemo(
+		() => highlights.filter((area) => area.pageNumber === pageNumber),
+		[highlights, pageNumber],
+	);
 
 	if (!rects?.length) return null;
 

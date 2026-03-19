@@ -1,9 +1,9 @@
-import type { HTMLProps } from "react";
+import { type HTMLProps, memo } from "react";
 
 import { useCanvasLayer } from "../../hooks/layers/useCanvasLayer";
 import { useDetailCanvasLayer } from "../../hooks/layers/useDetailCanvasLayer";
 
-export const CanvasLayer = ({
+export const CanvasLayer = memo(({
 	style,
 	background,
 	...props
@@ -27,4 +27,6 @@ export const CanvasLayer = ({
 			</div>
 		</>
 	);
-};
+});
+
+CanvasLayer.displayName = "CanvasLayer";

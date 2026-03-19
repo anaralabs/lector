@@ -1,7 +1,9 @@
+import { writeFileSync } from "node:fs";
 import { chromium } from "playwright";
 
 const BASE_URL = process.env.BENCH_URL || "http://localhost:3001";
 const PDF_COUNT = 5;
+const SAVE_TRACES = process.argv.includes("--trace");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -29,6 +31,40 @@ function diffMetrics(before, after) {
 
 function fmtMs(n) { return String(Math.round(n * 100) / 100).padStart(8) + "ms"; }
 function fmtN(n)  { return String(n).padStart(6); }
+
+async function startTrace(cdp) {
+  if (!SAVE_TRACES) return;
+  await cdp.send("Tracing.start", {
+    categories: "devtools.timeline,v8.execute,blink.user_timing,disabled-by-default-devtools.timeline",
+    options: "sampling-frequency=10000",
+  });
+}
+
+async function stopTrace(cdp, name) {
+  if (!SAVE_TRACES) return;
+  const chunks = [];
+  cdp.on("Tracing.dataCollected", (p) => chunks.push(...p.value));
+  await cdp.send("Tracing.end");
+  await new Promise((resolve) => cdp.once("Tracing.tracingComplete", resolve));
+  const file = `trace-${name.replace(/[^a-z0-9]/gi, "-")}.json`;
+  writeFileSync(file, JSON.stringify(chunks));
+  console.log(`    trace saved → ${file}`);
+}
+
+async function getDomStats(page) {
+  return page.evaluate(() => {
+    const all = document.querySelectorAll("*").length;
+    const tls = document.querySelectorAll(".textLayer");
+    let maxChildren = 0;
+    let totalSpans = 0;
+    tls.forEach((tl) => {
+      const n = tl.children.length;
+      if (n > maxChildren) maxChildren = n;
+      totalSpans += tl.querySelectorAll("span").length;
+    });
+    return { totalElements: all, textLayers: tls.length, maxTextLayerChildren: maxChildren, totalSpans };
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Test scenarios
@@ -218,6 +254,8 @@ async function run() {
 
       console.log(`--- ${tag} ---`);
 
+      const domBefore = await getDomStats(page);
+
       // Gentle scroll
       const gs = await gentleScroll(page, cdp);
       if (gs) {
@@ -228,8 +266,10 @@ async function run() {
 
       await page.waitForTimeout(500);
 
-      // Fast flick
+      // Fast flick (with optional trace capture)
+      await startTrace(cdp);
       const ff = await fastFlick(page, cdp);
+      await stopTrace(cdp, `${tag}-fast-flick`);
       if (ff) {
         const r = { pdf: tag, test: "fast-flick", ...ff.frames, ...ff.cdp };
         allRows.push(r);
@@ -255,6 +295,10 @@ async function run() {
         console.log(`  zoom-cycle      p50:${fmtMs(zc.frames.p50)} p95:${fmtMs(zc.frames.p95)} p99:${fmtMs(zc.frames.p99)}  dropped:${fmtN(zc.frames.droppedFrames)}/${zc.frames.totalFrames}  layouts:${fmtN(zc.cdp.layoutCount)} (${fmtMs(zc.cdp.layoutDurationMs)})  styles:${fmtN(zc.cdp.recalcStyleCount)} (${fmtMs(zc.cdp.recalcStyleDurationMs)})`);
       }
 
+      const domAfter = await getDomStats(page);
+      console.log(`  dom             total:${fmtN(domAfter.totalElements)}  textLayers:${fmtN(domAfter.textLayers)}  maxChildren:${fmtN(domAfter.maxTextLayerChildren)}  spans:${fmtN(domAfter.totalSpans)}`);
+
+      allRows.push({ pdf: tag, test: "dom-stats", ...domAfter });
       console.log();
     }
   }

@@ -1,10 +1,10 @@
-import type { HTMLProps, ReactNode } from "react";
+import { type HTMLProps, memo, type ReactNode } from "react";
 
 import { PDFPageNumberContext } from "../hooks/usePdfPageNumber";
 import { usePdf } from "../internal";
 import { Primitive } from "./primitive";
 
-export const Page = ({
+export const Page = memo(({
 	children,
 	pageNumber = 1,
 	style,
@@ -48,4 +48,6 @@ export const Page = ({
 			</Primitive.div>
 		</PDFPageNumberContext.Provider>
 	);
-};
+});
+
+Page.displayName = "Page";

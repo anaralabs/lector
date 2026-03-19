@@ -51,6 +51,9 @@ interface PDFState {
 	isPinching: boolean;
 	setIsPinching: (isPinching: boolean) => void;
 
+	isScrolling: boolean;
+	setIsScrolling: (isScrolling: boolean) => void;
+
 	currentPage: number;
 	setCurrentPage: (pageNumber: number) => void;
 
@@ -150,6 +153,13 @@ export const PDFStore = createZustandContext(
 				set({
 					isPinching: val,
 				});
+			},
+
+			isScrolling: false,
+			setIsScrolling: (val) => {
+				if (get().isScrolling !== val) {
+					set({ isScrolling: val });
+				}
 			},
 
 			virtualizer: null,

@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { v4 as uuidv4 } from "uuid";
 
 import { usePDFPageNumber } from "../../../hooks/usePdfPageNumber";
@@ -46,9 +46,10 @@ export const ColoredHighlightLayer = ({
 
 	return (
 		<div className="colored-highlights-layer">
-			{highlights
-				.filter((selection) => selection.pageNumber === pageNumber)
-				.map((selection) => (
+			{useMemo(
+			() => highlights.filter((s) => s.pageNumber === pageNumber),
+			[highlights, pageNumber],
+		).map((selection) => (
 					<ColoredHighlightComponent
 						key={selection.uuid}
 						selection={selection}
