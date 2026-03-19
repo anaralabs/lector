@@ -1,0 +1,102 @@
+---
+description: How to use Chrome DevTools MCP for performance benchmarking and profiling
+alwaysApply: false
+---
+
+# Chrome DevTools MCP — Performance Benchmarking
+
+## Setup
+
+The `chrome-devtools` MCP server is configured in `~/.cursor/mcp.json`:
+
+```json
+"chrome-devtools": {
+  "command": "npx",
+  "args": ["-y", "chrome-devtools-mcp@latest"]
+}
+```
+
+Requires Chrome open with at least one tab. The MCP connects to it automatically.
+
+## Core Workflow
+
+### 1. Navigate and take baseline screenshot
+
+```
+navigate_page({ type: "url", url: "http://localhost:3000/bench" })
+take_screenshot()
+```
+
+### 2. Record a performance trace (cold load)
+
+```
+navigate_page({ type: "url", url: "..." })
+performance_start_trace({ reload: true, autoStop: true })
+```
+
+Returns LCP, CLS, TTFB, and available insight names. Use `performance_analyze_insight` to drill into each.
+
+### 3. Record a trace during interaction (scroll, zoom)
+
+```
+performance_start_trace({ reload: false, autoStop: false })
+evaluate_script({ function: "async () => { /* scroll/zoom/interact */ }" })
+performance_stop_trace()
+```
+
+Analyze `ForcedReflow`, `CLSCulprits`, `RenderBlocking`, `NetworkDependencyTree` insights.
+
+### 4. Run JavaScript on the page
+
+```
+evaluate_script({ function: "() => { return document.querySelectorAll('.textLayer').length; }" })
+```
+
+Use this to instrument the page, run benchmarks, monkey-patch APIs (e.g. count `getBoundingClientRect` calls), or read results.
+
+## Benchmark Page
+
+This project has a benchmark page at `/bench` (`packages/docs/app/bench/page.tsx`). It exposes `window.__bench` with:
+
+- `__bench.runScrollBench(steps, delayMs)` — scroll top→bottom→top, measures FPS/long tasks/CLS
+- `__bench.runZoomBench(steps, delayMs)` — zoom in/out via button clicks
+- `__bench.runPinchZoomBench(cycles, stepsPerCycle, delayMs)` — ctrl+wheel zoom simulation
+- `__bench.runFullSuite()` — runs all tests on all PDFs
+- `__bench.selectPdf(index)` — switch PDF (0=pathways, 1=large, 2=links, 3=form)
+
+### Example: benchmark scroll on large.pdf
+
+```
+evaluate_script({
+  function: "async () => { __bench.selectPdf(1); await new Promise(r => setTimeout(r, 2500)); return await __bench.runScrollBench(30, 40); }"
+})
+```
+
+## Profiling Forced Reflows
+
+To count `getBoundingClientRect` calls during an interaction:
+
+```
+evaluate_script({
+  function: "async () => { let n=0; const orig=Element.prototype.getBoundingClientRect; Element.prototype.getBoundingClientRect=function(){n++;return orig.call(this);}; /* interaction */ Element.prototype.getBoundingClientRect=orig; return n; }"
+})
+```
+
+## Key Insights to Check
+
+| Insight | What it catches |
+|---------|----------------|
+| `ForcedReflow` | JS reading layout props after DOM mutation |
+| `CLSCulprits` | Elements causing layout shifts |
+| `LCPBreakdown` | TTFB vs resource load vs render delay |
+| `RenderBlocking` | CSS/JS blocking first paint |
+| `NetworkDependencyTree` | Critical request chains |
+
+## Iterative Optimization Loop
+
+1. Run trace → identify top insight
+2. Drill into the insight → find the call frame / file
+3. Fix the code → rebuild (`pnpm build --filter @anaralabs/lector`)
+4. Reload page (`navigate_page({ type: "reload", ignoreCache: true })`)
+5. Re-run trace → confirm the insight is gone
+6. Repeat until no actionable insights remain
