@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
@@ -26,8 +26,6 @@ export const useDetailCanvasLayer = ({
 	const viewportRef = usePdf((state) => state.viewportRef);
 
 	const [zoom] = useDebounce(bouncyZoom, 200);
-	const [scrollTick, setScrollTick] = useState(0);
-	const [debouncedScrollTick] = useDebounce(scrollTick, 20);
 
 	const ensureDetailCanvas = useCallback(() => {
 		let detailCanvas = detailCanvasRef.current;
@@ -75,34 +73,20 @@ export const useDetailCanvasLayer = ({
 		[],
 	);
 
-	// Listen to scroll events to trigger re-renders
-	useLayoutEffect(() => {
+	const rafRef = useRef(0);
+	const renderTaskRef = useRef<ReturnType<typeof pdfPageProxy.render> | null>(
+		null,
+	);
+
+	const updateDetailCanvas = useCallback(() => {
 		const scrollContainer = viewportRef?.current;
 		if (!scrollContainer) return;
-		const handleScroll = () => {
-			setScrollTick((prev) => prev + 1);
-		};
-		scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
-		return () => {
-			scrollContainer.removeEventListener("scroll", handleScroll);
-		};
-	}, [viewportRef?.current]);
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: debouncedScrollTick is intentionally added to trigger re-renders on scroll
-	useLayoutEffect(() => {
-		if (!viewportRef?.current) {
-			return;
-		}
 
 		const detailCanvas = ensureDetailCanvas();
 		const container = containerRef.current;
-		if (!detailCanvas || !container) {
-			return;
-		}
+		if (!detailCanvas || !container) return;
 
-		const scrollContainer = viewportRef.current;
 		const pageContainer = baseCanvasRef.current?.parentElement ?? null;
-
 		if (!pageContainer) {
 			detailCanvas.style.display = "none";
 			detailCanvas.width = 0;
@@ -114,9 +98,20 @@ export const useDetailCanvasLayer = ({
 		const pageWidth = baseViewport.width;
 		const pageHeight = baseViewport.height;
 
+		const targetDetailScale = dpr * zoom * 1.3;
+		const baseTargetScale = dpr * Math.min(zoom, 1);
+		const baseScale = clampScaleForPage(baseTargetScale, pageWidth, pageHeight);
+		const needsDetail = zoom > 1 && targetDetailScale - baseScale > 1e-3;
+
+		if (!needsDetail) {
+			detailCanvas.style.display = "none";
+			detailCanvas.width = 0;
+			detailCanvas.height = 0;
+			return;
+		}
+
 		const scrollX = scrollContainer.scrollLeft / zoom;
 		const scrollY = scrollContainer.scrollTop / zoom;
-
 		const viewportWidth = scrollContainer.clientWidth / zoom;
 		const viewportHeight = scrollContainer.clientHeight / zoom;
 
@@ -140,12 +135,7 @@ export const useDetailCanvasLayer = ({
 		const visibleWidth = Math.max(0, visibleRight - visibleLeft);
 		const visibleHeight = Math.max(0, visibleBottom - visibleTop);
 
-		const targetDetailScale = dpr * zoom * 1.3;
-		const baseTargetScale = dpr * Math.min(zoom, 1);
-		const baseScale = clampScaleForPage(baseTargetScale, pageWidth, pageHeight);
-		const needsDetail = zoom > 1 && targetDetailScale - baseScale > 1e-3;
-
-		if (!needsDetail || visibleWidth <= 0 || visibleHeight <= 0) {
+		if (visibleWidth <= 0 || visibleHeight <= 0) {
 			detailCanvas.style.display = "none";
 			detailCanvas.width = 0;
 			detailCanvas.height = 0;
@@ -157,64 +147,43 @@ export const useDetailCanvasLayer = ({
 		const pdfOffsetX = visibleLeft;
 		const pdfOffsetY = visibleTop;
 
-		const pdfWidth = visibleWidth * targetDetailScale;
-		const pdfHeight = visibleHeight * targetDetailScale;
-
 		const effectiveScale = targetDetailScale;
-		const actualWidth = pdfWidth;
-		const actualHeight = pdfHeight;
+		const actualWidth = visibleWidth * effectiveScale;
+		const actualHeight = visibleHeight * effectiveScale;
 
 		detailCanvas.width = actualWidth;
 		detailCanvas.height = actualHeight;
 
-		const scaledWidth = visibleWidth * zoom;
-		const scaledHeight = visibleHeight * zoom;
-
-		detailCanvas.style.width = `${scaledWidth}px`;
-		detailCanvas.style.height = `${scaledHeight}px`;
+		detailCanvas.style.width = `${visibleWidth * zoom}px`;
+		detailCanvas.style.height = `${visibleHeight * zoom}px`;
 
 		detailCanvas.style.transformOrigin = "center center";
 		detailCanvas.style.transform = `translate(${visibleLeft * zoom}px, ${visibleTop * zoom}px) `;
 		container.style.transform = `scale3d(${1 / zoom}, ${1 / zoom}, 1)`;
-
 		container.style.transformOrigin = `0 0`;
+
 		const context = detailCanvas.getContext("2d");
-		if (!context) {
-			return;
-		}
+		if (!context) return;
 
 		context.setTransform(1, 0, 0, 1, 0, 0);
 		context.clearRect(0, 0, detailCanvas.width, detailCanvas.height);
 
-		const transform = [
-			1,
-			0,
-			0,
-			1,
-			-pdfOffsetX * effectiveScale,
-			-pdfOffsetY * effectiveScale,
-		];
+		if (renderTaskRef.current) {
+			void renderTaskRef.current.cancel();
+		}
 
 		const detailViewport = pdfPageProxy.getViewport({ scale: effectiveScale });
-		const renderingTask = pdfPageProxy.render({
+		renderTaskRef.current = pdfPageProxy.render({
 			canvasContext: context,
 			viewport: detailViewport,
 			background,
-			transform,
+			transform: [1, 0, 0, 1, -pdfOffsetX * effectiveScale, -pdfOffsetY * effectiveScale],
 		});
 
-		renderingTask.promise.catch((error) => {
-			if (error.name === "RenderingCancelledException") {
-				return;
-			}
-
+		renderTaskRef.current.promise.catch((error) => {
+			if (error.name === "RenderingCancelledException") return;
 			throw error;
 		});
-
-		return () => {
-			void renderingTask.cancel();
-		};
-		// debouncedScrollTick is intentionally added to trigger re-renders on scroll
 	}, [
 		pdfPageProxy,
 		zoom,
@@ -224,8 +193,47 @@ export const useDetailCanvasLayer = ({
 		ensureDetailCanvas,
 		clampScaleForPage,
 		baseCanvasRef,
-		debouncedScrollTick,
 	]);
+
+	// Set up scroll-driven detail canvas updates outside React's render cycle.
+	// Only active when zoom > 1, completely skipped at zoom <= 1.
+	useLayoutEffect(() => {
+		const scrollContainer = viewportRef?.current;
+		if (!scrollContainer || zoom <= 1) {
+			const detailCanvas = detailCanvasRef.current;
+			if (detailCanvas) {
+				detailCanvas.style.display = "none";
+				detailCanvas.width = 0;
+				detailCanvas.height = 0;
+			}
+			return;
+		}
+
+		updateDetailCanvas();
+
+		let debounceTimer: ReturnType<typeof setTimeout>;
+		const handleScroll = () => {
+			clearTimeout(debounceTimer);
+			debounceTimer = setTimeout(() => {
+				cancelAnimationFrame(rafRef.current);
+				rafRef.current = requestAnimationFrame(updateDetailCanvas);
+			}, 20);
+		};
+
+		scrollContainer.addEventListener("scroll", handleScroll, {
+			passive: true,
+		});
+
+		return () => {
+			scrollContainer.removeEventListener("scroll", handleScroll);
+			clearTimeout(debounceTimer);
+			cancelAnimationFrame(rafRef.current);
+			if (renderTaskRef.current) {
+				void renderTaskRef.current.cancel();
+				renderTaskRef.current = null;
+			}
+		};
+	}, [zoom, viewportRef, updateDetailCanvas]);
 
 	return {
 		detailCanvasRef,

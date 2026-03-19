@@ -1,21 +1,31 @@
+import type { PDFPageProxy } from "pdfjs-dist";
 import { TextLayer } from "pdfjs-dist";
 import { useEffect, useRef } from "react";
 
 import { usePdf } from "../../internal";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
-// Add custom property declarations
 interface TextLayerDivElement extends HTMLDivElement {
 	_textSelectionBound?: boolean;
 	_cleanupTextSelection?: () => void;
 }
+
+// Cache rendered text layer DOM across virtualizer mount/unmount cycles.
+// Keyed on PDFPageProxy so entries are GC'd when the document is released.
+const textLayerDOMCache = new WeakMap<PDFPageProxy, DocumentFragment>();
 
 const createTextSelectionManager = () => {
 	const textLayers = new Map<HTMLDivElement, HTMLElement>();
 	let selectionChangeAbortController: AbortController | null = null;
 	let isPointerDown = false;
 	let prevRange: Range | null = null;
-	let isFirefox: boolean | undefined;
+	let isFirefox: boolean | null = null;
+
+	const detectFirefox = (el: HTMLDivElement) => {
+		if (isFirefox !== null) return;
+		isFirefox =
+			getComputedStyle(el).getPropertyValue("-moz-user-select") === "none";
+	};
 
 	const removeGlobalSelectionListener = (textLayerDiv: HTMLDivElement) => {
 		textLayers.delete(textLayerDiv);
@@ -108,16 +118,6 @@ const createTextSelectionManager = () => {
 					}
 				}
 
-				if (isFirefox === undefined) {
-					const firstTextLayer = textLayers.keys().next().value;
-					if (firstTextLayer) {
-						isFirefox =
-							getComputedStyle(firstTextLayer).getPropertyValue(
-								"-moz-user-select",
-							) === "none";
-					}
-				}
-
 				if (isFirefox) {
 					return;
 				}
@@ -168,6 +168,7 @@ const createTextSelectionManager = () => {
 
 		textLayers.set(textLayerDiv, endOfContent);
 		enableGlobalSelectionListener();
+		detectFirefox(textLayerDiv);
 
 		const handleMouseDown = () => {
 			textLayerDiv.classList.add("selecting");
@@ -196,61 +197,83 @@ export const useTextLayer = () => {
 
 	useEffect(() => {
 		const textContainer = textContainerRef.current;
-		if (!textContainer || isRenderingRef.current) {
-			return;
-		}
+		if (!textContainer) return;
 
-		isRenderingRef.current = true;
+		const cached = textLayerDOMCache.get(pdfPageProxy);
+		if (cached) {
+			textLayerDOMCache.delete(pdfPageProxy);
+			textContainer.appendChild(cached);
 
-		textContainer.innerHTML = "";
-
-		if (textLayerRef.current) {
-			textLayerRef.current.cancel();
-			textLayerRef.current = null;
-		}
-
-		const textLayer = new TextLayer({
-			textContentSource: pdfPageProxy.streamTextContent(),
-			container: textContainer,
-			viewport: pdfPageProxy.getViewport({ scale: 1 }),
-		});
-
-		textLayerRef.current = textLayer;
-
-		textLayer
-			.render()
-			.then(() => {
-				if (textLayerRef.current === textLayer && textContainer) {
-					const endOfContent = document.createElement("div");
-					endOfContent.className = "endOfContent";
-					textContainer.appendChild(endOfContent);
-
-					bindMouseEvents(textContainer, endOfContent);
-				}
-			})
-			.catch((error) => {
-				if (error.name !== "AbortException") {
-					console.error("TextLayer rendering error:", error);
-				}
-			})
-			.finally(() => {
-				isRenderingRef.current = false;
-			});
-
-		return () => {
-			isRenderingRef.current = false;
+			const endOfContent = textContainer.querySelector(
+				".endOfContent",
+			) as HTMLElement;
+			if (endOfContent) {
+				bindMouseEvents(textContainer, endOfContent);
+			}
+		} else if (!isRenderingRef.current) {
+			isRenderingRef.current = true;
+			textContainer.replaceChildren();
 
 			if (textLayerRef.current) {
 				textLayerRef.current.cancel();
 				textLayerRef.current = null;
 			}
 
-			if (textContainer?._cleanupTextSelection) {
+			const textLayer = new TextLayer({
+				textContentSource: pdfPageProxy.streamTextContent(),
+				container: textContainer,
+				viewport: pdfPageProxy.getViewport({ scale: 1 }),
+			});
+
+			textLayerRef.current = textLayer;
+
+			textLayer
+				.render()
+				.then(() => {
+					if (textLayerRef.current === textLayer && textContainer) {
+						const endOfContent = document.createElement("div");
+						endOfContent.className = "endOfContent";
+						textContainer.appendChild(endOfContent);
+
+						bindMouseEvents(textContainer, endOfContent);
+					}
+				})
+				.catch((error) => {
+					if (error.name !== "AbortException") {
+						console.error("TextLayer rendering error:", error);
+					}
+				})
+				.finally(() => {
+					isRenderingRef.current = false;
+				});
+		}
+
+		return () => {
+			if (isRenderingRef.current) {
+				isRenderingRef.current = false;
+				if (textLayerRef.current) {
+					textLayerRef.current.cancel();
+					textLayerRef.current = null;
+				}
+			} else if (textContainer.childNodes.length > 0) {
+				const fragment = document.createDocumentFragment();
+				while (textContainer.firstChild) {
+					fragment.appendChild(textContainer.firstChild);
+				}
+				textLayerDOMCache.set(pdfPageProxy, fragment);
+
+				if (textLayerRef.current) {
+					textLayerRef.current.cancel();
+					textLayerRef.current = null;
+				}
+			}
+
+			if (textContainer._cleanupTextSelection) {
 				textContainer._cleanupTextSelection();
 				delete textContainer._cleanupTextSelection;
 			}
 		};
-	}, [pdfPageProxy.streamTextContent, pdfPageProxy.getViewport]);
+	}, [pdfPageProxy]);
 
 	return {
 		textContainerRef,

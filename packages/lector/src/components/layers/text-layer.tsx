@@ -18,6 +18,7 @@ export const TextLayer = ({
 				position: "absolute",
 				top: 0,
 				left: 0,
+				contain: "layout style",
 			}}
 			{...props}
 			{...{
