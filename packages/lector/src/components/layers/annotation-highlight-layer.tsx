@@ -11,10 +11,10 @@ import {
 interface AnnotationHighlightLayerProps {
 	className?: string;
 	style?: React.CSSProperties;
-	renderTooltipContent: (
+	renderTooltipContent?: (
 		props: AnnotationTooltipContentProps,
 	) => React.ReactNode;
-	renderHoverTooltipContent: (props: {
+	renderHoverTooltipContent?: (props: {
 		annotation: Annotation;
 		onClose: () => void;
 	}) => React.ReactNode;
@@ -137,7 +137,7 @@ export const AnnotationHighlightLayer = ({
 							}
 						}}
 						renderTooltipContent={renderTooltipContent}
-						hoverTooltipContent={renderHoverTooltipContent({
+						hoverTooltipContent={renderHoverTooltipContent?.({
 							annotation,
 							onClose: () => {},
 						})}
