@@ -30,11 +30,13 @@
 		"postbuild": "size-limit --json > size.json",
 		"test": "pnpm run '/^test:/'",
 		"test:unit": "vitest run",
+		"test:e2e": "playwright test",
 		"test:size": "size-limit",
 		"prepack": "./scripts/prepack.sh"
 	},
 	"devDependencies": {
 		"@microsoft/api-extractor": "^7.48.1",
+		"@playwright/test": "^1.58.2",
 		"@size-limit/preset-small-lib": "^11.1.6",
 		"@testing-library/react": "^16.0.0",
 		"@types/node": "^22.9.0",
