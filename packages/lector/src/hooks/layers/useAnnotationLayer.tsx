@@ -1,9 +1,8 @@
+import { AnnotationLayer as PdfjsAnnotationLayer } from "pdfjs-dist";
 import { useEffect, useMemo, useRef } from "react";
 
 import { usePdf } from "../../internal";
 import { ensureAnnotationLayerStyles } from "../../lib/annotation-layer-styles";
-import { cancellable } from "../../lib/cancellable";
-import { loadPdfJs } from "../../lib/pdfjs";
 import { usePdfJump } from "../pages/usePdfJump";
 import { usePDFLinkService } from "../usePDFLinkService";
 import { usePDFPageNumber } from "../usePdfPageNumber";
@@ -129,41 +128,45 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 			return;
 		}
 
-		// Update the pdfDocumentProxy in the linkService
 		if (linkService._pdfDocumentProxy !== pdfDocumentProxy) {
 			linkService.setDocument(pdfDocumentProxy);
 		}
 
-		// Clear the current layer
-		annotationLayerRef.current.innerHTML = "";
+		const container = annotationLayerRef.current;
+		let cancelled = false;
 
-		// Add necessary class for styling
-		annotationLayerRef.current.className = "annotationLayer";
+		const rafId = requestAnimationFrame(() => {
+			if (cancelled || !container.isConnected) return;
 
-		const viewport = pdfPageProxy.getViewport({ scale: 1 }).clone({
-			dontFlip: true,
-		});
+			container.replaceChildren();
+			container.className = "annotationLayer";
 
-		const annotationLayerConfig = {
-			div: annotationLayerRef.current,
-			viewport: viewport,
-			page: pdfPageProxy,
-			linkService: linkService as never,
-			annotationStorage: undefined,
-			accessibilityManager: undefined,
-			annotationCanvasMap: undefined,
-			annotationEditorUIManager: undefined,
-			structTreeLayer: undefined,
-			commentManager: undefined,
-		};
+			const viewport = pdfPageProxy.getViewport({ scale: 1 }).clone({
+				dontFlip: true,
+			});
 
-		const { cancel } = cancellable(
+			const annotationLayerConfig = {
+				div: container,
+				viewport: viewport,
+				page: pdfPageProxy,
+				linkService: linkService as never,
+				annotationStorage: undefined,
+				accessibilityManager: undefined,
+				annotationCanvasMap: undefined,
+				annotationEditorUIManager: undefined,
+				structTreeLayer: undefined,
+				commentManager: undefined,
+			};
+
 			(async () => {
 				try {
-					const { AnnotationLayer } = await loadPdfJs();
-					const annotationLayer = new AnnotationLayer(annotationLayerConfig);
+					if (cancelled) return;
+					const annotationLayer = new PdfjsAnnotationLayer(
+						annotationLayerConfig,
+					);
 					annotationLayerObjectRef.current = annotationLayer;
 					const annotations = await pdfPageProxy.getAnnotations();
+					if (cancelled) return;
 
 					await annotationLayer.render({
 						...annotationLayerConfig,
@@ -174,11 +177,12 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 				} catch (_error) {
 					// Silently handle rendering errors
 				}
-			})(),
-		);
+			})();
+		});
 
 		return () => {
-			cancel();
+			cancelled = true;
+			cancelAnimationFrame(rafId);
 		};
 	}, [pdfPageProxy, pdfDocumentProxy, mergedParams, linkService]);
 
