@@ -13,7 +13,7 @@ import {
 } from "@anaralabs/lector";
 import "@/lib/setup";
 import { useSearchParams } from "next/navigation";
-import { useMemo, useEffect, useRef } from "react";
+import { Suspense, useMemo, useEffect, useRef } from "react";
 
 type LayerConfig = {
 	canvas: boolean;
@@ -222,6 +222,20 @@ function useBenchAPI(layers: LayerConfig) {
 }
 
 export default function BenchPage() {
+	return (
+		<Suspense
+			fallback={
+				<div className="h-screen w-screen bg-neutral-900 flex items-center justify-center text-white">
+					Loading...
+				</div>
+			}
+		>
+			<BenchContent />
+		</Suspense>
+	);
+}
+
+function BenchContent() {
 	const searchParams = useSearchParams();
 	const pdfKey = searchParams.get("pdf") ?? "pathways";
 	const pdfUrl = PDFS[pdfKey] ?? PDFS.pathways;

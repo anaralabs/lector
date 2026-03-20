@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build": "next build",
+    "build": "NODE_OPTIONS='--require ./lib/node-polyfills.cjs' next build",
     "dev": "next dev --port 3001",
     "start": "next start",
     "postinstall": "fumadocs-mdx",
@@ -37,6 +37,7 @@
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
     "autoprefixer": "^10.4.20",
+    "eslint": "^10.0.3",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.16",
     "typescript": "^5.7.2"
