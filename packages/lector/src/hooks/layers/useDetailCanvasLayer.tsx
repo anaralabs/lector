@@ -84,7 +84,8 @@ export const useDetailCanvasLayer = ({
 		}
 
 		let renderingTask: RenderTask | null = null;
-		let renderTimeoutId: NodeJS.Timeout | null = null;
+		let animationFrameId: number | null = null;
+		let renderTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 		const hideDetailCanvas = () => {
 			renderingTask?.cancel();
@@ -105,15 +106,29 @@ export const useDetailCanvasLayer = ({
 			const pageWidth = baseViewport.width;
 			const pageHeight = baseViewport.height;
 
+			// Check needsDetail BEFORE reading layout properties
+			const targetDetailScale = dpr * zoom * 1.3;
+			const baseTargetScale = dpr * Math.min(zoom, 1);
+			const baseScale = clampScaleForPage(
+				baseTargetScale,
+				pageWidth,
+				pageHeight,
+			);
+			const needsDetail = zoom > 1 && targetDetailScale - baseScale > 1e-3;
+
+			if (!needsDetail) {
+				hideDetailCanvas();
+				return;
+			}
+
+			// Only read layout properties when we actually need detail rendering
 			const scrollX = scrollContainer.scrollLeft / zoom;
 			const scrollY = scrollContainer.scrollTop / zoom;
-
 			const viewportWidth = scrollContainer.clientWidth / zoom;
 			const viewportHeight = scrollContainer.clientHeight / zoom;
 
 			const pageRect = pageContainer.getBoundingClientRect();
 			const containerRect = scrollContainer.getBoundingClientRect();
-
 			const pageLeft = (pageRect.left - containerRect.left) / zoom + scrollX;
 			const pageTop = (pageRect.top - containerRect.top) / zoom + scrollY;
 
@@ -131,32 +146,19 @@ export const useDetailCanvasLayer = ({
 			const visibleWidth = Math.max(0, visibleRight - visibleLeft);
 			const visibleHeight = Math.max(0, visibleBottom - visibleTop);
 
-			const targetDetailScale = dpr * zoom * 1.3;
-			const baseTargetScale = dpr * Math.min(zoom, 1);
-			const baseScale = clampScaleForPage(
-				baseTargetScale,
-				pageWidth,
-				pageHeight,
-			);
-			const needsDetail = zoom > 1 && targetDetailScale - baseScale > 1e-3;
-
-			if (
-				isPinching ||
-				!needsDetail ||
-				visibleWidth <= 0 ||
-				visibleHeight <= 0
-			) {
+			if (isPinching || visibleWidth <= 0 || visibleHeight <= 0) {
 				hideDetailCanvas();
 				return;
 			}
 
-			renderingTask?.cancel();
+			if (renderingTask) {
+				void renderingTask.cancel();
+				renderingTask = null;
+			}
 
 			detailCanvas.style.display = "block";
 			detailCanvas.style.opacity = "0";
 
-			const pdfOffsetX = visibleLeft;
-			const pdfOffsetY = visibleTop;
 			const effectiveScale = targetDetailScale;
 			const actualWidth = visibleWidth * effectiveScale;
 			const actualHeight = visibleHeight * effectiveScale;
@@ -185,8 +187,8 @@ export const useDetailCanvasLayer = ({
 				0,
 				0,
 				1,
-				-pdfOffsetX * effectiveScale,
-				-pdfOffsetY * effectiveScale,
+				-visibleLeft * effectiveScale,
+				-visibleTop * effectiveScale,
 			];
 			const detailViewport = pdfPageProxy.getViewport({
 				scale: effectiveScale,
@@ -221,23 +223,27 @@ export const useDetailCanvasLayer = ({
 				});
 		};
 
-		const scheduleRender = (delay = DETAIL_RENDER_IDLE_MS) => {
+		const scheduleRender = (delayMs: number) => {
 			if (renderTimeoutId !== null) {
 				clearTimeout(renderTimeoutId);
 			}
+			if (animationFrameId !== null) {
+				cancelAnimationFrame(animationFrameId);
+			}
 
-			hideDetailCanvas();
-
-			renderTimeoutId = setTimeout(() => {
-				renderTimeoutId = null;
-				renderDetailCanvas();
-			}, delay);
+			if (delayMs <= 0) {
+				animationFrameId = requestAnimationFrame(renderDetailCanvas);
+			} else {
+				renderTimeoutId = setTimeout(() => {
+					animationFrameId = requestAnimationFrame(renderDetailCanvas);
+				}, delayMs);
+			}
 		};
 
-		const unsubscribe = subscribeToViewportInvalidation(
-			scrollContainer,
-			scheduleRender,
-		);
+		const unsubscribe = subscribeToViewportInvalidation(scrollContainer, () => {
+			hideDetailCanvas();
+			scheduleRender(DETAIL_RENDER_IDLE_MS);
+		});
 
 		scheduleRender(isPinching ? DETAIL_RENDER_IDLE_MS * 2 : 0);
 
@@ -246,6 +252,9 @@ export const useDetailCanvasLayer = ({
 
 			if (renderTimeoutId !== null) {
 				clearTimeout(renderTimeoutId);
+			}
+			if (animationFrameId !== null) {
+				cancelAnimationFrame(animationFrameId);
 			}
 
 			void renderingTask?.cancel();

@@ -145,14 +145,14 @@ export const PDFStore = createZustandContext(
 				});
 			},
 
-			isPinching: false,
-			setIsPinching: (val) => {
-				set({
-					isPinching: val,
-				});
-			},
+		isPinching: false,
+		setIsPinching: (val) => {
+			set({
+				isPinching: val,
+			});
+		},
 
-			virtualizer: null,
+		virtualizer: null,
 			setVirtualizer: (val) => {
 				set({
 					virtualizer: val,

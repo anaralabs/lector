@@ -1,21 +1,31 @@
+import type { PDFPageProxy } from "pdfjs-dist";
+import { TextLayer as PdfjsTextLayer } from "pdfjs-dist";
 import { useEffect, useRef } from "react";
 
 import { usePdf } from "../../internal";
-import { loadPdfJs } from "../../lib/pdfjs";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
-// Add custom property declarations
 interface TextLayerDivElement extends HTMLDivElement {
 	_textSelectionBound?: boolean;
 	_cleanupTextSelection?: () => void;
 }
+
+// Cache rendered text layer DOM across virtualizer mount/unmount cycles.
+// Keyed on PDFPageProxy so entries are GC'd when the document is released.
+const textLayerDOMCache = new WeakMap<PDFPageProxy, DocumentFragment>();
 
 const createTextSelectionManager = () => {
 	const textLayers = new Map<HTMLDivElement, HTMLElement>();
 	let selectionChangeAbortController: AbortController | null = null;
 	let isPointerDown = false;
 	let prevRange: Range | null = null;
-	let isFirefox: boolean | undefined;
+	let isFirefox: boolean | null = null;
+
+	const detectFirefox = (el: HTMLDivElement) => {
+		if (isFirefox !== null) return;
+		isFirefox =
+			getComputedStyle(el).getPropertyValue("-moz-user-select") === "none";
+	};
 
 	const removeGlobalSelectionListener = (textLayerDiv: HTMLDivElement) => {
 		textLayers.delete(textLayerDiv);
@@ -108,16 +118,6 @@ const createTextSelectionManager = () => {
 					}
 				}
 
-				if (isFirefox === undefined) {
-					const firstTextLayer = textLayers.keys().next().value;
-					if (firstTextLayer) {
-						isFirefox =
-							getComputedStyle(firstTextLayer).getPropertyValue(
-								"-moz-user-select",
-							) === "none";
-					}
-				}
-
 				if (isFirefox) {
 					return;
 				}
@@ -168,6 +168,7 @@ const createTextSelectionManager = () => {
 
 		textLayers.set(textLayerDiv, endOfContent);
 		enableGlobalSelectionListener();
+		detectFirefox(textLayerDiv);
 
 		const handleMouseDown = () => {
 			textLayerDiv.classList.add("selecting");
@@ -199,77 +200,107 @@ export const useTextLayer = () => {
 
 	useEffect(() => {
 		const textContainer = textContainerRef.current;
-		if (!textContainer || isRenderingRef.current) {
+		if (!textContainer) return;
+
+		// Restore cached DOM instantly if available
+		const cached = textLayerDOMCache.get(pdfPageProxy);
+		if (cached) {
+			textLayerDOMCache.delete(pdfPageProxy);
+			textContainer.replaceChildren(cached);
+
+			const endOfContent = textContainer.querySelector(
+				".endOfContent",
+			) as HTMLElement;
+			if (endOfContent) {
+				bindMouseEvents(textContainer, endOfContent);
+			}
 			return;
 		}
 
-		let isCancelled = false;
+		if (isRenderingRef.current) return;
 
-		isRenderingRef.current = true;
+		let cancelled = false;
 
-		textContainer.innerHTML = "";
+		// Push text layer rendering to the next frame via rAF so it
+		// doesn't block the current scroll frame. React's useEffect
+		// fires in the same long animation frame as the scroll handler;
+		// rAF defers the expensive pdfjs layout work to the next frame.
+		const rafId = requestAnimationFrame(() => {
+			if (cancelled || !textContainerRef.current) return;
 
-		if (textLayerRef.current) {
-			textLayerRef.current.cancel();
-			textLayerRef.current = null;
-		}
-
-		void loadPdfJs()
-			.then(({ TextLayer }) => {
-				if (isCancelled || textContainerRef.current !== textContainer) {
-					return;
-				}
-
-				const textLayer = new TextLayer({
-					textContentSource: pdfPageProxy.streamTextContent(),
-					container: textContainer,
-					viewport: pdfPageProxy.getViewport({ scale: 1 }),
-				});
-
-				textLayerRef.current = textLayer;
-
-				return textLayer.render();
-			})
-			.then(() => {
-				const textLayer = textLayerRef.current;
-				if (
-					!textLayer ||
-					isCancelled ||
-					textContainerRef.current !== textContainer
-				) {
-					return;
-				}
-
-				const endOfContent = document.createElement("div");
-				endOfContent.className = "endOfContent";
-				textContainer.appendChild(endOfContent);
-
-				bindMouseEvents(textContainer, endOfContent);
-			})
-			.catch((error) => {
-				if (error.name !== "AbortException") {
-					console.error("TextLayer rendering error:", error);
-				}
-			})
-			.finally(() => {
-				isRenderingRef.current = false;
-			});
-
-		return () => {
-			isCancelled = true;
-			isRenderingRef.current = false;
+			isRenderingRef.current = true;
+			textContainer.replaceChildren();
 
 			if (textLayerRef.current) {
 				textLayerRef.current.cancel();
 				textLayerRef.current = null;
 			}
 
-			if (textContainer?._cleanupTextSelection) {
+			const textLayer = new PdfjsTextLayer({
+				textContentSource: pdfPageProxy.streamTextContent(),
+				container: textContainer,
+				viewport: pdfPageProxy.getViewport({ scale: 1 }),
+			});
+
+			textLayerRef.current = textLayer;
+
+			textLayer
+				.render()
+				.then(() => {
+					if (
+						!cancelled &&
+						textLayerRef.current === textLayer &&
+						textContainer
+					) {
+						const endOfContent = document.createElement("div");
+						endOfContent.className = "endOfContent";
+						textContainer.appendChild(endOfContent);
+						bindMouseEvents(textContainer, endOfContent);
+					}
+				})
+				.catch((error) => {
+					if (
+						error instanceof Error &&
+						error.name !== "AbortException"
+					) {
+						console.error("TextLayer rendering error:", error);
+					}
+				})
+				.finally(() => {
+					isRenderingRef.current = false;
+				});
+		});
+
+		return () => {
+			cancelled = true;
+			cancelAnimationFrame(rafId);
+
+			if (isRenderingRef.current) {
+				isRenderingRef.current = false;
+				if (textLayerRef.current) {
+					textLayerRef.current.cancel();
+					textLayerRef.current = null;
+				}
+			} else if (textContainer.childNodes.length > 0) {
+				// Save rendered DOM to cache on unmount
+				const fragment = document.createDocumentFragment();
+				while (textContainer.firstChild) {
+					fragment.appendChild(textContainer.firstChild);
+				}
+				textLayerDOMCache.set(pdfPageProxy, fragment);
+
+				if (textLayerRef.current) {
+					textLayerRef.current.cancel();
+					textLayerRef.current = null;
+				}
+			}
+
+			if (textContainer._cleanupTextSelection) {
 				textContainer._cleanupTextSelection();
 				delete textContainer._cleanupTextSelection;
 			}
 		};
-	}, [pdfPageProxy.streamTextContent, pdfPageProxy.getViewport]);
+	}, [pdfPageProxy]);
 
 	return {
 		textContainerRef,

@@ -1,4 +1,5 @@
-import { useCallback, useLayoutEffect, useRef } from "react";
+import type { PDFPageProxy } from "pdfjs-dist";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
@@ -7,6 +8,40 @@ import { usePDFPageNumber } from "../usePdfPageNumber";
 
 const MAX_CANVAS_PIXELS = 16777216;
 const MAX_CANVAS_DIMENSION = 32767;
+
+// Cache rendered bitmaps keyed on PDFPageProxy (document-aware).
+// Different PDFs have different proxy objects, so there's no cross-doc leaking.
+// Entries are GC'd automatically when the document is released.
+const canvasBitmapCache = new WeakMap<
+	PDFPageProxy,
+	Map<number, ImageBitmap>
+>();
+
+function getCachedBitmap(
+	proxy: PDFPageProxy,
+	scale: number,
+): ImageBitmap | null {
+	const scaleKey = Math.round(scale * 1e4);
+	return canvasBitmapCache.get(proxy)?.get(scaleKey) ?? null;
+}
+
+function setCachedBitmap(
+	proxy: PDFPageProxy,
+	scale: number,
+	bitmap: ImageBitmap,
+): void {
+	const scaleKey = Math.round(scale * 1e4);
+	let map = canvasBitmapCache.get(proxy);
+	if (!map) {
+		map = new Map();
+		canvasBitmapCache.set(proxy, map);
+	}
+	const existing = map.get(scaleKey);
+	if (existing && existing !== bitmap) {
+		existing.close();
+	}
+	map.set(scaleKey, bitmap);
+}
 
 export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -73,8 +108,18 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			return;
 		}
 
+		// Restore from cache instantly (keyed on PDFPageProxy — document-aware)
+		const cached = getCachedBitmap(pdfPageProxy, baseScale);
+		if (cached) {
+			context.drawImage(cached, 0, 0);
+			return;
+		}
+
 		context.setTransform(1, 0, 0, 1, 0, 0);
 		context.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+
+		// Hide canvas during render to prevent flash of partial content
+		baseCanvas.style.visibility = "hidden";
 
 		const viewport = pdfPageProxy.getViewport({ scale: baseScale });
 
@@ -85,20 +130,38 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			background,
 		});
 
-		renderingTask.promise.catch((error) => {
-			if (error.name === "RenderingCancelledException") {
-				return;
-			}
-
-			throw error;
-		});
+		renderingTask.promise
+			.then(() => {
+				baseCanvas.style.visibility = "";
+				if (typeof createImageBitmap !== "undefined") {
+					createImageBitmap(baseCanvas).then((bitmap) => {
+						setCachedBitmap(pdfPageProxy, baseScale, bitmap);
+					});
+				}
+			})
+			.catch((error) => {
+				if (error.name === "RenderingCancelledException") {
+					return;
+				}
+				throw error;
+			});
 
 		return () => {
 			void renderingTask.cancel();
 		};
-		// We intentionally omit baseScale dependencies derived from zoom to avoid redundant renders
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [pdfPageProxy, background, dpr, zoom, clampScaleForPage]);
+
+	// Release GPU memory on unmount
+	useEffect(
+		() => () => {
+			if (canvasRef.current) {
+				canvasRef.current.width = 0;
+				canvasRef.current.height = 0;
+			}
+		},
+		[],
+	);
 
 	return {
 		canvasRef,
