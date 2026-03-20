@@ -22,7 +22,7 @@
     "fumadocs-ui": "14.6.2",
     "lucide-react": "^0.469.0",
     "next": "15.1.11",
-    "pdfjs-dist": "^5.5.207",
+    "pdfjs-dist": "^4.10.38",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "shiki": "^1.24.4",

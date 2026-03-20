@@ -18,12 +18,12 @@ Lector follows a component-based architecture with three main layers:
 First, set up the PDF.js worker:
 
 ```tsx
-import { GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { GlobalWorkerOptions } from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
 
 // Set up the worker
 GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/legacy/build/pdf.worker.mjs",
+  "pdfjs-dist/build/pdf.worker.mjs",
   import.meta.url
 ).toString();
 ```

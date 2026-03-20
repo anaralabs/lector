@@ -7,8 +7,8 @@ description: Complete guide to installing and setting up Lector in your React ap
 
 Before installing Lector, make sure you have:
 
-- Node.js 18.0 or later
-- React 19 or later
+- Node.js 16.0 or later
+- A React project (version 16.8 or later)
 - npm, yarn, pnpm, or bun package manager
 
 ## Installing the Package
@@ -38,12 +38,12 @@ bun add @anaralabs/lector pdfjs-dist
 In your PDF viewer component:
 
 ```tsx
-import { GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { GlobalWorkerOptions } from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
 
 // Set up the worker
 GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/legacy/build/pdf.worker.mjs",
+  "pdfjs-dist/build/pdf.worker.mjs",
   import.meta.url
 ).toString();
 
@@ -66,7 +66,7 @@ In your PDF viewer component:
 
 ```tsx
 import { Root, Pages, Page, CanvasLayer } from "@anaralabs/lector";
-import "pdfjs-dist/legacy/build/pdf.worker.min.mjs";
+import "pdfjs-dist/build/pdf.worker.min.mjs";
 import "pdfjs-dist/web/pdf_viewer.css";
 
 export function PDFViewer() {

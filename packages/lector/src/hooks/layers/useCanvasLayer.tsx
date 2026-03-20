@@ -66,7 +66,6 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		baseCanvas.style.transform = "translate(0px, 0px)";
 		baseCanvas.style.zIndex = "0";
 		baseCanvas.style.pointerEvents = "none";
-		baseCanvas.style.backgroundColor = background ?? "white";
 
 		const context = baseCanvas.getContext("2d");
 		if (!context) {
@@ -79,7 +78,6 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const viewport = pdfPageProxy.getViewport({ scale: baseScale });
 
 		const renderingTask = pdfPageProxy.render({
-			canvas: baseCanvas,
 			canvasContext: context,
 			viewport,
 			background,
