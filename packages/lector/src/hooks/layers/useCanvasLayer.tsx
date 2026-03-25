@@ -46,6 +46,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 	// Track the last successfully rendered scale to avoid redundant low-res passes
 	const lastRenderedScaleRef = useRef(0);
+	const lastBackgroundRef = useRef(background);
 	const lastPageProxyRef = useRef(pdfPageProxy);
 
 	useEffect(() => {
@@ -53,9 +54,10 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			return;
 		}
 
-		// Only reset when the page changes, not on every zoom/dpr change
-		if (lastPageProxyRef.current !== pdfPageProxy) {
+		// Reset when the page or background changes so we force a re-render
+		if (lastPageProxyRef.current !== pdfPageProxy || lastBackgroundRef.current !== background) {
 			lastPageProxyRef.current = pdfPageProxy;
+			lastBackgroundRef.current = background;
 			lastRenderedScaleRef.current = 0;
 		}
 
