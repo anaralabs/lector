@@ -147,18 +147,18 @@ export const useDetailCanvasLayer = ({
 			const actualWidth = visibleWidth * effectiveScale;
 			const actualHeight = visibleHeight * effectiveScale;
 
-			detailCanvas.width = actualWidth;
-			detailCanvas.height = actualHeight;
-			detailCanvas.style.cssText = `${detailBaseStyle};display:block;opacity:0;width:${visibleWidth * zoom}px;height:${visibleHeight * zoom}px;transform-origin:center center;transform:translate(${visibleLeft * zoom}px,${visibleTop * zoom}px)`;
-			container.style.cssText = `transform:scale3d(${1 / zoom},${1 / zoom},1);transform-origin:0 0`;
+			// Double-buffer: render to an offscreen buffer so the old detail
+			// canvas stays visible during the render (no flash to pixelated base)
+			const buffer = document.createElement("canvas");
+			buffer.width = actualWidth;
+			buffer.height = actualHeight;
 
-			const context = detailCanvas.getContext("2d");
-			if (!context) {
+			const bufferCtx = buffer.getContext("2d");
+			if (!bufferCtx) {
 				return;
 			}
 
-			context.setTransform(1, 0, 0, 1, 0, 0);
-			context.clearRect(0, 0, detailCanvas.width, detailCanvas.height);
+			bufferCtx.setTransform(1, 0, 0, 1, 0, 0);
 
 			const transform = [
 				1,
@@ -173,8 +173,8 @@ export const useDetailCanvasLayer = ({
 			});
 
 			const currentRenderingTask = pdfPageProxy.render({
-				canvas: detailCanvas,
-				canvasContext: context,
+				canvas: buffer,
+				canvasContext: bufferCtx,
 				viewport: detailViewport,
 				background,
 				transform,
@@ -183,8 +183,17 @@ export const useDetailCanvasLayer = ({
 
 			currentRenderingTask.promise
 				.then(() => {
-					if (renderingTask === currentRenderingTask) {
-						detailCanvas.style.opacity = "1";
+					if (renderingTask !== currentRenderingTask) return;
+
+					// Swap: update the visible detail canvas in one go
+					detailCanvas.width = actualWidth;
+					detailCanvas.height = actualHeight;
+					detailCanvas.style.cssText = `${detailBaseStyle};display:block;opacity:1;width:${visibleWidth * zoom}px;height:${visibleHeight * zoom}px;transform-origin:center center;transform:translate(${visibleLeft * zoom}px,${visibleTop * zoom}px)`;
+					container.style.cssText = `transform:scale3d(${1 / zoom},${1 / zoom},1);transform-origin:0 0`;
+
+					const ctx = detailCanvas.getContext("2d");
+					if (ctx) {
+						ctx.drawImage(buffer, 0, 0);
 					}
 				})
 				.catch((error) => {
@@ -206,7 +215,9 @@ export const useDetailCanvasLayer = ({
 				clearTimeout(renderTimeoutId);
 			}
 
-			hideDetailCanvas();
+			// Cancel any in-progress render but keep the old detail canvas
+			// visible — stale sharpness is better than a flash to pixelated base
+			renderingTask?.cancel();
 
 			renderTimeoutId = setTimeout(() => {
 				renderTimeoutId = null;

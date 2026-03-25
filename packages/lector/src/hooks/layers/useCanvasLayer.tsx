@@ -44,7 +44,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		[],
 	);
 
-	// Track the last successfully rendered scale to avoid redundant low-res passes
+	// Track the last rendered state to skip redundant renders
 	const lastRenderedScaleRef = useRef(0);
 	const lastBackgroundRef = useRef(background);
 	const lastPageProxyRef = useRef(pdfPageProxy);
@@ -67,39 +67,30 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const bgColor = background ?? "white";
 
 		const targetBaseScale = dpr * Math.min(zoom, 1);
-		const fullScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
+		const baseScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
 
 		// Skip re-render if scale hasn't changed (e.g. zoom > 1 doesn't affect base canvas)
-		if (fullScale === lastRenderedScaleRef.current) {
+		if (baseScale === lastRenderedScaleRef.current) {
 			return;
 		}
-
-		// Progressive rendering: if DPR > 1, render at 1x first, then upgrade
-		const needsProgressive = dpr > 1 && lastRenderedScaleRef.current === 0;
-		const lowScale = needsProgressive
-			? clampScaleForPage(1 * Math.min(zoom, 1), pageWidth, pageHeight)
-			: fullScale;
 
 		let cancelled = false;
 		// Mutable object so the cleanup function always cancels the latest render,
 		// even when a hi-res job is enqueued asynchronously inside a .then()
 		const cancelRef = { current: () => {} };
 
-		// Double-buffer: render to a temporary canvas, then swap onto the visible
-		// canvas in a single frame. This prevents the white flash that would occur
-		// if we cleared the visible canvas before the render completed.
-		const renderAtScale = (scale: number): Promise<void> => {
+		const job = renderQueue.enqueue(() => {
 			return new Promise<void>((resolve, reject) => {
 				if (cancelled || !canvasRef.current) {
 					resolve();
 					return;
 				}
 
-				const w = Math.floor(pageWidth * scale);
-				const h = Math.floor(pageHeight * scale);
+				const w = Math.floor(pageWidth * baseScale);
+				const h = Math.floor(pageHeight * baseScale);
 
-				// Render to an offscreen buffer so the visible canvas keeps
-				// its old content until the new render is complete
+				// Double-buffer: render to a temporary canvas, then swap onto the
+				// visible canvas in a single frame to avoid white flash
 				const buffer = document.createElement("canvas");
 				buffer.width = w;
 				buffer.height = h;
@@ -110,7 +101,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 					return;
 				}
 
-				const viewport = pdfPageProxy.getViewport({ scale });
+				const viewport = pdfPageProxy.getViewport({ scale: baseScale });
 
 				const renderingTask = pdfPageProxy.render({
 					canvas: buffer,
@@ -137,7 +128,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 							ctx.drawImage(buffer, 0, 0);
 						}
 
-						lastRenderedScaleRef.current = scale;
+						lastRenderedScaleRef.current = baseScale;
 						resolve();
 					})
 					.catch((error) => {
@@ -155,25 +146,8 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 					prevCancel();
 				};
 			});
-		};
-
-		if (needsProgressive && lowScale < fullScale) {
-			// Phase 1: Quick low-res render (queued)
-			const lowRes = renderQueue.enqueue(() => renderAtScale(lowScale));
-			cancelRef.current = lowRes.cancel;
-
-			// Phase 2: Full-res upgrade (queued after low-res)
-			lowRes.promise.then(() => {
-				if (cancelled) return;
-				const hiRes = renderQueue.enqueue(() => renderAtScale(fullScale));
-				cancelRef.current = hiRes.cancel;
-				hiRes.promise.catch(() => {});
-			});
-		} else {
-			// Single render at full scale (queued)
-			const job = renderQueue.enqueue(() => renderAtScale(fullScale));
-			cancelRef.current = job.cancel;
-		}
+		});
+		cancelRef.current = job.cancel;
 
 		return () => {
 			cancelled = true;
