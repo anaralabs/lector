@@ -157,6 +157,12 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		return () => {
 			cancelled = true;
 			cancelRef.current();
+			// Release canvas memory for Safari, which holds onto it even after
+			// elements leave the DOM (384 MB total canvas limit on iOS)
+			if (canvasRef.current) {
+				canvasRef.current.width = 1;
+				canvasRef.current.height = 1;
+			}
 		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [pdfPageProxy, background, dpr, zoom, clampScaleForPage]);

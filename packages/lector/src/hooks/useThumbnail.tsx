@@ -90,6 +90,11 @@ export const useThumbnail = (
 
 		return () => {
 			renderTaskRef.current?.cancel();
+			// Release canvas memory for Safari (384 MB total canvas limit on iOS)
+			if (canvasRef.current) {
+				canvasRef.current.width = 1;
+				canvasRef.current.height = 1;
+			}
 		};
 	}, [pageProxy, isVisible, dpr, maxHeight, maxWidth]);
 

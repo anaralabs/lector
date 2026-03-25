@@ -249,6 +249,11 @@ export const useDetailCanvasLayer = ({
 			}
 
 			void renderingTask?.cancel();
+			// Release canvas memory for Safari (384 MB total canvas limit on iOS)
+			if (detailCanvasRef.current) {
+				detailCanvasRef.current.width = 1;
+				detailCanvasRef.current.height = 1;
+			}
 		};
 	}, [
 		pdfPageProxy,
