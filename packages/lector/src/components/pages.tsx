@@ -99,12 +99,16 @@ export const Pages = ({
 	const { scrollToFn } = useScrollFn();
 	const { observeElementOffset } = useObserveElement();
 
+	const viewportsRef = useRef(viewports);
+	viewportsRef.current = viewports;
+
 	const estimateSize = useCallback(
 		(index: number) => {
-			if (!viewports || !viewports[index]) return DEFAULT_HEIGHT;
-			return viewports[index].height + EXTRA_HEIGHT;
+			const vp = viewportsRef.current;
+			if (!vp || !vp[index]) return DEFAULT_HEIGHT;
+			return vp[index].height + EXTRA_HEIGHT;
 		},
-		[viewports],
+		[], // Stable — reads from ref
 	);
 
 	const virtualizer = useVirtualizer({

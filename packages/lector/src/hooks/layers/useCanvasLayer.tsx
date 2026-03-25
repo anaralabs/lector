@@ -84,15 +84,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 				const canvas = canvasRef.current;
 				canvas.width = Math.floor(pageWidth * scale);
 				canvas.height = Math.floor(pageHeight * scale);
-				canvas.style.position = "absolute";
-				canvas.style.top = "0";
-				canvas.style.left = "0";
-				canvas.style.width = `${pageWidth}px`;
-				canvas.style.height = `${pageHeight}px`;
-				canvas.style.transform = "translate(0px, 0px)";
-				canvas.style.zIndex = "0";
-				canvas.style.pointerEvents = "none";
-				canvas.style.backgroundColor = background ?? "white";
+				canvas.style.cssText = `position:absolute;top:0;left:0;width:${pageWidth}px;height:${pageHeight}px;transform:translate(0px,0px);z-index:0;pointer-events:none;background-color:${background ?? "white"}`;
 
 				const context = canvas.getContext("2d");
 				if (!context) {

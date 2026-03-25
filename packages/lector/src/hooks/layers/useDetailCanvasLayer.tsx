@@ -32,20 +32,8 @@ export const useDetailCanvasLayer = ({
 	const [zoom] = useDebounce(bouncyZoom, 200);
 
 	const getDetailCanvas = useCallback(() => {
-		const detailCanvas = detailCanvasRef.current;
-		if (!detailCanvas) {
-			return null;
-		}
-
-		detailCanvas.style.position = "absolute";
-		detailCanvas.style.top = "0";
-		detailCanvas.style.left = "0";
-		detailCanvas.style.pointerEvents = "none";
-		detailCanvas.style.zIndex = "1";
-		detailCanvas.style.backgroundColor = background ?? "white";
-
-		return detailCanvas;
-	}, [background]);
+		return detailCanvasRef.current;
+	}, []);
 
 	const clampScaleForPage = useCallback(
 		(targetScale: number, pageWidth: number, pageHeight: number) => {
@@ -86,12 +74,13 @@ export const useDetailCanvasLayer = ({
 		let renderingTask: RenderTask | null = null;
 		let renderTimeoutId: NodeJS.Timeout | null = null;
 
+		const bgColor = background ?? "white";
+		const detailBaseStyle = `position:absolute;top:0;left:0;pointer-events:none;z-index:1;background-color:${bgColor}`;
+
 		const hideDetailCanvas = () => {
 			renderingTask?.cancel();
-			detailCanvas.style.display = "block";
-			detailCanvas.style.opacity = "0";
-			container.style.transform = "";
-			container.style.transformOrigin = "";
+			detailCanvas.style.cssText = `${detailBaseStyle};display:block;opacity:0`;
+			container.style.cssText = "";
 		};
 
 		const renderDetailCanvas = () => {
@@ -152,9 +141,6 @@ export const useDetailCanvasLayer = ({
 
 			renderingTask?.cancel();
 
-			detailCanvas.style.display = "block";
-			detailCanvas.style.opacity = "0";
-
 			const pdfOffsetX = visibleLeft;
 			const pdfOffsetY = visibleTop;
 			const effectiveScale = targetDetailScale;
@@ -163,14 +149,8 @@ export const useDetailCanvasLayer = ({
 
 			detailCanvas.width = actualWidth;
 			detailCanvas.height = actualHeight;
-			detailCanvas.style.width = `${visibleWidth * zoom}px`;
-			detailCanvas.style.height = `${visibleHeight * zoom}px`;
-			detailCanvas.style.transformOrigin = "center center";
-			detailCanvas.style.transform = `translate(${visibleLeft * zoom}px, ${
-				visibleTop * zoom
-			}px)`;
-			container.style.transform = `scale3d(${1 / zoom}, ${1 / zoom}, 1)`;
-			container.style.transformOrigin = "0 0";
+			detailCanvas.style.cssText = `${detailBaseStyle};display:block;opacity:0;width:${visibleWidth * zoom}px;height:${visibleHeight * zoom}px;transform-origin:center center;transform:translate(${visibleLeft * zoom}px,${visibleTop * zoom}px)`;
+			container.style.cssText = `transform:scale3d(${1 / zoom},${1 / zoom},1);transform-origin:0 0`;
 
 			const context = detailCanvas.getContext("2d");
 			if (!context) {
