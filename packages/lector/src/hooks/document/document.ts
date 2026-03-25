@@ -29,6 +29,11 @@ export interface usePDFDocumentParams {
 	isZoomFitWidth?: boolean;
 	zoom?: number;
 	zoomOptions?: ZoomOptions;
+	/**
+	 * Override or extend the PDF.js DocumentInitParameters passed to getDocument().
+	 * These take highest precedence over both the source object and lector's defaults.
+	 */
+	documentOptions?: Partial<DocumentInitParameters>;
 }
 
 export type Source =
@@ -38,6 +43,37 @@ export type Source =
 	| ArrayBuffer
 	| DocumentInitParameters;
 
+function buildDocumentInitParams(
+	source: Source,
+	overrides?: Partial<DocumentInitParameters>,
+): DocumentInitParameters {
+	let params: DocumentInitParameters;
+
+	if (typeof source === "string" || source instanceof URL) {
+		params = { url: source };
+	} else if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
+		params = { data: source };
+	} else {
+		params = { ...source };
+	}
+
+	const defaults: Partial<DocumentInitParameters> = {
+		// Skip the slow _guessMax binary-search auto-detection of max canvas area.
+		// 1 GiB = 256 megapixels at 4 bytes/pixel. If the device can't allocate
+		// this, pdfjs falls back gracefully via try/catch.
+		canvasMaxAreaInBytes: 1024 * 1024 * 1024,
+		// Enable GPU-backed canvases (willReadFrequently: false). PDF viewers are
+		// render-dominated — they don't call getImageData() — so GPU compositing
+		// is the correct path. This is the browser's default when no hint is given.
+		enableHWA: true,
+		// Explicitly opt-in to OffscreenCanvas in the worker for image processing.
+		// Already the browser default, but being explicit avoids edge cases.
+		isOffscreenCanvasSupported: true,
+	};
+
+	return { ...defaults, ...params, ...overrides };
+}
+
 export const usePDFDocumentContext = ({
 	onDocumentLoad,
 	source,
@@ -45,6 +81,7 @@ export const usePDFDocumentContext = ({
 	isZoomFitWidth,
 	zoom = 1,
 	zoomOptions,
+	documentOptions,
 }: usePDFDocumentParams) => {
 	const [_, setProgress] = useState(0);
 
@@ -98,7 +135,7 @@ export const usePDFDocumentContext = ({
 						return;
 					}
 
-					loadingTask = getDocument(source);
+					loadingTask = getDocument(buildDocumentInitParams(source, documentOptions));
 					loadingTask.onProgress = (progressEvent: OnProgressParameters) => {
 						if (progressEvent.loaded === progressEvent.total) {
 							return;
