@@ -52,11 +52,8 @@ export const ColoredHighlightLayer = ({
 	return (
 		<div className="colored-highlights-layer">
 			{pageHighlights.map((selection) => (
-					<ColoredHighlightComponent
-						key={selection.uuid}
-						selection={selection}
-					/>
-				))}
+				<ColoredHighlightComponent key={selection.uuid} selection={selection} />
+			))}
 			<ColorSelectionTool
 				onColorSelection={(colorItem) => handleHighlighting(colorItem.color)}
 			/>

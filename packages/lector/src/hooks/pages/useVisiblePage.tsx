@@ -1,5 +1,5 @@
 import type { VirtualItem } from "@tanstack/react-virtual";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import { usePdf } from "../../internal";
 
@@ -12,6 +12,8 @@ export const useVisiblePage = ({ items }: UseVisiblePageProps) => {
 	const isPinching = usePdf((state) => state.isPinching);
 	const setCurrentPage = usePdf((state) => state.setCurrentPage);
 	const scrollElement = usePdf((state) => state.viewportRef?.current);
+
+	const lastPageRef = useRef(0);
 
 	const calculateVisiblePageIndex = useCallback(
 		(virtualItems: VirtualItem[]) => {
@@ -44,8 +46,13 @@ export const useVisiblePage = ({ items }: UseVisiblePageProps) => {
 	useEffect(() => {
 		if (!isPinching && items.length > 0) {
 			const mostVisibleIndex = calculateVisiblePageIndex(items);
+			const page = mostVisibleIndex + 1;
 
-			setCurrentPage?.(mostVisibleIndex + 1);
+			// Skip the state update if the page hasn't actually changed
+			if (page !== lastPageRef.current) {
+				lastPageRef.current = page;
+				setCurrentPage?.(page);
+			}
 		}
 	}, [items, isPinching, calculateVisiblePageIndex, setCurrentPage]);
 

@@ -46,25 +46,34 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 	// Track the last successfully rendered scale to avoid redundant low-res passes
 	const lastRenderedScaleRef = useRef(0);
+	const lastPageProxyRef = useRef(pdfPageProxy);
 
 	useEffect(() => {
 		if (!canvasRef.current) {
 			return;
 		}
 
-		// Reset when page changes so progressive rendering always runs for new pages
-		lastRenderedScaleRef.current = 0;
+		// Only reset when the page changes, not on every zoom/dpr change
+		if (lastPageProxyRef.current !== pdfPageProxy) {
+			lastPageProxyRef.current = pdfPageProxy;
+			lastRenderedScaleRef.current = 0;
+		}
 
-		const baseCanvas = canvasRef.current;
 		const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
 		const pageWidth = baseViewport.width;
 		const pageHeight = baseViewport.height;
+		const bgColor = background ?? "white";
 
 		const targetBaseScale = dpr * Math.min(zoom, 1);
 		const fullScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
 
+		// Skip re-render if scale hasn't changed (e.g. zoom > 1 doesn't affect base canvas)
+		if (fullScale === lastRenderedScaleRef.current) {
+			return;
+		}
+
 		// Progressive rendering: if DPR > 1, render at 1x first, then upgrade
-		const needsProgressive = dpr > 1 && lastRenderedScaleRef.current !== fullScale;
+		const needsProgressive = dpr > 1 && lastRenderedScaleRef.current === 0;
 		const lowScale = needsProgressive
 			? clampScaleForPage(1 * Math.min(zoom, 1), pageWidth, pageHeight)
 			: fullScale;
@@ -74,6 +83,9 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		// even when a hi-res job is enqueued asynchronously inside a .then()
 		const cancelRef = { current: () => {} };
 
+		// Double-buffer: render to a temporary canvas, then swap onto the visible
+		// canvas in a single frame. This prevents the white flash that would occur
+		// if we cleared the visible canvas before the render completed.
 		const renderAtScale = (scale: number): Promise<void> => {
 			return new Promise<void>((resolve, reject) => {
 				if (cancelled || !canvasRef.current) {
@@ -81,34 +93,49 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 					return;
 				}
 
-				const canvas = canvasRef.current;
-				canvas.width = Math.floor(pageWidth * scale);
-				canvas.height = Math.floor(pageHeight * scale);
-				canvas.style.cssText = `position:absolute;top:0;left:0;width:${pageWidth}px;height:${pageHeight}px;transform:translate(0px,0px);z-index:0;pointer-events:none;background-color:${background ?? "white"}`;
+				const w = Math.floor(pageWidth * scale);
+				const h = Math.floor(pageHeight * scale);
 
-				const context = canvas.getContext("2d");
-				if (!context) {
+				// Render to an offscreen buffer so the visible canvas keeps
+				// its old content until the new render is complete
+				const buffer = document.createElement("canvas");
+				buffer.width = w;
+				buffer.height = h;
+
+				const bufferCtx = buffer.getContext("2d");
+				if (!bufferCtx) {
 					resolve();
 					return;
 				}
 
-				context.setTransform(1, 0, 0, 1, 0, 0);
-				context.clearRect(0, 0, canvas.width, canvas.height);
-
 				const viewport = pdfPageProxy.getViewport({ scale });
 
 				const renderingTask = pdfPageProxy.render({
-					canvas,
-					canvasContext: context,
+					canvas: buffer,
+					canvasContext: bufferCtx,
 					viewport,
 					background,
 				});
 
 				renderingTask.promise
 					.then(() => {
-						if (!cancelled) {
-							lastRenderedScaleRef.current = scale;
+						if (cancelled || !canvasRef.current) {
+							resolve();
+							return;
 						}
+
+						// Swap: copy the completed render onto the visible canvas
+						const canvas = canvasRef.current;
+						canvas.width = w;
+						canvas.height = h;
+						canvas.style.cssText = `position:absolute;top:0;left:0;width:${pageWidth}px;height:${pageHeight}px;transform:translate(0px,0px);z-index:0;pointer-events:none;background-color:${bgColor}`;
+
+						const ctx = canvas.getContext("2d");
+						if (ctx) {
+							ctx.drawImage(buffer, 0, 0);
+						}
+
+						lastRenderedScaleRef.current = scale;
 						resolve();
 					})
 					.catch((error) => {
@@ -149,15 +176,21 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		return () => {
 			cancelled = true;
 			cancelRef.current();
-			// Release canvas memory for Safari, which holds onto it even after
-			// elements leave the DOM (384 MB total canvas limit on iOS)
-			if (canvasRef.current) {
-				canvasRef.current.width = 1;
-				canvasRef.current.height = 1;
-			}
 		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [pdfPageProxy, background, dpr, zoom, clampScaleForPage]);
+
+	// Release canvas memory for Safari on unmount only (not between re-renders,
+	// which would cause a visible white flash during zoom)
+	useEffect(() => {
+		const canvas = canvasRef.current;
+		return () => {
+			if (canvas) {
+				canvas.width = 1;
+				canvas.height = 1;
+			}
+		};
+	}, []);
 
 	return {
 		canvasRef,

@@ -13,7 +13,10 @@ class RenderQueue {
 	private queue: RenderJob[] = [];
 	private running = false;
 
-	enqueue(execute: () => Promise<void>): { promise: Promise<void>; cancel: () => void } {
+	enqueue(execute: () => Promise<void>): {
+		promise: Promise<void>;
+		cancel: () => void;
+	} {
 		let resolve: () => void;
 		let reject: (error: unknown) => void;
 

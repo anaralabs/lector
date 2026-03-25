@@ -18,6 +18,10 @@ import { useViewportContainer } from "../hooks/viewport/useViewportContainer";
 import { usePdf } from "../internal";
 import { Primitive } from "./primitive";
 
+const selectLargestPageWidth = (state: {
+	viewports: Array<{ width: number }>;
+}) => state.viewports.reduce((max, vp) => Math.max(max, vp.width), 0);
+
 const DEFAULT_HEIGHT = 600;
 const EXTRA_HEIGHT = 0;
 
@@ -166,11 +170,7 @@ export const Pages = ({
 	});
 
 	useFitWidth({ viewportRef: containerRef });
-	const largestPageWidth = usePdf((state) =>
-		state.viewports.reduce((largestWidth, viewport) => {
-			return Math.max(largestWidth, viewport.width);
-		}, 0),
-	);
+	const largestPageWidth = usePdf(selectLargestPageWidth);
 
 	useEffect(() => {
 		virtualizer.getOffsetForAlignment = (

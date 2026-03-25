@@ -136,7 +136,9 @@ export const usePDFDocumentContext = ({
 						return;
 					}
 
-					loadingTask = getDocument(buildDocumentInitParams(source, documentOptions));
+					loadingTask = getDocument(
+						buildDocumentInitParams(source, documentOptions),
+					);
 					loadingTask.onProgress = (progressEvent: OnProgressParameters) => {
 						if (progressEvent.loaded === progressEvent.total) {
 							return;
