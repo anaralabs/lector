@@ -1,7 +1,8 @@
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
+import { renderQueue } from "../../lib/render-queue";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
@@ -43,7 +44,10 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		[],
 	);
 
-	useLayoutEffect(() => {
+	// Track the last successfully rendered scale to avoid redundant low-res passes
+	const lastRenderedScaleRef = useRef(0);
+
+	useEffect(() => {
 		if (!canvasRef.current) {
 			return;
 		}
@@ -54,49 +58,101 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const pageHeight = baseViewport.height;
 
 		const targetBaseScale = dpr * Math.min(zoom, 1);
-		const baseScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
+		const fullScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
 
-		baseCanvas.width = Math.floor(pageWidth * baseScale);
-		baseCanvas.height = Math.floor(pageHeight * baseScale);
-		baseCanvas.style.position = "absolute";
-		baseCanvas.style.top = "0";
-		baseCanvas.style.left = "0";
-		baseCanvas.style.width = `${pageWidth}px`;
-		baseCanvas.style.height = `${pageHeight}px`;
-		baseCanvas.style.transform = "translate(0px, 0px)";
-		baseCanvas.style.zIndex = "0";
-		baseCanvas.style.pointerEvents = "none";
-		baseCanvas.style.backgroundColor = background ?? "white";
+		// Progressive rendering: if DPR > 1, render at 1x first, then upgrade
+		const needsProgressive = dpr > 1 && lastRenderedScaleRef.current !== fullScale;
+		const lowScale = needsProgressive
+			? clampScaleForPage(1 * Math.min(zoom, 1), pageWidth, pageHeight)
+			: fullScale;
 
-		const context = baseCanvas.getContext("2d");
-		if (!context) {
-			return;
+		let cancelled = false;
+		let cancelQueue: (() => void) | null = null;
+
+		const renderAtScale = (scale: number): Promise<void> => {
+			return new Promise<void>((resolve, reject) => {
+				if (cancelled || !canvasRef.current) {
+					resolve();
+					return;
+				}
+
+				const canvas = canvasRef.current;
+				canvas.width = Math.floor(pageWidth * scale);
+				canvas.height = Math.floor(pageHeight * scale);
+				canvas.style.position = "absolute";
+				canvas.style.top = "0";
+				canvas.style.left = "0";
+				canvas.style.width = `${pageWidth}px`;
+				canvas.style.height = `${pageHeight}px`;
+				canvas.style.transform = "translate(0px, 0px)";
+				canvas.style.zIndex = "0";
+				canvas.style.pointerEvents = "none";
+				canvas.style.backgroundColor = background ?? "white";
+
+				const context = canvas.getContext("2d");
+				if (!context) {
+					resolve();
+					return;
+				}
+
+				context.setTransform(1, 0, 0, 1, 0, 0);
+				context.clearRect(0, 0, canvas.width, canvas.height);
+
+				const viewport = pdfPageProxy.getViewport({ scale });
+
+				const renderingTask = pdfPageProxy.render({
+					canvas,
+					canvasContext: context,
+					viewport,
+					background,
+				});
+
+				renderingTask.promise
+					.then(() => {
+						if (!cancelled) {
+							lastRenderedScaleRef.current = scale;
+						}
+						resolve();
+					})
+					.catch((error) => {
+						if (error.name === "RenderingCancelledException") {
+							resolve();
+							return;
+						}
+						reject(error);
+					});
+
+				// Store cancel handle for cleanup
+				const prevCancel = cancelQueue;
+				cancelQueue = () => {
+					void renderingTask.cancel();
+					prevCancel?.();
+				};
+			});
+		};
+
+		if (needsProgressive && lowScale < fullScale) {
+			// Phase 1: Quick low-res render (queued)
+			const lowRes = renderQueue.enqueue(() => renderAtScale(lowScale));
+			cancelQueue = lowRes.cancel;
+
+			// Phase 2: Full-res upgrade (queued after low-res)
+			lowRes.promise.then(() => {
+				if (cancelled) return;
+				const hiRes = renderQueue.enqueue(() => renderAtScale(fullScale));
+				cancelQueue = hiRes.cancel;
+				hiRes.promise.catch(() => {});
+			});
+		} else {
+			// Single render at full scale (queued)
+			const job = renderQueue.enqueue(() => renderAtScale(fullScale));
+			cancelQueue = job.cancel;
 		}
 
-		context.setTransform(1, 0, 0, 1, 0, 0);
-		context.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
-
-		const viewport = pdfPageProxy.getViewport({ scale: baseScale });
-
-		const renderingTask = pdfPageProxy.render({
-			canvas: baseCanvas,
-			canvasContext: context,
-			viewport,
-			background,
-		});
-
-		renderingTask.promise.catch((error) => {
-			if (error.name === "RenderingCancelledException") {
-				return;
-			}
-
-			throw error;
-		});
-
 		return () => {
-			void renderingTask.cancel();
+			cancelled = true;
+			cancelQueue?.();
 		};
-		// We intentionally omit baseScale dependencies derived from zoom to avoid redundant renders
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [pdfPageProxy, background, dpr, zoom, clampScaleForPage]);
 
