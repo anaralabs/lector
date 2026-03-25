@@ -52,6 +52,9 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			return;
 		}
 
+		// Reset when page changes so progressive rendering always runs for new pages
+		lastRenderedScaleRef.current = 0;
+
 		const baseCanvas = canvasRef.current;
 		const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
 		const pageWidth = baseViewport.width;
@@ -67,7 +70,9 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			: fullScale;
 
 		let cancelled = false;
-		let cancelQueue: (() => void) | null = null;
+		// Mutable object so the cleanup function always cancels the latest render,
+		// even when a hi-res job is enqueued asynchronously inside a .then()
+		const cancelRef = { current: () => {} };
 
 		const renderAtScale = (scale: number): Promise<void> => {
 			return new Promise<void>((resolve, reject) => {
@@ -122,11 +127,11 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 						reject(error);
 					});
 
-				// Store cancel handle for cleanup
-				const prevCancel = cancelQueue;
-				cancelQueue = () => {
+				// Store cancel handle so cleanup always cancels the latest render
+				const prevCancel = cancelRef.current;
+				cancelRef.current = () => {
 					void renderingTask.cancel();
-					prevCancel?.();
+					prevCancel();
 				};
 			});
 		};
@@ -134,24 +139,24 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		if (needsProgressive && lowScale < fullScale) {
 			// Phase 1: Quick low-res render (queued)
 			const lowRes = renderQueue.enqueue(() => renderAtScale(lowScale));
-			cancelQueue = lowRes.cancel;
+			cancelRef.current = lowRes.cancel;
 
 			// Phase 2: Full-res upgrade (queued after low-res)
 			lowRes.promise.then(() => {
 				if (cancelled) return;
 				const hiRes = renderQueue.enqueue(() => renderAtScale(fullScale));
-				cancelQueue = hiRes.cancel;
+				cancelRef.current = hiRes.cancel;
 				hiRes.promise.catch(() => {});
 			});
 		} else {
 			// Single render at full scale (queued)
 			const job = renderQueue.enqueue(() => renderAtScale(fullScale));
-			cancelQueue = job.cancel;
+			cancelRef.current = job.cancel;
 		}
 
 		return () => {
 			cancelled = true;
-			cancelQueue?.();
+			cancelRef.current();
 		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [pdfPageProxy, background, dpr, zoom, clampScaleForPage]);

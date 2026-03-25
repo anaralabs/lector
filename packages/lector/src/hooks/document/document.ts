@@ -32,6 +32,7 @@ export interface usePDFDocumentParams {
 	/**
 	 * Override or extend the PDF.js DocumentInitParameters passed to getDocument().
 	 * These take highest precedence over both the source object and lector's defaults.
+	 * Must be a stable reference (module-level constant or useMemo) to avoid reloading the document.
 	 */
 	documentOptions?: Partial<DocumentInitParameters>;
 }
