@@ -166,10 +166,6 @@ export const useDetailCanvasLayer = ({
 					if (ctx) {
 						ctx.drawImage(buffer, 0, 0);
 					}
-
-					// Release buffer canvas memory (Safari holds onto it)
-					buffer.width = 0;
-					buffer.height = 0;
 				})
 				.catch((error) => {
 					if (error.name === "RenderingCancelledException") {
@@ -182,6 +178,9 @@ export const useDetailCanvasLayer = ({
 					if (renderingTask === currentRenderingTask) {
 						renderingTask = null;
 					}
+					// Always release buffer — cancellations and stale tasks leak otherwise
+					buffer.width = 0;
+					buffer.height = 0;
 				});
 		};
 
