@@ -19,6 +19,8 @@ export const Root = forwardRef(
 			source,
 			loader,
 			onDocumentLoad,
+			onError,
+			onPassword,
 			isZoomFitWidth,
 			zoom,
 			zoomOptions,
@@ -33,6 +35,8 @@ export const Root = forwardRef(
 		const { initialState } = usePDFDocumentContext({
 			source,
 			onDocumentLoad,
+			onError,
+			onPassword,
 			isZoomFitWidth,
 			zoom,
 			zoomOptions,
