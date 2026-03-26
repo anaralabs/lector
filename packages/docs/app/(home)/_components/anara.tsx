@@ -29,7 +29,10 @@ import DocumentMenu from "./document-menu";
 import { PageNavigation } from "./page-navigation";
 import ZoomMenu from "./zoom-menu";
 
-const fileUrl = "/pdf/pathways.pdf";
+const DEFAULT_PDF = "/pdf/pathways.pdf";
+const ALT_PDF = "/pdf/2506.13188v1.pdf";
+const condition = 1;
+const fileUrl = condition === 1 ? ALT_PDF : DEFAULT_PDF;
 const STORAGE_KEY = "pdf-annotations";
 
 interface PDFContentProps {
