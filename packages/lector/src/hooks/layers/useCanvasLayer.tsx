@@ -17,6 +17,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const bouncyZoom = usePdf((state) => state.zoom);
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const markPageRendered = usePdf((state) => state.markPageRendered);
+	const unmarkPageRendered = usePdf((state) => state.unmarkPageRendered);
 	const documentId = usePdf(
 		(state) => state.pdfDocumentProxy.fingerprints[0] ?? "default",
 	);
@@ -136,18 +137,15 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 						swapToCanvas(buffer, w, h);
 						markPageRendered(pageNumber);
 
-						// Cache in background for instant scroll-back
-						void renderCache.set(
-							documentId,
-							pageNumber,
-							baseScale,
-							buffer,
-							background,
-						);
-
-						// Release buffer canvas memory (Safari holds onto it)
-						buffer.width = 0;
-						buffer.height = 0;
+						// Cache for instant scroll-back, then release buffer
+						renderCache
+							.set(documentId, pageNumber, baseScale, buffer, background)
+							.finally(() => {
+								// Release buffer canvas memory (Safari holds onto it)
+								// Only after createImageBitmap has read the pixels
+								buffer.width = 0;
+								buffer.height = 0;
+							});
 
 						resolve();
 					})
@@ -182,16 +180,17 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		markPageRendered,
 	]);
 
-	// Release canvas memory for Safari on unmount only
+	// Cleanup on unmount: release canvas memory (Safari) and unmark page
 	useEffect(() => {
 		const canvas = canvasRef.current;
 		return () => {
+			unmarkPageRendered(pageNumber);
 			if (canvas) {
 				canvas.width = 1;
 				canvas.height = 1;
 			}
 		};
-	}, []);
+	}, [pageNumber, unmarkPageRendered]);
 
 	return {
 		canvasRef,

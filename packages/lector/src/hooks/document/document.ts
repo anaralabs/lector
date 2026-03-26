@@ -116,9 +116,9 @@ export const usePDFDocumentContext = ({
 				}),
 			);
 
-			const sortedPageProxies = pageProxies.sort((a, b) => {
-				return a.pageNumber - b.pageNumber;
-			});
+			const sortedPageProxies = pageProxies.toSorted(
+				(a, b) => a.pageNumber - b.pageNumber,
+			);
 			setInitialState((prev) => ({
 				...prev,
 				isZoomFitWidth,

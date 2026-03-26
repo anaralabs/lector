@@ -24,6 +24,7 @@ const selectLargestPageWidth = (state: {
 
 const DEFAULT_HEIGHT = 600;
 const EXTRA_HEIGHT = 0;
+const DEFAULT_VIRTUALIZER_OPTIONS = { overscan: 1 };
 
 interface VirtualizedPageItemProps {
 	child: ReactElement;
@@ -69,7 +70,7 @@ VirtualizedPageItem.displayName = "VirtualizedPageItem";
 export const Pages = ({
 	children,
 	gap = 10,
-	virtualizerOptions = { overscan: 1 },
+	virtualizerOptions = DEFAULT_VIRTUALIZER_OPTIONS,
 	initialOffset,
 	onOffsetChange,
 	...props
