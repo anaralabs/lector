@@ -78,6 +78,9 @@ interface PDFState {
 	coloredHighlights: ColoredHighlight[];
 	addColoredHighlight: (value: ColoredHighlight) => void;
 	deleteColoredHighlight: (uuid: string) => void;
+
+	renderedPages: Set<number>;
+	markPageRendered: (pageNumber: number) => void;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -199,6 +202,15 @@ export const PDFStore = createZustandContext(
 						(rect) => rect.uuid !== uuid,
 					),
 				})),
+
+			renderedPages: new Set<number>(),
+			markPageRendered: (pageNumber: number) => {
+				const current = get().renderedPages;
+				if (current.has(pageNumber)) return;
+				const next = new Set(current);
+				next.add(pageNumber);
+				set({ renderedPages: next });
+			},
 		}));
 	},
 );

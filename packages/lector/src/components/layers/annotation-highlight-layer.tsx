@@ -3,6 +3,7 @@ import type React from "react";
 import type { Annotation } from "../../hooks/useAnnotations";
 import { useAnnotations } from "../../hooks/useAnnotations";
 import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
+import { usePdf } from "../../internal";
 import {
 	AnnotationTooltip,
 	type AnnotationTooltipContentProps,
@@ -50,10 +51,15 @@ export const AnnotationHighlightLayer = ({
 }: AnnotationHighlightLayerProps) => {
 	const { annotations } = useAnnotations();
 	const pageNumber = usePDFPageNumber();
+	const isPageRendered = usePdf(
+		(state) => state.renderedPages.has(pageNumber),
+	);
 
 	const pageAnnotations = annotations.filter(
 		(annotation) => annotation.pageNumber === pageNumber,
 	);
+
+	if (!isPageRendered) return null;
 
 	const getCommentIconPosition = (highlights: Annotation["highlights"]) => {
 		if (!highlights.length) return { top: 0, right: 10 };

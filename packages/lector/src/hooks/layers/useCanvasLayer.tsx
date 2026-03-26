@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
+import { renderCache } from "../../lib/render-cache";
 import { renderQueue } from "../../lib/render-queue";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
@@ -17,6 +18,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 	const bouncyZoom = usePdf((state) => state.zoom);
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
+	const markPageRendered = usePdf((state) => state.markPageRendered);
 
 	const [zoom] = useDebounce(bouncyZoom, 100);
 
@@ -69,25 +71,47 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const targetBaseScale = dpr * Math.min(zoom, 1);
 		const baseScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
 
-		// Skip re-render if scale hasn't changed (e.g. zoom > 1 doesn't affect base canvas)
+		// Skip re-render if scale hasn't changed
 		if (baseScale === lastRenderedScaleRef.current) {
 			return;
 		}
 
+		const w = Math.floor(pageWidth * baseScale);
+		const h = Math.floor(pageHeight * baseScale);
+		const cssText = `position:absolute;top:0;left:0;width:${pageWidth}px;height:${pageHeight}px;transform:translate(0px,0px);z-index:0;pointer-events:none;background-color:${bgColor}`;
+
+		// Helper to paint a source onto the visible canvas
+		const swapToCanvas = (source: ImageBitmap | HTMLCanvasElement, sw: number, sh: number) => {
+			const canvas = canvasRef.current;
+			if (!canvas) return;
+			canvas.width = sw;
+			canvas.height = sh;
+			canvas.style.cssText = cssText;
+			const ctx = canvas.getContext("2d");
+			if (ctx) {
+				ctx.drawImage(source, 0, 0);
+			}
+			lastRenderedScaleRef.current = baseScale;
+		};
+
+		// Check bitmap cache — instant draw, no PDF.js render needed
+		const cached = renderCache.get(pageNumber, baseScale, background);
+		if (cached) {
+			swapToCanvas(cached.bitmap, cached.width, cached.height);
+			markPageRendered(pageNumber);
+			return;
+		}
+
 		let cancelled = false;
-		// Mutable object so the cleanup function always cancels the latest render,
-		// even when a hi-res job is enqueued asynchronously inside a .then()
 		const cancelRef = { current: () => {} };
 
+		// Render via queue with double-buffer
 		const job = renderQueue.enqueue(() => {
 			return new Promise<void>((resolve, reject) => {
 				if (cancelled || !canvasRef.current) {
 					resolve();
 					return;
 				}
-
-				const w = Math.floor(pageWidth * baseScale);
-				const h = Math.floor(pageHeight * baseScale);
 
 				// Double-buffer: render to a temporary canvas, then swap onto the
 				// visible canvas in a single frame to avoid white flash
@@ -117,18 +141,12 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 							return;
 						}
 
-						// Swap: copy the completed render onto the visible canvas
-						const canvas = canvasRef.current;
-						canvas.width = w;
-						canvas.height = h;
-						canvas.style.cssText = `position:absolute;top:0;left:0;width:${pageWidth}px;height:${pageHeight}px;transform:translate(0px,0px);z-index:0;pointer-events:none;background-color:${bgColor}`;
+						swapToCanvas(buffer, w, h);
+						markPageRendered(pageNumber);
 
-						const ctx = canvas.getContext("2d");
-						if (ctx) {
-							ctx.drawImage(buffer, 0, 0);
-						}
+						// Cache in background for instant scroll-back
+						void renderCache.set(pageNumber, baseScale, buffer, background);
 
-						lastRenderedScaleRef.current = baseScale;
 						resolve();
 					})
 					.catch((error) => {
@@ -139,7 +157,6 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 						reject(error);
 					});
 
-				// Store cancel handle so cleanup always cancels the latest render
 				const prevCancel = cancelRef.current;
 				cancelRef.current = () => {
 					void renderingTask.cancel();
@@ -156,8 +173,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [pdfPageProxy, background, dpr, zoom, clampScaleForPage]);
 
-	// Release canvas memory for Safari on unmount only (not between re-renders,
-	// which would cause a visible white flash during zoom)
+	// Release canvas memory for Safari on unmount only
 	useEffect(() => {
 		const canvas = canvasRef.current;
 		return () => {
