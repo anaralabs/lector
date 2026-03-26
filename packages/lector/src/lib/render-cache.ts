@@ -8,6 +8,9 @@ type CacheEntry = {
  * LRU cache for rendered page bitmaps. When scrolling back to a previously
  * rendered page at the same scale, we can draw from cache instantly instead
  * of re-rendering through PDF.js.
+ *
+ * Cache keys include a document ID to prevent collisions when multiple
+ * <Root> instances render different PDFs on the same page.
  */
 class RenderCache {
 	private cache = new Map<string, CacheEntry>();
@@ -17,12 +20,22 @@ class RenderCache {
 		this.maxEntries = maxEntries;
 	}
 
-	private key(pageNumber: number, scale: number, background?: string): string {
-		return `${pageNumber}-${scale}-${background ?? "white"}`;
+	private key(
+		documentId: string,
+		pageNumber: number,
+		scale: number,
+		background?: string,
+	): string {
+		return `${documentId}-${pageNumber}-${scale}-${background ?? "white"}`;
 	}
 
-	get(pageNumber: number, scale: number, background?: string): CacheEntry | undefined {
-		const k = this.key(pageNumber, scale, background);
+	get(
+		documentId: string,
+		pageNumber: number,
+		scale: number,
+		background?: string,
+	): CacheEntry | undefined {
+		const k = this.key(documentId, pageNumber, scale, background);
 		const entry = this.cache.get(k);
 		if (!entry) return undefined;
 
@@ -33,12 +46,20 @@ class RenderCache {
 	}
 
 	async set(
+		documentId: string,
 		pageNumber: number,
 		scale: number,
 		canvas: HTMLCanvasElement,
 		background?: string,
 	): Promise<void> {
-		const k = this.key(pageNumber, scale, background);
+		const k = this.key(documentId, pageNumber, scale, background);
+
+		// Capture dimensions before any async work — the caller may zero the
+		// buffer canvas for Safari memory release before createImageBitmap resolves.
+		const w = canvas.width;
+		const h = canvas.height;
+
+		if (w === 0 || h === 0) return;
 
 		// Evict oldest entries if at capacity
 		while (this.cache.size >= this.maxEntries) {
@@ -54,17 +75,18 @@ class RenderCache {
 			const bitmap = await createImageBitmap(canvas);
 			this.cache.set(k, {
 				bitmap,
-				width: canvas.width,
-				height: canvas.height,
+				width: w,
+				height: h,
 			});
 		} catch {
 			// createImageBitmap can fail on empty canvases or unsupported environments
 		}
 	}
 
-	invalidatePage(pageNumber: number): void {
+	/** Remove all cached entries for a specific document (call on Root unmount). */
+	invalidateDocument(documentId: string): void {
 		for (const [k, entry] of this.cache) {
-			if (k.startsWith(`${pageNumber}-`)) {
+			if (k.startsWith(`${documentId}-`)) {
 				entry.bitmap.close();
 				this.cache.delete(k);
 			}

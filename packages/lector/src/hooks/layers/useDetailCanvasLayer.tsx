@@ -1,14 +1,13 @@
 import type { RenderTask } from "pdfjs-dist";
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
+import { clampScaleForPage } from "../../lib/canvas-utils";
 import { subscribeToViewportInvalidation } from "../../lib/viewport-invalidation";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
-const MAX_CANVAS_PIXELS = 16777216;
-const MAX_CANVAS_DIMENSION = 32767;
 const DETAIL_RENDER_IDLE_MS = 80;
 
 export const useDetailCanvasLayer = ({
@@ -31,41 +30,13 @@ export const useDetailCanvasLayer = ({
 
 	const [zoom] = useDebounce(bouncyZoom, 200);
 
-	const getDetailCanvas = useCallback(() => {
-		return detailCanvasRef.current;
-	}, []);
-
-	const clampScaleForPage = useCallback(
-		(targetScale: number, pageWidth: number, pageHeight: number) => {
-			if (!targetScale) {
-				return 0;
-			}
-
-			const areaLimit = Math.sqrt(
-				MAX_CANVAS_PIXELS / Math.max(pageWidth * pageHeight, 1),
-			);
-			const widthLimit = MAX_CANVAS_DIMENSION / Math.max(pageWidth, 1);
-			const heightLimit = MAX_CANVAS_DIMENSION / Math.max(pageHeight, 1);
-
-			const safeScale = Math.min(
-				targetScale,
-				Number.isFinite(areaLimit) ? areaLimit : targetScale,
-				Number.isFinite(widthLimit) ? widthLimit : targetScale,
-				Number.isFinite(heightLimit) ? heightLimit : targetScale,
-			);
-
-			return Math.max(safeScale, 0);
-		},
-		[],
-	);
-
 	useLayoutEffect(() => {
 		const scrollContainer = viewportRef?.current;
 		if (!scrollContainer) {
 			return;
 		}
 
-		const detailCanvas = getDetailCanvas();
+		const detailCanvas = detailCanvasRef.current;
 		const container = containerRef.current;
 		if (!detailCanvas || !container) {
 			return;
@@ -195,6 +166,10 @@ export const useDetailCanvasLayer = ({
 					if (ctx) {
 						ctx.drawImage(buffer, 0, 0);
 					}
+
+					// Release buffer canvas memory (Safari holds onto it)
+					buffer.width = 0;
+					buffer.height = 0;
 				})
 				.catch((error) => {
 					if (error.name === "RenderingCancelledException") {
@@ -230,7 +205,13 @@ export const useDetailCanvasLayer = ({
 			scheduleRender,
 		);
 
-		scheduleRender(isPinching ? DETAIL_RENDER_IDLE_MS * 2 : 0);
+		if (zoom <= 1 || isPinching) {
+			// Synchronously hide — runs before paint (useLayoutEffect),
+			// so no stale rectangle flicker on zoom-out
+			hideDetailCanvas();
+		} else {
+			scheduleRender(0);
+		}
 
 		return () => {
 			unsubscribe();
@@ -240,11 +221,8 @@ export const useDetailCanvasLayer = ({
 			}
 
 			void renderingTask?.cancel();
-			// Release canvas memory for Safari (384 MB total canvas limit on iOS)
-			if (detailCanvasRef.current) {
-				detailCanvasRef.current.width = 1;
-				detailCanvasRef.current.height = 1;
-			}
+			// Don't destroy canvas content — stale detail is better than a
+			// white flash. The next effect run will hide or replace it.
 		};
 	}, [
 		pdfPageProxy,
@@ -253,10 +231,18 @@ export const useDetailCanvasLayer = ({
 		background,
 		dpr,
 		viewportRef,
-		getDetailCanvas,
-		clampScaleForPage,
 		baseCanvasRef,
 	]);
+
+	// Release canvas memory for Safari on unmount only
+	useEffect(() => {
+		return () => {
+			if (detailCanvasRef.current) {
+				detailCanvasRef.current.width = 1;
+				detailCanvasRef.current.height = 1;
+			}
+		};
+	}, []);
 
 	return {
 		detailCanvasRef,

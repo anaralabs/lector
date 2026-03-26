@@ -8,7 +8,7 @@ import type {
 	DocumentInitParameters,
 	TypedArray,
 } from "pdfjs-dist/types/src/display/api";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { InitialPDFState, ZoomOptions } from "../../internal";
 import { loadPdfJs } from "../../lib/pdfjs";
@@ -89,6 +89,12 @@ export const usePDFDocumentContext = ({
 	const [initialState, setInitialState] = useState<InitialPDFState | null>();
 	const [rotation] = useState<number>(initialRotation);
 
+	// Ref so the effect always reads the latest documentOptions without
+	// needing it in the dependency array (avoids reload on every render
+	// when consumers pass an inline object).
+	const documentOptionsRef = useRef(documentOptions);
+	documentOptionsRef.current = documentOptions;
+
 	// biome-ignore lint/correctness/useExhaustiveDependencies: <onDocumnetLoad,zoomOptions>
 	useEffect(() => {
 		const generateViewports = async (pdf: PDFDocumentProxy) => {
@@ -137,7 +143,7 @@ export const usePDFDocumentContext = ({
 					}
 
 					loadingTask = getDocument(
-						buildDocumentInitParams(source, documentOptions),
+						buildDocumentInitParams(source, documentOptionsRef.current),
 					);
 					loadingTask.onProgress = (progressEvent: OnProgressParameters) => {
 						if (progressEvent.loaded === progressEvent.total) {

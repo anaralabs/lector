@@ -158,13 +158,6 @@ export const Pages = ({
 	const virtualizerItems = virtualizer?.getVirtualItems() ?? [];
 	const items = tempItems.length ? tempItems : virtualizerItems;
 
-	// const { normalizedVelocity } = useVirtualizerVelocity({
-	//   virtualizer,
-	// });
-
-	// const isScrollingFast = Math.abs(normalizedVelocity) > 1.5;
-	// const shouldRender = !isScrollingFast;
-
 	useVisiblePage({
 		items,
 	});

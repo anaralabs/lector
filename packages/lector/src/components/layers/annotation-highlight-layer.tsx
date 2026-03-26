@@ -51,9 +51,7 @@ export const AnnotationHighlightLayer = ({
 }: AnnotationHighlightLayerProps) => {
 	const { annotations } = useAnnotations();
 	const pageNumber = usePDFPageNumber();
-	const isPageRendered = usePdf(
-		(state) => state.renderedPages.has(pageNumber),
-	);
+	const isPageRendered = usePdf((state) => !!state.renderedPages[pageNumber]);
 
 	const pageAnnotations = annotations.filter(
 		(annotation) => annotation.pageNumber === pageNumber,

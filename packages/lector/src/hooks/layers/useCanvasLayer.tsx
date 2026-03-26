@@ -1,14 +1,12 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
+import { clampScaleForPage } from "../../lib/canvas-utils";
 import { renderCache } from "../../lib/render-cache";
 import { renderQueue } from "../../lib/render-queue";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
-
-const MAX_CANVAS_PIXELS = 16777216;
-const MAX_CANVAS_DIMENSION = 32767;
 
 export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -19,45 +17,29 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const bouncyZoom = usePdf((state) => state.zoom);
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const markPageRendered = usePdf((state) => state.markPageRendered);
+	const documentId = usePdf(
+		(state) => state.pdfDocumentProxy.fingerprints[0] ?? "default",
+	);
 
 	const [zoom] = useDebounce(bouncyZoom, 100);
-
-	const clampScaleForPage = useCallback(
-		(targetScale: number, pageWidth: number, pageHeight: number) => {
-			if (!targetScale) {
-				return 0;
-			}
-
-			const areaLimit = Math.sqrt(
-				MAX_CANVAS_PIXELS / Math.max(pageWidth * pageHeight, 1),
-			);
-			const widthLimit = MAX_CANVAS_DIMENSION / Math.max(pageWidth, 1);
-			const heightLimit = MAX_CANVAS_DIMENSION / Math.max(pageHeight, 1);
-
-			const safeScale = Math.min(
-				targetScale,
-				Number.isFinite(areaLimit) ? areaLimit : targetScale,
-				Number.isFinite(widthLimit) ? widthLimit : targetScale,
-				Number.isFinite(heightLimit) ? heightLimit : targetScale,
-			);
-
-			return Math.max(safeScale, 0);
-		},
-		[],
-	);
 
 	// Track the last rendered state to skip redundant renders
 	const lastRenderedScaleRef = useRef(0);
 	const lastBackgroundRef = useRef(background);
 	const lastPageProxyRef = useRef(pdfPageProxy);
 
-	useEffect(() => {
+	// useLayoutEffect for cache hits — synchronous draw before paint, no flash.
+	// Cache misses enqueue async work via the render queue (non-blocking).
+	useLayoutEffect(() => {
 		if (!canvasRef.current) {
 			return;
 		}
 
 		// Reset when the page or background changes so we force a re-render
-		if (lastPageProxyRef.current !== pdfPageProxy || lastBackgroundRef.current !== background) {
+		if (
+			lastPageProxyRef.current !== pdfPageProxy ||
+			lastBackgroundRef.current !== background
+		) {
 			lastPageProxyRef.current = pdfPageProxy;
 			lastBackgroundRef.current = background;
 			lastRenderedScaleRef.current = 0;
@@ -81,7 +63,11 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const cssText = `position:absolute;top:0;left:0;width:${pageWidth}px;height:${pageHeight}px;transform:translate(0px,0px);z-index:0;pointer-events:none;background-color:${bgColor}`;
 
 		// Helper to paint a source onto the visible canvas
-		const swapToCanvas = (source: ImageBitmap | HTMLCanvasElement, sw: number, sh: number) => {
+		const swapToCanvas = (
+			source: ImageBitmap | HTMLCanvasElement,
+			sw: number,
+			sh: number,
+		) => {
 			const canvas = canvasRef.current;
 			if (!canvas) return;
 			canvas.width = sw;
@@ -94,8 +80,14 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			lastRenderedScaleRef.current = baseScale;
 		};
 
-		// Check bitmap cache — instant draw, no PDF.js render needed
-		const cached = renderCache.get(pageNumber, baseScale, background);
+		// Check bitmap cache — instant synchronous draw, no PDF.js render needed.
+		// Since this is useLayoutEffect, the draw happens before browser paint = no flash.
+		const cached = renderCache.get(
+			documentId,
+			pageNumber,
+			baseScale,
+			background,
+		);
 		if (cached) {
 			swapToCanvas(cached.bitmap, cached.width, cached.height);
 			markPageRendered(pageNumber);
@@ -105,7 +97,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		let cancelled = false;
 		const cancelRef = { current: () => {} };
 
-		// Render via queue with double-buffer
+		// Cache miss — render via queue with double-buffer (async, non-blocking)
 		const job = renderQueue.enqueue(() => {
 			return new Promise<void>((resolve, reject) => {
 				if (cancelled || !canvasRef.current) {
@@ -145,7 +137,17 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 						markPageRendered(pageNumber);
 
 						// Cache in background for instant scroll-back
-						void renderCache.set(pageNumber, baseScale, buffer, background);
+						void renderCache.set(
+							documentId,
+							pageNumber,
+							baseScale,
+							buffer,
+							background,
+						);
+
+						// Release buffer canvas memory (Safari holds onto it)
+						buffer.width = 0;
+						buffer.height = 0;
 
 						resolve();
 					})
@@ -170,8 +172,15 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			cancelled = true;
 			cancelRef.current();
 		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [pdfPageProxy, background, dpr, zoom, clampScaleForPage]);
+	}, [
+		pdfPageProxy,
+		background,
+		dpr,
+		zoom,
+		pageNumber,
+		documentId,
+		markPageRendered,
+	]);
 
 	// Release canvas memory for Safari on unmount only
 	useEffect(() => {

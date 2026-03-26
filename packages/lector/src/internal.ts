@@ -79,7 +79,7 @@ interface PDFState {
 	addColoredHighlight: (value: ColoredHighlight) => void;
 	deleteColoredHighlight: (uuid: string) => void;
 
-	renderedPages: Set<number>;
+	renderedPages: Record<number, true>;
 	markPageRendered: (pageNumber: number) => void;
 }
 
@@ -203,13 +203,11 @@ export const PDFStore = createZustandContext(
 					),
 				})),
 
-			renderedPages: new Set<number>(),
+			renderedPages: {},
 			markPageRendered: (pageNumber: number) => {
 				const current = get().renderedPages;
-				if (current.has(pageNumber)) return;
-				const next = new Set(current);
-				next.add(pageNumber);
-				set({ renderedPages: next });
+				if (current[pageNumber]) return;
+				set({ renderedPages: { ...current, [pageNumber]: true } });
 			},
 		}));
 	},
