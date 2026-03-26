@@ -61,7 +61,7 @@ export const Root = forwardRef(
 						</PDFLinkServiceContext.Provider>
 					</PDFStore.Provider>
 				) : (
-					loader ?? "Loading..."
+					(loader ?? "Loading...")
 				)}
 			</Primitive.div>
 		);
