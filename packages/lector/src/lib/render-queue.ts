@@ -68,4 +68,10 @@ class RenderQueue {
 	}
 }
 
+/**
+ * Global singleton — intentionally shared across all <Root> instances.
+ * Serializing renders across documents prevents overall GPU/CPU pressure
+ * on the main thread (CanvasGraphics is single-threaded). The trade-off
+ * is increased latency in multi-viewer setups.
+ */
 export const renderQueue = new RenderQueue();

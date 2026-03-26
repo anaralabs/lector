@@ -96,7 +96,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		}
 
 		let cancelled = false;
-		const cancelRef = { current: () => {} };
+		let activeRenderingTask: { cancel(): void } | null = null;
 
 		// Cache miss — render via queue with double-buffer (async, non-blocking)
 		const job = renderQueue.enqueue(() => {
@@ -126,9 +126,11 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 					viewport,
 					background,
 				});
+				activeRenderingTask = renderingTask;
 
 				renderingTask.promise
 					.then(() => {
+						activeRenderingTask = null;
 						if (cancelled || !canvasRef.current) {
 							resolve();
 							return;
@@ -150,25 +152,20 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 						resolve();
 					})
 					.catch((error) => {
+						activeRenderingTask = null;
 						if (error.name === "RenderingCancelledException") {
 							resolve();
 							return;
 						}
 						reject(error);
 					});
-
-				const prevCancel = cancelRef.current;
-				cancelRef.current = () => {
-					void renderingTask.cancel();
-					prevCancel();
-				};
 			});
 		});
-		cancelRef.current = job.cancel;
 
 		return () => {
 			cancelled = true;
-			cancelRef.current();
+			job.cancel();
+			void activeRenderingTask?.cancel();
 		};
 	}, [
 		pdfPageProxy,
