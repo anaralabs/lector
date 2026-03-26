@@ -34,14 +34,14 @@ export const ZoomOut = ({ ...props }: HTMLProps<HTMLButtonElement>) => {
 };
 
 export const CurrentZoom = ({ ...props }: HTMLProps<HTMLInputElement>) => {
-	const setRealZoom = usePdf((state) => state.updateZoom);
+	const updateZoom = usePdf((state) => state.updateZoom);
 	const realZoom = usePdf((state) => state.zoom);
 
 	const [zoom, setZoom] = useState<string>((realZoom * 100).toFixed(0));
-	const isSelected = useRef<boolean>(false);
+	const isInputFocused = useRef<boolean>(false);
 
 	useEffect(() => {
-		if (isSelected.current) {
+		if (isInputFocused.current) {
 			return;
 		}
 
@@ -53,14 +53,14 @@ export const CurrentZoom = ({ ...props }: HTMLProps<HTMLInputElement>) => {
 			{...props}
 			value={zoom}
 			onClick={() => {
-				isSelected.current = true;
+				isInputFocused.current = true;
 			}}
 			onChange={(e) => {
-				setRealZoom(Number(e.target.value) / 100);
+				updateZoom(Number(e.target.value) / 100);
 				setZoom(e.target.value);
 			}}
 			onBlur={() => {
-				isSelected.current = false;
+				isInputFocused.current = false;
 
 				setZoom((realZoom * 100).toFixed(0));
 			}}
