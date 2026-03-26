@@ -15,6 +15,9 @@ type CacheEntry = {
 class RenderCache {
 	private cache = new Map<string, CacheEntry>();
 	private maxEntries: number;
+	// Tracks invalidated documents so in-flight createImageBitmap calls
+	// don't insert orphaned entries after invalidateDocument() runs.
+	private invalidatedDocs = new Set<string>();
 
 	constructor(maxEntries = 30) {
 		this.maxEntries = maxEntries;
@@ -73,6 +76,13 @@ class RenderCache {
 
 		try {
 			const bitmap = await createImageBitmap(canvas);
+
+			// Check if the document was invalidated while createImageBitmap was in-flight
+			if (this.invalidatedDocs.has(documentId)) {
+				bitmap.close();
+				return;
+			}
+
 			this.cache.set(k, {
 				bitmap,
 				width: w,
@@ -85,12 +95,18 @@ class RenderCache {
 
 	/** Remove all cached entries for a specific document (call on Root unmount). */
 	invalidateDocument(documentId: string): void {
+		this.invalidatedDocs.add(documentId);
 		for (const [k, entry] of this.cache) {
 			if (k.startsWith(`${documentId}-`)) {
 				entry.bitmap.close();
 				this.cache.delete(k);
 			}
 		}
+		// Clean up the invalidated set after a tick to catch any in-flight calls,
+		// then allow future caching if the same document is reopened.
+		setTimeout(() => {
+			this.invalidatedDocs.delete(documentId);
+		}, 1000);
 	}
 
 	clear(): void {
@@ -98,6 +114,7 @@ class RenderCache {
 			entry.bitmap.close();
 		}
 		this.cache.clear();
+		this.invalidatedDocs.clear();
 	}
 }
 

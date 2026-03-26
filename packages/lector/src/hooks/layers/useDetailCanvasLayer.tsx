@@ -234,12 +234,14 @@ export const useDetailCanvasLayer = ({
 		baseCanvasRef,
 	]);
 
-	// Release canvas memory for Safari on unmount only
+	// Release canvas memory for Safari on unmount only.
+	// Capture ref into local var — React clears refs before passive cleanup runs.
 	useEffect(() => {
+		const canvas = detailCanvasRef.current;
 		return () => {
-			if (detailCanvasRef.current) {
-				detailCanvasRef.current.width = 1;
-				detailCanvasRef.current.height = 1;
+			if (canvas) {
+				canvas.width = 1;
+				canvas.height = 1;
 			}
 		};
 	}, []);
