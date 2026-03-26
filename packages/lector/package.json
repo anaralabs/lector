@@ -1,7 +1,7 @@
 {
 	"name": "@anaralabs/lector",
 	"version": "0.0.0-semantically-released",
-	"description": "Headless PDF viewer for React",
+	"description": "A headless PDF viewer for React",
 	"author": "andrewdr (https://github.com/andrewdoro)",
 	"license": "MIT",
 	"type": "module",
