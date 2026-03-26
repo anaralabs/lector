@@ -18,8 +18,13 @@ import { useViewportContainer } from "../hooks/viewport/useViewportContainer";
 import { usePdf } from "../internal";
 import { Primitive } from "./primitive";
 
+const selectLargestPageWidth = (state: {
+	viewports: Array<{ width: number }>;
+}) => state.viewports.reduce((max, vp) => Math.max(max, vp.width), 0);
+
 const DEFAULT_HEIGHT = 600;
 const EXTRA_HEIGHT = 0;
+const DEFAULT_VIRTUALIZER_OPTIONS = { overscan: 1 };
 
 interface VirtualizedPageItemProps {
 	child: ReactElement;
@@ -65,7 +70,7 @@ VirtualizedPageItem.displayName = "VirtualizedPageItem";
 export const Pages = ({
 	children,
 	gap = 10,
-	virtualizerOptions = { overscan: 1 },
+	virtualizerOptions = DEFAULT_VIRTUALIZER_OPTIONS,
 	initialOffset,
 	onOffsetChange,
 	...props
@@ -99,12 +104,16 @@ export const Pages = ({
 	const { scrollToFn } = useScrollFn();
 	const { observeElementOffset } = useObserveElement();
 
+	const viewportsRef = useRef(viewports);
+	viewportsRef.current = viewports;
+
 	const estimateSize = useCallback(
 		(index: number) => {
-			if (!viewports || !viewports[index]) return DEFAULT_HEIGHT;
-			return viewports[index].height + EXTRA_HEIGHT;
+			const vp = viewportsRef.current;
+			if (!vp || !vp[index]) return DEFAULT_HEIGHT;
+			return vp[index].height + EXTRA_HEIGHT;
 		},
-		[viewports],
+		[], // Stable — reads from ref
 	);
 
 	const virtualizer = useVirtualizer({
@@ -150,23 +159,12 @@ export const Pages = ({
 	const virtualizerItems = virtualizer?.getVirtualItems() ?? [];
 	const items = tempItems.length ? tempItems : virtualizerItems;
 
-	// const { normalizedVelocity } = useVirtualizerVelocity({
-	//   virtualizer,
-	// });
-
-	// const isScrollingFast = Math.abs(normalizedVelocity) > 1.5;
-	// const shouldRender = !isScrollingFast;
-
 	useVisiblePage({
 		items,
 	});
 
 	useFitWidth({ viewportRef: containerRef });
-	const largestPageWidth = usePdf((state) =>
-		state.viewports.reduce((largestWidth, viewport) => {
-			return Math.max(largestWidth, viewport.width);
-		}, 0),
-	);
+	const largestPageWidth = usePdf(selectLargestPageWidth);
 
 	useEffect(() => {
 		virtualizer.getOffsetForAlignment = (

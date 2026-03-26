@@ -32,6 +32,7 @@ export {
 export { calculateHighlightRects } from "./hooks/search/useSearchPosition";
 export type { Annotation } from "./hooks/useAnnotations";
 export { useAnnotations } from "./hooks/useAnnotations";
+export { usePageRendered } from "./hooks/usePageRendered";
 export {
 	LinkService,
 	PDFLinkServiceContext,

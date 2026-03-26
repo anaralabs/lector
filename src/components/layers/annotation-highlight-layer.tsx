@@ -1,8 +1,10 @@
 import type React from "react";
+import { useMemo } from "react";
 
 import type { Annotation } from "../../hooks/useAnnotations";
 import { useAnnotations } from "../../hooks/useAnnotations";
 import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
+import { usePdf } from "../../internal";
 import {
 	AnnotationTooltip,
 	type AnnotationTooltipContentProps,
@@ -50,16 +52,20 @@ export const AnnotationHighlightLayer = ({
 }: AnnotationHighlightLayerProps) => {
 	const { annotations } = useAnnotations();
 	const pageNumber = usePDFPageNumber();
+	const isPageRendered = usePdf((state) => !!state.renderedPages[pageNumber]);
 
-	const pageAnnotations = annotations.filter(
-		(annotation) => annotation.pageNumber === pageNumber,
+	const pageAnnotations = useMemo(
+		() => annotations.filter((a) => a.pageNumber === pageNumber),
+		[annotations, pageNumber],
 	);
+
+	if (!isPageRendered) return null;
 
 	const getCommentIconPosition = (highlights: Annotation["highlights"]) => {
 		if (!highlights.length) return { top: 0, right: 10 };
 
 		// Sort highlights by vertical position to group them into lines
-		const sortedHighlights = [...highlights].sort((a, b) => {
+		const sortedHighlights = highlights.toSorted((a, b) => {
 			const topDiff = a.top - b.top;
 			return Math.abs(topDiff) < 3 ? a.left - b.left : topDiff;
 		});
