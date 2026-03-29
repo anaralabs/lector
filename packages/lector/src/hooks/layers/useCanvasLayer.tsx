@@ -11,6 +11,11 @@ import { usePDFPageNumber } from "../usePdfPageNumber";
 export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const pageNumber = usePDFPageNumber();
+	const previousPageNumberRef = useRef(pageNumber);
+	const cleanupStateRef = useRef({
+		pageNumber,
+		unmarkPageRendered: (_pageNumber: number) => {},
+	});
 
 	const dpr = useDpr();
 
@@ -23,6 +28,13 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	);
 
 	const [zoom] = useDebounce(bouncyZoom, 100);
+
+	useEffect(() => {
+		cleanupStateRef.current = {
+			pageNumber,
+			unmarkPageRendered,
+		};
+	}, [pageNumber, unmarkPageRendered]);
 
 	// Track the last rendered state to skip redundant renders
 	const lastRenderedScaleRef = useRef(0);
@@ -177,17 +189,32 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		markPageRendered,
 	]);
 
-	// Cleanup on unmount: release canvas memory (Safari) and unmark page
+	// Unmark the previous page when this layer is reused for a different page.
 	useEffect(() => {
-		const canvas = canvasRef.current;
-		return () => {
-			unmarkPageRendered(pageNumber);
-			if (canvas) {
-				canvas.width = 1;
-				canvas.height = 1;
-			}
-		};
+		const previousPageNumber = previousPageNumberRef.current;
+		previousPageNumberRef.current = pageNumber;
+
+		if (previousPageNumber !== pageNumber) {
+			unmarkPageRendered(previousPageNumber);
+		}
 	}, [pageNumber, unmarkPageRendered]);
+
+	// Cleanup on unmount only: unmark the currently rendered page.
+	// Avoid shrinking the backing store to 1x1 here; under fast virtualization
+	// and React Strict Mode this can leave a visible blank/white page while the
+	// next render job is still queued. Browsers reclaim detached canvas memory
+	// well enough here, and correctness during fast scroll matters more.
+	useEffect(() => {
+		return () => {
+			const { pageNumber: currentPageNumber, unmarkPageRendered } =
+				cleanupStateRef.current;
+			unmarkPageRendered(currentPageNumber);
+		};
+		// Intentionally empty dependency array: this cleanup should only run on
+		// true unmount, not when the virtualized page component is reused for a
+		// different page number.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
 
 	return {
 		canvasRef,

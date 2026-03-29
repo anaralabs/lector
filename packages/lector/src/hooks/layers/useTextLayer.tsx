@@ -1,3 +1,4 @@
+import type { PDFPageProxy } from "pdfjs-dist";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { usePdf } from "../../internal";
@@ -12,6 +13,8 @@ interface TextLayerDivElement extends HTMLDivElement {
 	_textSelectionBound?: boolean;
 	_cleanupTextSelection?: () => void;
 }
+
+const textLayerDOMCache = new WeakMap<PDFPageProxy, DocumentFragment>();
 
 const createTextSelectionManager = () => {
 	const textLayers = new Map<HTMLDivElement, HTMLElement>();
@@ -221,10 +224,42 @@ export const useTextLayer = ({
 		}
 
 		let isCancelled = false;
+		const cached = textLayerDOMCache.get(pdfPageProxy);
+
+		if (cached) {
+			textLayerDOMCache.delete(pdfPageProxy);
+			textContainer.replaceChildren(cached);
+			const endOfContent = textContainer.querySelector(
+				".endOfContent",
+			) as HTMLElement | null;
+			if (endOfContent) {
+				bindMouseEvents(textContainer, endOfContent);
+			}
+			setRenderMode(
+				effectiveMode === "pdfjs"
+					? "pdfjs"
+					: textContainer.querySelector("span")
+						? "pretext"
+						: "pdfjs-fallback",
+			);
+			setFallbackReason(null);
+			return () => {
+				if (textContainer.childNodes.length > 0) {
+					const fragment = document.createDocumentFragment();
+					while (textContainer.firstChild) {
+						fragment.appendChild(textContainer.firstChild);
+					}
+					textLayerDOMCache.set(pdfPageProxy, fragment);
+				}
+
+				if (textContainer?._cleanupTextSelection) {
+					textContainer._cleanupTextSelection();
+					delete textContainer._cleanupTextSelection;
+				}
+			};
+		}
 
 		isRenderingRef.current = true;
-
-		textContainer.innerHTML = "";
 
 		if (textLayerRef.current) {
 			textLayerRef.current.cancel();
@@ -372,6 +407,14 @@ export const useTextLayer = ({
 			if (textLayerRef.current) {
 				textLayerRef.current.cancel();
 				textLayerRef.current = null;
+			}
+
+			if (textContainer.childNodes.length > 0) {
+				const fragment = document.createDocumentFragment();
+				while (textContainer.firstChild) {
+					fragment.appendChild(textContainer.firstChild);
+				}
+				textLayerDOMCache.set(pdfPageProxy, fragment);
 			}
 
 			if (textContainer?._cleanupTextSelection) {
