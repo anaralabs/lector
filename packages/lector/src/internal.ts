@@ -5,6 +5,7 @@ import { createRef } from "react";
 import { createStore, useStore } from "zustand";
 
 import { clamp } from "./lib/clamp";
+import type { TextLayerPageModel } from "./lib/text-layer/types";
 import { getFitWidthZoom } from "./lib/zoom";
 import { createZustandContext } from "./lib/zustand";
 
@@ -61,6 +62,11 @@ interface PDFState {
 
 	textContent: TextContent[];
 	setTextContent: (textContents: TextContent[]) => void;
+	getTextContentForPage: (pageNumber: number) => TextContent | undefined;
+
+	textLayerModels: Record<number, TextLayerPageModel | undefined>;
+	setTextLayerModel: (model: TextLayerPageModel) => void;
+	getTextLayerModel: (pageNumber: number) => TextLayerPageModel | undefined;
 
 	zoomOptions: Required<ZoomOptions>;
 
@@ -178,6 +184,18 @@ export const PDFStore = createZustandContext(
 					textContent: val,
 				});
 			},
+			getTextContentForPage: (pageNumber) =>
+				get().textContent.find((entry) => entry.pageNumber === pageNumber),
+			textLayerModels: {},
+			setTextLayerModel: (model) => {
+				set((state) => ({
+					textLayerModels: {
+						...state.textLayerModels,
+						[model.pageNumber]: model,
+					},
+				}));
+			},
+			getTextLayerModel: (pageNumber) => get().textLayerModels[pageNumber],
 			highlights: [],
 			setHighlight: (val) => {
 				set({

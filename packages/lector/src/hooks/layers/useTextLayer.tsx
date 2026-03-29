@@ -1,7 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { usePdf } from "../../internal";
 import { loadPdfJs } from "../../lib/pdfjs";
+import { getTextLayerPageModel } from "../../lib/text-layer/model";
+import { ensureTextLayerStyles } from "../../lib/text-layer/styles";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
 // Add custom property declarations
@@ -193,9 +195,18 @@ export const useTextLayer = () => {
 		render: () => Promise<void>;
 	} | null>(null);
 	const isRenderingRef = useRef(false);
+	const [renderMode, setRenderMode] = useState<"pretext" | "pdfjs-fallback">(
+		"pretext",
+	);
+	const [fallbackReason, setFallbackReason] = useState<string | null>(null);
 
 	const pageNumber = usePDFPageNumber();
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
+	const setTextLayerModel = usePdf((state) => state.setTextLayerModel);
+
+	useEffect(() => {
+		ensureTextLayerStyles();
+	}, []);
 
 	useEffect(() => {
 		const textContainer = textContainerRef.current;
@@ -214,29 +225,86 @@ export const useTextLayer = () => {
 			textLayerRef.current = null;
 		}
 
-		void loadPdfJs()
-			.then(({ TextLayer }) => {
-				if (isCancelled || textContainerRef.current !== textContainer) {
-					return;
+		const renderCustomTextLayer = async () => {
+			const model = await getTextLayerPageModel(pdfPageProxy);
+			if (isCancelled || textContainerRef.current !== textContainer) {
+				return false;
+			}
+
+			setTextLayerModel(model);
+			setRenderMode(model.renderMode);
+			setFallbackReason(model.fallbackReason);
+
+			if (!model.canUseCustomRenderer) {
+				return false;
+			}
+
+			for (const run of model.runs) {
+				if (!run.rawText) {
+					if (run.hasEOL) {
+						const br = document.createElement("br");
+						br.setAttribute("role", "presentation");
+						textContainer.appendChild(br);
+					}
+					continue;
 				}
 
-				const textLayer = new TextLayer({
-					textContentSource: pdfPageProxy.streamTextContent(),
-					container: textContainer,
-					viewport: pdfPageProxy.getViewport({ scale: 1 }),
-				});
+				const span = document.createElement("span");
+				span.setAttribute("role", "presentation");
+				span.textContent = run.rawText;
+				span.dir = run.dir;
 
-				textLayerRef.current = textLayer;
+				const style = span.style;
+				style.left = `${((run.left / model.viewport.width) * 100).toFixed(2)}%`;
+				style.top = `${((run.top / model.viewport.height) * 100).toFixed(2)}%`;
+				style.setProperty("--font-height", `${run.fontSize.toFixed(2)}px`);
+				style.fontFamily = run.fontFamily;
+				style.fontSize = "calc(var(--text-scale-factor) * var(--font-height))";
+				style.setProperty("--scale-x", `${run.scaleX}`);
+				style.setProperty("--rotate", `${run.angle}deg`);
 
-				return textLayer.render();
-			})
-			.then(() => {
-				const textLayer = textLayerRef.current;
+				textContainer.appendChild(span);
+
+				if (run.hasEOL) {
+					const br = document.createElement("br");
+					br.setAttribute("role", "presentation");
+					textContainer.appendChild(br);
+				}
+			}
+
+			return true;
+		};
+
+		void renderCustomTextLayer()
+			.then((rendered) => {
 				if (
-					!textLayer ||
+					rendered ||
 					isCancelled ||
 					textContainerRef.current !== textContainer
 				) {
+					return;
+				}
+
+				return loadPdfJs().then(({ TextLayer }) => {
+					if (isCancelled || textContainerRef.current !== textContainer) {
+						return;
+					}
+
+					setRenderMode("pdfjs-fallback");
+
+					const textLayer = new TextLayer({
+						textContentSource: pdfPageProxy.streamTextContent(),
+						container: textContainer,
+						viewport: pdfPageProxy.getViewport({ scale: 1 }),
+					});
+
+					textLayerRef.current = textLayer;
+
+					return textLayer.render();
+				});
+			})
+			.then(() => {
+				if (isCancelled || textContainerRef.current !== textContainer) {
 					return;
 				}
 
@@ -269,10 +337,12 @@ export const useTextLayer = () => {
 				delete textContainer._cleanupTextSelection;
 			}
 		};
-	}, [pdfPageProxy.streamTextContent, pdfPageProxy.getViewport]);
+	}, [pdfPageProxy, setTextLayerModel]);
 
 	return {
 		textContainerRef,
 		pageNumber: pdfPageProxy.pageNumber,
+		renderMode,
+		fallbackReason,
 	};
 };

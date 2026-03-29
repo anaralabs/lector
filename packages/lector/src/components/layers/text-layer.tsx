@@ -5,7 +5,8 @@ import { useTextLayer } from "../../hooks/layers/useTextLayer";
 
 export const TextLayer = memo(
 	({ className, style, ...props }: HTMLProps<HTMLDivElement>) => {
-		const { textContainerRef, pageNumber } = useTextLayer();
+		const { textContainerRef, pageNumber, renderMode, fallbackReason } =
+			useTextLayer();
 
 		return (
 			<div
@@ -19,6 +20,8 @@ export const TextLayer = memo(
 				{...props}
 				{...{
 					"data-page-number": pageNumber,
+					"data-text-layer-mode": renderMode,
+					"data-text-layer-fallback-reason": fallbackReason ?? undefined,
 				}}
 				ref={textContainerRef}
 			/>

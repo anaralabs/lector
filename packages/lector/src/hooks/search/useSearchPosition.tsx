@@ -1,7 +1,10 @@
 import type { PDFPageProxy } from "pdfjs-dist";
-import type { TextItem } from "pdfjs-dist/types/src/display/api";
 
 import type { HighlightRect } from "../../internal";
+import {
+	getRunsForTextRange,
+	getTextLayerPageModel,
+} from "../../lib/text-layer/model";
 import type { SearchResult } from "./useSearch";
 
 interface TextPosition {
@@ -27,76 +30,36 @@ export async function calculateHighlightRects(
 	pageProxy: PDFPageProxy,
 	textMatch: TextPosition,
 ): Promise<HighlightRect[]> {
-	const textContent = await pageProxy.getTextContent();
-	const items = textContent.items as TextItem[];
+	const model = await getTextLayerPageModel(pageProxy);
 
 	const matchLength = textMatch.searchText
 		? textMatch.searchText.length
 		: textMatch.text.length;
 
-	const matchRects: HighlightRect[] = [];
-	let currentIndex = 0;
-	let remainingMatchLength = matchLength;
-	let foundStart = false;
+	const matchStart = textMatch.matchIndex;
+	const matchEnd = matchStart + matchLength;
+	const runMatches = getRunsForTextRange({
+		model,
+		start: matchStart,
+		end: matchEnd,
+	});
 
-	const viewport = pageProxy.getViewport({ scale: 1 });
+	const matchRects: HighlightRect[] = runMatches.map(({ run, start, end }) => {
+		const fullText = run.text;
+		const runLength = fullText.length || 1;
+		const startOffset = start - run.start;
+		const endOffset = end - run.start;
+		const left = run.left + (startOffset / runLength) * run.width;
+		const width = ((endOffset - startOffset) / runLength) * run.width;
 
-	for (let i = 0; i < items.length; i++) {
-		const item = items[i];
-
-		if (!item) continue;
-
-		const itemLength = item.str.length;
-
-		if (
-			!foundStart &&
-			currentIndex <= textMatch.matchIndex &&
-			textMatch.matchIndex < currentIndex + itemLength
-		) {
-			foundStart = true;
-			const matchStartInItem = textMatch.matchIndex - currentIndex;
-			const matchLengthInItem = Math.min(
-				itemLength - matchStartInItem,
-				remainingMatchLength,
-			);
-
-			const transform = item.transform;
-			const y = viewport.height - (transform[5] + item.height);
-
-			const rect: HighlightRect = {
-				pageNumber: textMatch.pageNumber,
-				left: transform[4] + matchStartInItem * (item.width / itemLength),
-				top: y,
-				width: matchLengthInItem * (item.width / itemLength),
-				height: item.height,
-			};
-
-			matchRects.push(rect);
-			remainingMatchLength -= matchLengthInItem;
-		} else if (foundStart && remainingMatchLength > 0) {
-			const matchLengthInItem = Math.min(itemLength, remainingMatchLength);
-
-			const transform = item.transform;
-			const y = viewport.height - (transform[5] + item.height);
-
-			const rect: HighlightRect = {
-				pageNumber: textMatch.pageNumber,
-				left: transform[4],
-				top: y,
-				width: matchLengthInItem * (item.width / itemLength),
-				height: item.height,
-			};
-
-			matchRects.push(rect);
-			remainingMatchLength -= matchLengthInItem;
-		}
-
-		if (remainingMatchLength <= 0 && foundStart) {
-			break;
-		}
-
-		currentIndex += itemLength;
-	}
+		return {
+			pageNumber: textMatch.pageNumber,
+			left,
+			top: run.top,
+			width,
+			height: run.height,
+		};
+	});
 
 	return mergeAdjacentRects(matchRects);
 }
