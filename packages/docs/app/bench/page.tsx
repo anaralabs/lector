@@ -38,6 +38,27 @@ type BenchmarkRunResult = BenchmarkMetric & {
 declare global {
 	interface Window {
 		__bench?: {
+			measureReady: (params?: {
+				pdf?: BenchmarkPdfKey;
+				mode?: BenchmarkMode;
+			}) => Promise<BenchmarkRunResult>;
+			readCurrentMetrics: (
+				scrollDurationMs?: number,
+			) => Promise<BenchmarkRunResult>;
+			runScroll: (params?: {
+				durationMs?: number;
+			}) => Promise<
+				Pick<
+					BenchmarkRunResult,
+					| "scrollDurationMs"
+					| "frameCount"
+					| "p50FrameMs"
+					| "p95FrameMs"
+					| "framesOver16ms"
+					| "framesOver50ms"
+					| "framesOver100ms"
+				>
+			>;
 			runComparison: (params?: {
 				pdf?: BenchmarkPdfKey;
 				modes?: BenchmarkMode[];
@@ -169,33 +190,45 @@ export default function BenchmarkPage() {
 
 	const source = PDF_OPTIONS[pdf].source;
 
-	const runSingleBenchmark = useMemo(
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+
+		const params = new URLSearchParams(window.location.search);
+		const requestedPdf = params.get("pdf");
+		const requestedMode = params.get("mode");
+
+		if (requestedPdf && requestedPdf in PDF_OPTIONS) {
+			setPdf(requestedPdf as BenchmarkPdfKey);
+		}
+
+		if (requestedMode === "pretext" || requestedMode === "pdfjs") {
+			setMode(requestedMode);
+		}
+	}, []);
+
+	const waitForTextLayerReady = useMemo(
+		() => (nextMode: BenchmarkMode) =>
+			new Promise<{
+				requestedMode: BenchmarkMode;
+				actualMode: string | null;
+				fallbackReason: string | null;
+				elapsedMs: number;
+			}>((resolve) => {
+				const wait = () => {
+					if (readyPayloadRef.current?.requestedMode === nextMode) {
+						resolve(readyPayloadRef.current);
+						return;
+					}
+					requestAnimationFrame(wait);
+				};
+				wait();
+			}),
+		[],
+	);
+
+	const runScrollMeasurement = useMemo(
 		() =>
-			async ({
-				nextMode,
-				nextPdf,
-				scrollDurationMs = 3000,
-			}: {
-				nextMode: BenchmarkMode;
-				nextPdf: BenchmarkPdfKey;
-				scrollDurationMs?: number;
-			}): Promise<BenchmarkRunResult> => {
-				setIsRunning(true);
-				readyPayloadRef.current = null;
-				setMode(nextMode);
-				setPdf(nextPdf);
-
-				await new Promise<void>((resolve) => {
-					const waitForReady = () => {
-						if (readyPayloadRef.current?.requestedMode === nextMode) {
-							resolve();
-							return;
-						}
-						requestAnimationFrame(waitForReady);
-					};
-					waitForReady();
-				});
-
+			async ({ durationMs = 1200 }: { durationMs?: number } = {}) => {
 				const scrollContainer = document.querySelector(
 					"[data-bench-viewer] [style*='overflow: auto']",
 				) as HTMLDivElement | null;
@@ -220,7 +253,7 @@ export default function BenchmarkPage() {
 					lastTimestamp = timestamp;
 
 					const elapsed = timestamp - startedAt;
-					const progress = Math.min(1, elapsed / scrollDurationMs);
+					const progress = Math.min(1, elapsed / durationMs);
 					scrollContainer.scrollTop =
 						initialScrollTop + maxScrollTop * progress;
 
@@ -230,20 +263,11 @@ export default function BenchmarkPage() {
 				};
 
 				animationFrameId = requestAnimationFrame(step);
-				await new Promise((resolve) =>
-					setTimeout(resolve, scrollDurationMs + 100),
-				);
+				await new Promise((resolve) => setTimeout(resolve, durationMs + 100));
 				cancelAnimationFrame(animationFrameId);
 
-				const readyPayload = readyPayloadRef.current;
-				const metric: BenchmarkRunResult = {
-					mode: nextMode,
-					pdf: nextPdf,
-					requestedMode: nextMode,
-					actualMode: readyPayload?.actualMode ?? null,
-					fallbackReason: readyPayload?.fallbackReason ?? null,
-					textLayerReadyMs: readyPayload?.elapsedMs ?? null,
-					scrollDurationMs,
+				return {
+					scrollDurationMs: durationMs,
 					frameCount: frameTimes.length,
 					p50FrameMs: percentile(frameTimes, 0.5),
 					p95FrameMs: percentile(frameTimes, 0.95),
@@ -251,16 +275,99 @@ export default function BenchmarkPage() {
 					framesOver50ms: frameTimes.filter((value) => value > 50).length,
 					framesOver100ms: frameTimes.filter((value) => value > 100).length,
 				};
+			},
+		[],
+	);
+
+	const runSingleBenchmark = useMemo(
+		() =>
+			async ({
+				nextMode,
+				nextPdf,
+				scrollDurationMs = 3000,
+			}: {
+				nextMode: BenchmarkMode;
+				nextPdf: BenchmarkPdfKey;
+				scrollDurationMs?: number;
+			}): Promise<BenchmarkRunResult> => {
+				setIsRunning(true);
+				readyPayloadRef.current = null;
+				setMode(nextMode);
+				setPdf(nextPdf);
+				const readyPayload = await waitForTextLayerReady(nextMode);
+				const scrollMetrics = await runScrollMeasurement({
+					durationMs: scrollDurationMs,
+				});
+				const metric: BenchmarkRunResult = {
+					mode: nextMode,
+					pdf: nextPdf,
+					requestedMode: nextMode,
+					actualMode: readyPayload?.actualMode ?? null,
+					fallbackReason: readyPayload?.fallbackReason ?? null,
+					textLayerReadyMs: readyPayload?.elapsedMs ?? null,
+					...scrollMetrics,
+				};
 
 				setLastMetric(metric);
 				setIsRunning(false);
 				return metric;
 			},
-		[],
+		[runScrollMeasurement, waitForTextLayerReady],
 	);
 
 	useEffect(() => {
 		window.__bench = {
+			measureReady: async ({
+				pdf: nextPdf = pdf,
+				mode: nextMode = mode,
+			} = {}) => {
+				setIsRunning(true);
+				readyPayloadRef.current = null;
+				setMode(nextMode);
+				setPdf(nextPdf);
+
+				const readyPayload = await waitForTextLayerReady(nextMode);
+
+				const result: BenchmarkRunResult = {
+					mode: nextMode,
+					pdf: nextPdf,
+					requestedMode: nextMode,
+					actualMode: readyPayload.actualMode,
+					fallbackReason: readyPayload.fallbackReason,
+					textLayerReadyMs: readyPayload.elapsedMs,
+					scrollDurationMs: null,
+					frameCount: 0,
+					p50FrameMs: null,
+					p95FrameMs: null,
+					framesOver16ms: 0,
+					framesOver50ms: 0,
+					framesOver100ms: 0,
+				};
+
+				setLastMetric(result);
+				setIsRunning(false);
+				return result;
+			},
+			readCurrentMetrics: async (durationMs = 400) => {
+				const readyPayload = await waitForTextLayerReady(mode);
+				const scrollMetrics = await runScrollMeasurement({
+					durationMs,
+				});
+
+				const result: BenchmarkRunResult = {
+					mode,
+					pdf,
+					requestedMode: mode,
+					actualMode: readyPayload.actualMode,
+					fallbackReason: readyPayload.fallbackReason,
+					textLayerReadyMs: readyPayload.elapsedMs,
+					...scrollMetrics,
+				};
+
+				setLastMetric(result);
+				return result;
+			},
+			runScroll: runScrollMeasurement,
 			runComparison: async ({
 				pdf: nextPdf = "pathways",
 				modes = ["pretext", "pdfjs"],
@@ -288,7 +395,13 @@ export default function BenchmarkPage() {
 		return () => {
 			delete window.__bench;
 		};
-	}, [mode, pdf, runSingleBenchmark]);
+	}, [
+		mode,
+		pdf,
+		runScrollMeasurement,
+		runSingleBenchmark,
+		waitForTextLayerReady,
+	]);
 
 	return (
 		<div className="min-h-screen bg-slate-50 p-6">

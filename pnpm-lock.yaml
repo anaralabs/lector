@@ -106,6 +106,9 @@ importers:
       postcss:
         specifier: ^8.4.49
         version: 8.4.49
+      puppeteer-core:
+        specifier: ^24.40.0
+        version: 24.40.0
       tailwindcss:
         specifier: ^3.4.16
         version: 3.4.16

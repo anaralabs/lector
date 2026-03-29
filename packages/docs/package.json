@@ -38,6 +38,7 @@
     "@types/react-dom": "^19.0.2",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
+    "puppeteer-core": "^24.40.0",
     "tailwindcss": "^3.4.16",
     "typescript": "^5.7.2"
   }

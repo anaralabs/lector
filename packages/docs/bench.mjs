@@ -18,6 +18,7 @@ const CPU_RATES = [
 ];
 
 const MODES = ["pretext", "pdfjs"];
+const EVALUATE_TIMEOUT_MS = 600000;
 
 const percentile = (values, ratio) => {
 	if (!values.length) return null;
@@ -64,6 +65,7 @@ const summarizePair = (results) => {
 const browser = await puppeteer.launch({
 	headless: "new",
 	executablePath: process.env.PUPPETEER_EXECUTABLE_PATH ?? "/usr/bin/google-chrome",
+	protocolTimeout: 600000,
 	args: ["--no-sandbox", "--disable-setuid-sandbox"],
 	defaultViewport: {
 		width: 1440,
@@ -74,6 +76,8 @@ const browser = await puppeteer.launch({
 
 const page = await browser.newPage();
 const session = await page.target().createCDPSession();
+page.setDefaultTimeout(EVALUATE_TIMEOUT_MS);
+page.setDefaultNavigationTimeout(EVALUATE_TIMEOUT_MS);
 
 await page.goto(`${BASE_URL}/bench`, {
 	waitUntil: "networkidle2",
@@ -90,21 +94,30 @@ for (const cpu of CPU_RATES) {
 	await session.send("Emulation.setCPUThrottlingRate", { rate: cpu.rate });
 
 	for (const pdf of PDFS) {
-		const runResults = await page.evaluate(
-			async ({ nextPdf, modes }) => {
-				return window.__bench.runComparison({
-					pdf: nextPdf,
-					modes,
-					scrollDurationMs: 3000,
-				});
-			},
-			{
-				nextPdf: pdf.key,
-				modes: MODES,
-			},
-		);
-
-		for (const result of runResults) {
+		for (const mode of MODES) {
+			await page.goto(
+				`${BASE_URL}/bench?pdf=${encodeURIComponent(pdf.key)}&mode=${encodeURIComponent(mode)}`,
+				{
+					waitUntil: "networkidle2",
+					timeout: 120000,
+				},
+			);
+			await page.waitForFunction(
+				() =>
+					typeof window.__bench?.readCurrentMetrics === "function" &&
+					typeof window.__bench?.runScroll === "function",
+				{
+					timeout: 120000,
+				},
+			);
+			const result = await page.evaluate(
+				({ scrollDurationMs }) => {
+					return window.__bench.readCurrentMetrics(scrollDurationMs);
+				},
+				{
+					scrollDurationMs: 400,
+				},
+			);
 			results.push({
 				...result,
 				pdf: pdf.label,
