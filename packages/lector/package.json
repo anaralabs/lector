@@ -61,6 +61,7 @@
 		"react": ">=19"
 	},
 	"dependencies": {
+		"@chenglou/pretext": "^0.0.3",
 		"@floating-ui/react": "^0.26.28",
 		"@radix-ui/react-slot": "^1.1.0",
 		"@tanstack/react-virtual": "^3.10.9",
