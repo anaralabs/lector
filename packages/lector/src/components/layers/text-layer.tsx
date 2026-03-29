@@ -4,8 +4,23 @@ import { type HTMLProps, memo } from "react";
 import { useTextLayer } from "../../hooks/layers/useTextLayer";
 
 export const TextLayer = memo(
-	({ className, style, ...props }: HTMLProps<HTMLDivElement>) => {
-		const { textContainerRef, pageNumber } = useTextLayer();
+	({
+		className,
+		style,
+		mode = "auto",
+		...props
+	}: HTMLProps<HTMLDivElement> & {
+		mode?: "auto" | "pretext" | "pdfjs";
+	}) => {
+		const {
+			textContainerRef,
+			pageNumber,
+			renderMode,
+			fallbackReason,
+			requestedMode,
+		} = useTextLayer({
+			mode,
+		});
 
 		return (
 			<div
@@ -19,6 +34,9 @@ export const TextLayer = memo(
 				{...props}
 				{...{
 					"data-page-number": pageNumber,
+					"data-text-layer-requested-mode": requestedMode,
+					"data-text-layer-mode": renderMode,
+					"data-text-layer-fallback-reason": fallbackReason ?? undefined,
 				}}
 				ref={textContainerRef}
 			/>

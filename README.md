@@ -29,7 +29,12 @@ Here's a simple example of how to create a basic PDF viewer:
 
 ```tsx
 import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
-import "pdfjs-dist/web/pdf_viewer.css";
+import { GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
+
+GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/legacy/build/pdf.worker.mjs",
+  import.meta.url
+).toString();
 
 export default function PDFViewer() {
   return (
@@ -48,6 +53,10 @@ export default function PDFViewer() {
   );
 }
 ```
+
+`TextLayer` now renders through Lector's built-in pretext-powered text layout,
+so you only need to configure the PDF.js worker. Importing
+`pdfjs-dist/web/pdf_viewer.css` is no longer required for text selection.
 
 ## Local Development using PNPM and Yalc
 

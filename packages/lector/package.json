@@ -46,6 +46,7 @@
 		"clsx": "^2.1.1",
 		"pdfjs-dist": "^5.5.207",
 		"playwright": "^1.45.3",
+		"puppeteer-core": "^24.40.0",
 		"react": "^19.1.1",
 		"size-limit": "^11.1.6",
 		"tsc-alias": "^1.8.10",
@@ -61,6 +62,7 @@
 		"react": ">=19"
 	},
 	"dependencies": {
+		"@chenglou/pretext": "^0.0.3",
 		"@floating-ui/react": "^0.26.28",
 		"@radix-ui/react-slot": "^1.1.0",
 		"@tanstack/react-virtual": "^3.10.9",

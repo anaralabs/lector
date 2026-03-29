@@ -23,6 +23,7 @@ export { Search } from "./components/search";
 export { SelectionTooltip } from "./components/selection-tooltip";
 export { Thumbnail, Thumbnails } from "./components/thumbnails";
 export { CurrentZoom, ZoomIn, ZoomOut } from "./components/zoom";
+export type { TextLayerModeOverride } from "./hooks/layers/useTextLayer";
 export { usePdfJump } from "./hooks/pages/usePdfJump";
 export {
 	type SearchResult,

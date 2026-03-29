@@ -1,7 +1,11 @@
-import { useEffect, useRef } from "react";
+import type { PDFPageProxy } from "pdfjs-dist";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { usePdf } from "../../internal";
 import { loadPdfJs } from "../../lib/pdfjs";
+import { getTextLayerPageModel } from "../../lib/text-layer/model";
+import { ensureTextLayerStyles } from "../../lib/text-layer/styles";
+import type { TextLayerRenderMode } from "../../lib/text-layer/types";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
 // Add custom property declarations
@@ -9,6 +13,8 @@ interface TextLayerDivElement extends HTMLDivElement {
 	_textSelectionBound?: boolean;
 	_cleanupTextSelection?: () => void;
 }
+
+const textLayerDOMCache = new WeakMap<PDFPageProxy, DocumentFragment>();
 
 const createTextSelectionManager = () => {
 	const textLayers = new Map<HTMLDivElement, HTMLElement>();
@@ -186,16 +192,30 @@ const createTextSelectionManager = () => {
 
 const bindMouseEvents = createTextSelectionManager();
 
-export const useTextLayer = () => {
+export type TextLayerModeOverride = "auto" | "pretext" | "pdfjs";
+
+export const useTextLayer = ({
+	mode = "auto",
+}: {
+	mode?: TextLayerModeOverride;
+} = {}) => {
 	const textContainerRef = useRef<TextLayerDivElement>(null);
 	const textLayerRef = useRef<{
 		cancel: () => void;
 		render: () => Promise<void>;
 	} | null>(null);
 	const isRenderingRef = useRef(false);
+	const [renderMode, setRenderMode] = useState<TextLayerRenderMode>("pretext");
+	const [fallbackReason, setFallbackReason] = useState<string | null>(null);
 
 	const pageNumber = usePDFPageNumber();
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
+	const setTextLayerModel = usePdf((state) => state.setTextLayerModel);
+	const effectiveMode = useMemo(() => mode ?? "auto", [mode]);
+
+	useEffect(() => {
+		ensureTextLayerStyles();
+	}, []);
 
 	useEffect(() => {
 		const textContainer = textContainerRef.current;
@@ -204,39 +224,164 @@ export const useTextLayer = () => {
 		}
 
 		let isCancelled = false;
+		const cached = textLayerDOMCache.get(pdfPageProxy);
+
+		if (cached) {
+			textLayerDOMCache.delete(pdfPageProxy);
+			textContainer.replaceChildren(cached);
+			const endOfContent = textContainer.querySelector(
+				".endOfContent",
+			) as HTMLElement | null;
+			if (endOfContent) {
+				bindMouseEvents(textContainer, endOfContent);
+			}
+			setRenderMode(
+				effectiveMode === "pdfjs"
+					? "pdfjs"
+					: textContainer.querySelector("span")
+						? "pretext"
+						: "pdfjs-fallback",
+			);
+			setFallbackReason(null);
+			return () => {
+				if (textContainer.childNodes.length > 0) {
+					const fragment = document.createDocumentFragment();
+					while (textContainer.firstChild) {
+						fragment.appendChild(textContainer.firstChild);
+					}
+					textLayerDOMCache.set(pdfPageProxy, fragment);
+				}
+
+				if (textContainer?._cleanupTextSelection) {
+					textContainer._cleanupTextSelection();
+					delete textContainer._cleanupTextSelection;
+				}
+			};
+		}
 
 		isRenderingRef.current = true;
-
-		textContainer.innerHTML = "";
 
 		if (textLayerRef.current) {
 			textLayerRef.current.cancel();
 			textLayerRef.current = null;
 		}
 
-		void loadPdfJs()
-			.then(({ TextLayer }) => {
-				if (isCancelled || textContainerRef.current !== textContainer) {
-					return;
+		const renderCustomTextLayer = async () => {
+			const model = await getTextLayerPageModel(pdfPageProxy);
+			if (isCancelled || textContainerRef.current !== textContainer) {
+				return false;
+			}
+
+			setTextLayerModel(model);
+			const shouldForcePdfjs = effectiveMode === "pdfjs";
+			const shouldForcePretext = effectiveMode === "pretext";
+			const shouldUseCustomRenderer = shouldForcePretext
+				? true
+				: shouldForcePdfjs
+					? false
+					: model.canUseCustomRenderer;
+
+			if (shouldForcePdfjs) {
+				setRenderMode("pdfjs");
+				setFallbackReason("forced-pdfjs");
+				return false;
+			}
+
+			setRenderMode("pretext");
+			setFallbackReason(
+				shouldForcePretext
+					? null
+					: model.canUseCustomRenderer
+						? null
+						: model.fallbackReason,
+			);
+
+			if (!shouldUseCustomRenderer) {
+				return false;
+			}
+
+			for (const run of model.runs) {
+				if (!shouldForcePretext && !run.canUseCustomRenderer) {
+					return false;
 				}
 
-				const textLayer = new TextLayer({
-					textContentSource: pdfPageProxy.streamTextContent(),
-					container: textContainer,
-					viewport: pdfPageProxy.getViewport({ scale: 1 }),
-				});
+				if (!run.rawText) {
+					if (run.hasEOL) {
+						const br = document.createElement("br");
+						br.setAttribute("role", "presentation");
+						textContainer.appendChild(br);
+					}
+					continue;
+				}
 
-				textLayerRef.current = textLayer;
+				const span = document.createElement("span");
+				span.setAttribute("role", "presentation");
+				span.textContent = run.rawText;
+				span.dir = run.dir;
 
-				return textLayer.render();
-			})
-			.then(() => {
-				const textLayer = textLayerRef.current;
+				const style = span.style;
+				style.left = `${((run.left / model.viewport.width) * 100).toFixed(2)}%`;
+				style.top = `${((run.top / model.viewport.height) * 100).toFixed(2)}%`;
+				style.setProperty("--font-height", `${run.fontSize.toFixed(2)}px`);
+				style.fontFamily = run.fontFamily;
+				style.fontSize = "calc(var(--text-scale-factor) * var(--font-height))";
+				style.setProperty("--scale-x", "1");
+				style.setProperty("--rotate", `${run.angle}deg`);
+
+				textContainer.appendChild(span);
+
+				const actualWidth = span.getBoundingClientRect().width;
+				if (actualWidth > 0 && run.width > 0) {
+					style.setProperty("--scale-x", `${run.width / actualWidth}`);
+				} else {
+					style.setProperty("--scale-x", `${run.scaleX}`);
+				}
+
+				if (run.hasEOL) {
+					const br = document.createElement("br");
+					br.setAttribute("role", "presentation");
+					textContainer.appendChild(br);
+				}
+			}
+
+			return true;
+		};
+
+		void renderCustomTextLayer()
+			.then((rendered) => {
 				if (
-					!textLayer ||
+					rendered ||
 					isCancelled ||
 					textContainerRef.current !== textContainer
 				) {
+					return;
+				}
+
+				return loadPdfJs().then(({ TextLayer }) => {
+					if (isCancelled || textContainerRef.current !== textContainer) {
+						return;
+					}
+
+					setRenderMode(effectiveMode === "pdfjs" ? "pdfjs" : "pdfjs-fallback");
+					setFallbackReason(
+						(reason) =>
+							reason ??
+							(effectiveMode === "pdfjs" ? "forced-pdfjs" : "runtime-fallback"),
+					);
+
+					const textLayer = new TextLayer({
+						textContentSource: pdfPageProxy.streamTextContent(),
+						container: textContainer,
+						viewport: pdfPageProxy.getViewport({ scale: 1 }),
+					});
+
+					textLayerRef.current = textLayer;
+
+					return textLayer.render();
+				});
+			})
+			.then(() => {
+				if (isCancelled || textContainerRef.current !== textContainer) {
 					return;
 				}
 
@@ -264,15 +409,26 @@ export const useTextLayer = () => {
 				textLayerRef.current = null;
 			}
 
+			if (textContainer.childNodes.length > 0) {
+				const fragment = document.createDocumentFragment();
+				while (textContainer.firstChild) {
+					fragment.appendChild(textContainer.firstChild);
+				}
+				textLayerDOMCache.set(pdfPageProxy, fragment);
+			}
+
 			if (textContainer?._cleanupTextSelection) {
 				textContainer._cleanupTextSelection();
 				delete textContainer._cleanupTextSelection;
 			}
 		};
-	}, [pdfPageProxy.streamTextContent, pdfPageProxy.getViewport]);
+	}, [effectiveMode, pdfPageProxy, setTextLayerModel]);
 
 	return {
 		textContainerRef,
 		pageNumber: pdfPageProxy.pageNumber,
+		renderMode,
+		fallbackReason,
+		requestedMode: effectiveMode,
 	};
 };

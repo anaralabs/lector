@@ -29,7 +29,6 @@ Here's a simple example of how to create a basic PDF viewer:
 
 ```tsx
 import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
-import "pdfjs-dist/web/pdf_viewer.css";
 
 export default function PDFViewer() {
   return (
@@ -48,6 +47,10 @@ export default function PDFViewer() {
   );
 }
 ```
+
+The text layer now renders through Lector's custom pipeline, powered by
+`@chenglou/pretext` for measurement and layout, while still using PDF.js text
+content as the source of truth for geometry and fallback behavior.
 
 ## Local Development using PNPM and Yalc
 
