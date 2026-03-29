@@ -189,7 +189,7 @@ const createTextSelectionManager = () => {
 
 const bindMouseEvents = createTextSelectionManager();
 
-type TextLayerModeOverride = "auto" | "pretext" | "pdfjs";
+export type TextLayerModeOverride = "auto" | "pretext" | "pdfjs";
 
 export const useTextLayer = ({
 	mode = "auto",

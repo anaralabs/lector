@@ -46,6 +46,7 @@
 		"clsx": "^2.1.1",
 		"pdfjs-dist": "^5.5.207",
 		"playwright": "^1.45.3",
+		"puppeteer-core": "^24.40.0",
 		"react": "^19.1.1",
 		"size-limit": "^11.1.6",
 		"tsc-alias": "^1.8.10",
