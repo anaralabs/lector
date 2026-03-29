@@ -290,10 +290,17 @@ export const useTextLayer = ({
 				style.setProperty("--font-height", `${run.fontSize.toFixed(2)}px`);
 				style.fontFamily = run.fontFamily;
 				style.fontSize = "calc(var(--text-scale-factor) * var(--font-height))";
-				style.setProperty("--scale-x", `${run.scaleX}`);
+				style.setProperty("--scale-x", "1");
 				style.setProperty("--rotate", `${run.angle}deg`);
 
 				textContainer.appendChild(span);
+
+				const actualWidth = span.getBoundingClientRect().width;
+				if (actualWidth > 0 && run.width > 0) {
+					style.setProperty("--scale-x", `${run.width / actualWidth}`);
+				} else {
+					style.setProperty("--scale-x", `${run.scaleX}`);
+				}
 
 				if (run.hasEOL) {
 					const br = document.createElement("br");
