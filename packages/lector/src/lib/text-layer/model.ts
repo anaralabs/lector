@@ -176,7 +176,6 @@ const createRunFromTextItem = ({
 		canUseCustomRenderer:
 			!style?.vertical &&
 			isSupportedRotation(angle) &&
-			item.str.length > 0 &&
 			Number.isFinite(left) &&
 			Number.isFinite(top) &&
 			Number.isFinite(width) &&
