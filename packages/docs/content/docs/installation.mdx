@@ -38,8 +38,8 @@ bun add @anaralabs/lector pdfjs-dist
 In your PDF viewer component:
 
 ```tsx
+import { Root, Pages, Page, CanvasLayer } from "@anaralabs/lector";
 import { GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
-import "pdfjs-dist/web/pdf_viewer.css";
 
 // Set up the worker
 GlobalWorkerOptions.workerSrc = new URL(
@@ -67,7 +67,6 @@ In your PDF viewer component:
 ```tsx
 import { Root, Pages, Page, CanvasLayer } from "@anaralabs/lector";
 import "pdfjs-dist/legacy/build/pdf.worker.min.mjs";
-import "pdfjs-dist/web/pdf_viewer.css";
 
 export function PDFViewer() {
   return (
@@ -84,12 +83,7 @@ export function PDFViewer() {
 
 ## Required Styles
 
-3. Import the required CSS styles. You can do this in your main CSS file or component:
-
-```tsx
-// Import the default PDF viewer styles
-import "pdfjs-dist/web/pdf_viewer.css";
-```
+3. No extra PDF.js viewer CSS is required for the `TextLayer`. Lector now injects the text-layer styles it needs internally. You only need to configure the PDF.js worker.
 
 ## Verifying Installation
 
@@ -117,7 +111,7 @@ If you encounter any issues during installation:
 
 1. Make sure all peer dependencies are installed
 2. Check that the PDF.js worker is properly configured
-3. Verify that the required CSS files are imported
+3. Verify that the PDF.js worker is imported from the legacy build and resolves correctly
 4. Ensure your React version is compatible
 
 ## Next Steps

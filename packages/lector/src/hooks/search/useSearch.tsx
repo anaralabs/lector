@@ -69,7 +69,7 @@ export const useSearch = () => {
 			searchText: string,
 			text: string,
 			pageNumber: number,
-			textSize: number,
+			_textSize: number,
 		): SearchResult[] => {
 			const results: SearchResult[] = [];
 			const textLower = text.toLowerCase();
@@ -82,7 +82,7 @@ export const useSearch = () => {
 
 				results.push({
 					pageNumber,
-					text: text.substr(matchIndex, searchText.length + textSize),
+					text: text,
 					score: 1,
 					matchIndex,
 					isExactMatch: true,
@@ -104,7 +104,7 @@ export const useSearch = () => {
 			pageNumber: number,
 			threshold: number,
 			excludeIndices: Set<number>,
-			textSize: number,
+			_textSize: number,
 		): SearchResult[] => {
 			const results: SearchResult[] = [];
 			const textLower = text.toLowerCase();
@@ -130,7 +130,7 @@ export const useSearch = () => {
 					const score = 1 - distance / searchLower.length;
 					results.push({
 						pageNumber,
-						text: text.substr(index, searchLower.length + textSize),
+						text: text,
 						score,
 						matchIndex: index,
 						isExactMatch: false,

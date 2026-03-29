@@ -1,6 +1,5 @@
 import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
 import { GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
-import "pdfjs-dist/web/pdf_viewer.css";
 
 GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/legacy/build/pdf.worker.mjs",
