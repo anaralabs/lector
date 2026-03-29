@@ -370,7 +370,7 @@ export default function BenchmarkPage() {
 			runScroll: runScrollMeasurement,
 			runComparison: async ({
 				pdf: nextPdf = "pathways",
-				modes = ["pretext", "pdfjs"],
+				modes = ["pretext", "pdfjs"] as BenchmarkMode[],
 				scrollDurationMs = 3000,
 			} = {}) => {
 				const results: BenchmarkRunResult[] = [];
