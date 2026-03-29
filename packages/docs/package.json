@@ -37,6 +37,8 @@
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
     "autoprefixer": "^10.4.20",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^15.1.11",
     "postcss": "^8.4.49",
     "puppeteer-core": "^24.40.0",
     "tailwindcss": "^3.4.16",
