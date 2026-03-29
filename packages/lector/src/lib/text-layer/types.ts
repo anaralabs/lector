@@ -7,7 +7,7 @@ import type {
 
 export type TextLayerItem = TextItem | TextMarkedContent;
 
-export type TextLayerRenderMode = "pretext" | "pdfjs-fallback";
+export type TextLayerRenderMode = "pretext" | "pdfjs" | "pdfjs-fallback";
 
 export type TextLayerRun = {
 	id: string;

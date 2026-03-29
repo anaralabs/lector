@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { usePdf } from "../../internal";
 import { loadPdfJs } from "../../lib/pdfjs";
 import { getTextLayerPageModel } from "../../lib/text-layer/model";
 import { ensureTextLayerStyles } from "../../lib/text-layer/styles";
+import type { TextLayerRenderMode } from "../../lib/text-layer/types";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
 // Add custom property declarations
@@ -188,21 +189,26 @@ const createTextSelectionManager = () => {
 
 const bindMouseEvents = createTextSelectionManager();
 
-export const useTextLayer = () => {
+type TextLayerModeOverride = "auto" | "pretext" | "pdfjs";
+
+export const useTextLayer = ({
+	mode = "auto",
+}: {
+	mode?: TextLayerModeOverride;
+} = {}) => {
 	const textContainerRef = useRef<TextLayerDivElement>(null);
 	const textLayerRef = useRef<{
 		cancel: () => void;
 		render: () => Promise<void>;
 	} | null>(null);
 	const isRenderingRef = useRef(false);
-	const [renderMode, setRenderMode] = useState<"pretext" | "pdfjs-fallback">(
-		"pretext",
-	);
+	const [renderMode, setRenderMode] = useState<TextLayerRenderMode>("pretext");
 	const [fallbackReason, setFallbackReason] = useState<string | null>(null);
 
 	const pageNumber = usePDFPageNumber();
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const setTextLayerModel = usePdf((state) => state.setTextLayerModel);
+	const effectiveMode = useMemo(() => mode ?? "auto", [mode]);
 
 	useEffect(() => {
 		ensureTextLayerStyles();
@@ -232,14 +238,38 @@ export const useTextLayer = () => {
 			}
 
 			setTextLayerModel(model);
-			setRenderMode(model.renderMode);
-			setFallbackReason(model.fallbackReason);
+			const shouldForcePdfjs = effectiveMode === "pdfjs";
+			const shouldForcePretext = effectiveMode === "pretext";
+			const shouldUseCustomRenderer = shouldForcePretext
+				? true
+				: shouldForcePdfjs
+					? false
+					: model.canUseCustomRenderer;
 
-			if (!model.canUseCustomRenderer) {
+			if (shouldForcePdfjs) {
+				setRenderMode("pdfjs");
+				setFallbackReason("forced-pdfjs");
+				return false;
+			}
+
+			setRenderMode("pretext");
+			setFallbackReason(
+				shouldForcePretext
+					? null
+					: model.canUseCustomRenderer
+						? null
+						: model.fallbackReason,
+			);
+
+			if (!shouldUseCustomRenderer) {
 				return false;
 			}
 
 			for (const run of model.runs) {
+				if (!shouldForcePretext && !run.canUseCustomRenderer) {
+					return false;
+				}
+
 				if (!run.rawText) {
 					if (run.hasEOL) {
 						const br = document.createElement("br");
@@ -290,7 +320,12 @@ export const useTextLayer = () => {
 						return;
 					}
 
-					setRenderMode("pdfjs-fallback");
+					setRenderMode(effectiveMode === "pdfjs" ? "pdfjs" : "pdfjs-fallback");
+					setFallbackReason(
+						(reason) =>
+							reason ??
+							(effectiveMode === "pdfjs" ? "forced-pdfjs" : "runtime-fallback"),
+					);
 
 					const textLayer = new TextLayer({
 						textContentSource: pdfPageProxy.streamTextContent(),
@@ -337,12 +372,13 @@ export const useTextLayer = () => {
 				delete textContainer._cleanupTextSelection;
 			}
 		};
-	}, [pdfPageProxy, setTextLayerModel]);
+	}, [effectiveMode, pdfPageProxy, setTextLayerModel]);
 
 	return {
 		textContainerRef,
 		pageNumber: pdfPageProxy.pageNumber,
 		renderMode,
 		fallbackReason,
+		requestedMode: effectiveMode,
 	};
 };
