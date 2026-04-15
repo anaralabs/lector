@@ -4,7 +4,6 @@ import {
 	useCallback,
 	useEffect,
 	useRef,
-	useState,
 } from "react";
 
 import { usePdf } from "../../internal";
@@ -25,7 +24,9 @@ export const useViewportContainer = ({
 	elementWrapperRef: RefObject<HTMLDivElement | null>;
 	elementRef: RefObject<HTMLDivElement | null>;
 }) => {
-	const [origin, setOrigin] = useState<[number, number]>([0, 0]);
+	// Ref instead of useState — the return value isn't consumed by any caller,
+	// so useState was causing a wasted React re-render on every pinch start.
+	const originRef = useRef<[number, number]>([0, 0]);
 	const wheelInertia = useRef<{
 		active: boolean;
 		lastTime: number;
@@ -59,6 +60,12 @@ export const useViewportContainer = ({
 		zoom,
 	});
 
+	// rAF handle for debouncing Zustand store updates during pinch.
+	// The imperative DOM transform runs every frame; the store update
+	// (which triggers React re-renders in all zoom subscribers) is
+	// coalesced to at most one per animation frame.
+	const zoomRafRef = useRef<number | null>(null);
+
 	const updateTransform = useCallback(
 		(zoomUpdate?: boolean) => {
 			if (
@@ -89,10 +96,24 @@ export const useViewportContainer = ({
 			containerRef.current.scrollTop = translateY;
 			containerRef.current.scrollLeft = translateX;
 
-			if (zoomUpdate) updateZoom(() => transformations.current.zoom);
+			if (zoomUpdate && zoomRafRef.current === null) {
+				zoomRafRef.current = requestAnimationFrame(() => {
+					zoomRafRef.current = null;
+					updateZoom(() => transformations.current.zoom);
+				});
+			}
 		},
 		[containerRef, elementRef, elementWrapperRef, updateZoom],
 	);
+
+	// Cancel pending rAF on unmount
+	useEffect(() => {
+		return () => {
+			if (zoomRafRef.current !== null) {
+				cancelAnimationFrame(zoomRafRef.current);
+			}
+		};
+	}, []);
 
 	useEffect(() => {
 		if (transformations.current.zoom === zoom || !containerRef.current) {
@@ -226,10 +247,10 @@ export const useViewportContainer = ({
 						origin[1] - containerRect.top,
 					];
 
-					setOrigin([
+					originRef.current = [
 						contentPosition[0] / currentZoom,
 						contentPosition[1] / currentZoom,
-					]);
+					];
 
 					return {
 						contentPosition,
@@ -292,6 +313,6 @@ export const useViewportContainer = ({
 	);
 
 	return {
-		origin,
+		origin: originRef.current,
 	};
 };

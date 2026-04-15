@@ -30,6 +30,13 @@ export const useDetailCanvasLayer = ({
 
 	const [zoom] = useDebounce(bouncyZoom, 200);
 
+	// Cache base viewport dimensions — they never change for a given page proxy.
+	const pageDimsRef = useRef<{ width: number; height: number; proxy: unknown } | null>(null);
+	if (!pageDimsRef.current || pageDimsRef.current.proxy !== pdfPageProxy) {
+		const vp = pdfPageProxy.getViewport({ scale: 1 });
+		pageDimsRef.current = { width: vp.width, height: vp.height, proxy: pdfPageProxy };
+	}
+
 	useLayoutEffect(() => {
 		const scrollContainer = viewportRef?.current;
 		if (!scrollContainer) {
@@ -61,9 +68,7 @@ export const useDetailCanvasLayer = ({
 				return;
 			}
 
-			const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
-			const pageWidth = baseViewport.width;
-			const pageHeight = baseViewport.height;
+			const { width: pageWidth, height: pageHeight } = pageDimsRef.current;
 
 			const scrollX = scrollContainer.scrollLeft / zoom;
 			const scrollY = scrollContainer.scrollTop / zoom;
