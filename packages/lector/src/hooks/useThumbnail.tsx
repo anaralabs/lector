@@ -1,8 +1,8 @@
-import type { RenderTask } from "pdfjs-dist";
 import { useEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../internal";
+import { renderQueue } from "../lib/render-queue";
 import { useDpr } from "./useDpr";
 import { useVisibility } from "./useVisibility";
 
@@ -29,7 +29,8 @@ export const useThumbnail = (
 
 	const containerRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
-	const renderTaskRef = useRef<RenderTask | null>(null);
+	// Track the queue job cancel fn so we can cancel before the render starts
+	const cancelJobRef = useRef<(() => void) | null>(null);
 
 	const pageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const { visible } = useVisibility({ elementRef: containerRef });
@@ -39,59 +40,72 @@ export const useThumbnail = (
 	const isVisible = isFirstPage || debouncedVisible;
 
 	useEffect(() => {
-		const renderThumbnail = async () => {
-			const canvas = canvasRef.current;
+		const canvas = canvasRef.current;
+		if (!canvas || !pageProxy) return;
 
-			if (!canvas || !pageProxy) return;
+		// Cancel any in-flight queue job or render from the previous effect run
+		cancelJobRef.current?.();
+		cancelJobRef.current = null;
 
-			try {
-				// Cancel any existing render task
-				if (renderTaskRef.current) {
-					renderTaskRef.current.cancel();
+		const viewport = pageProxy.getViewport({ scale: 1 });
+		const scale =
+			Math.min(maxWidth / viewport.width, maxHeight / viewport.height) *
+			(isVisible ? dpr : 0.5);
+		const scaledViewport = pageProxy.getViewport({ scale });
+
+		let activeRenderTask: { cancel(): void } | null = null;
+
+		const job = renderQueue.enqueue(() => {
+			return new Promise<void>((resolve, reject) => {
+				if (!canvasRef.current) {
+					resolve();
+					return;
 				}
 
-				// Calculate viewport and scale
-				const viewport = pageProxy.getViewport({ scale: 1 });
-				const scale =
-					Math.min(maxWidth / viewport.width, maxHeight / viewport.height) *
-					(isVisible ? dpr : 0.5);
-
-				const scaledViewport = pageProxy.getViewport({ scale });
-
-				// Set canvas dimensions
 				canvas.width = scaledViewport.width;
 				canvas.height = scaledViewport.height;
 
-				// Create and store new render task
 				const context = canvas.getContext("2d");
-				if (!context) return;
+				if (!context) {
+					resolve();
+					return;
+				}
 
 				const renderTask = pageProxy.render({
 					canvas,
 					canvasContext: context,
 					viewport: scaledViewport,
 				});
+				activeRenderTask = renderTask;
 
-				renderTaskRef.current = renderTask;
-				await renderTask.promise;
-			} catch (error: unknown) {
-				if (
-					error instanceof Error &&
-					error.name === "RenderingCancelledException"
-				) {
-					console.log("Rendering cancelled");
-				} else {
-					console.error("Failed to render PDF page:", error);
-				}
-			}
+				renderTask.promise
+					.then(() => {
+						activeRenderTask = null;
+						resolve();
+					})
+					.catch((error: unknown) => {
+						activeRenderTask = null;
+						if (
+							error instanceof Error &&
+							error.name === "RenderingCancelledException"
+						) {
+							resolve();
+						} else {
+							reject(error);
+						}
+					});
+			});
+		}, "background");
+
+		cancelJobRef.current = () => {
+			job.cancel();
+			activeRenderTask?.cancel();
 		};
 
-		renderThumbnail();
-
 		// Capture ref — React clears refs before passive cleanup runs on unmount
-		const canvas = canvasRef.current;
 		return () => {
-			renderTaskRef.current?.cancel();
+			cancelJobRef.current?.();
+			cancelJobRef.current = null;
 			// Release canvas memory for Safari (384 MB total canvas limit on iOS)
 			if (canvas) {
 				canvas.width = 1;

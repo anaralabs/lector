@@ -1,5 +1,6 @@
 import type {
 	OnProgressParameters,
+	PageViewport,
 	PDFDocumentLoadingTask,
 	PDFDocumentProxy,
 	PDFPageProxy,
@@ -97,37 +98,87 @@ export const usePDFDocumentContext = ({
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: <onDocumnetLoad,zoomOptions>
 	useEffect(() => {
+		// Number of pages to load eagerly before showing UI.
+		// Remaining pages are loaded in the background after first paint.
+		const EAGER_PAGE_COUNT = 5;
+
 		const generateViewports = async (pdf: PDFDocumentProxy) => {
-			const pageProxies: Array<PDFPageProxy> = [];
-			const rotations: number[] = [];
-			const viewports = await Promise.all(
-				Array.from({ length: pdf.numPages }, async (_, index) => {
+			const totalPages = pdf.numPages;
+			const eagerCount = Math.min(EAGER_PAGE_COUNT, totalPages);
+
+			// Load initial batch of pages eagerly
+			const eagerProxies: Array<PDFPageProxy> = [];
+			const viewports: Array<PageViewport> = [];
+
+			await Promise.all(
+				Array.from({ length: eagerCount }, async (_, index) => {
 					const page = await pdf.getPage(index + 1);
-					// sometimes there is information about the default rotation of the document
-					// stored in page.rotate. we need to always add that additional rotaton offset
 					const deltaRotate = page.rotate || 0;
 					const viewport = page.getViewport({
 						scale: 1,
 						rotation: rotation + deltaRotate,
 					});
-					pageProxies.push(page);
-					rotations.push(page.rotate);
-					return viewport;
+					eagerProxies[index] = page;
+					viewports[index] = viewport;
 				}),
 			);
 
-			const sortedPageProxies = pageProxies.toSorted(
-				(a, b) => a.pageNumber - b.pageNumber,
-			);
+			// Estimate remaining page viewports from the first page to unblock the virtualizer
+			if (totalPages > eagerCount && viewports[0]) {
+				const templateViewport = viewports[0];
+				for (let i = eagerCount; i < totalPages; i++) {
+					viewports[i] = templateViewport;
+				}
+			}
+
+			// Build sparse array — eagerly loaded pages are present, rest are undefined
+			const allProxies: Array<PDFPageProxy | undefined> = new Array(totalPages);
+			for (let i = 0; i < eagerCount; i++) {
+				allProxies[i] = eagerProxies[i];
+			}
+
 			setInitialState((prev) => ({
 				...prev,
 				isZoomFitWidth,
 				viewports,
-				pageProxies: sortedPageProxies,
+				pageProxies: allProxies as PDFPageProxy[],
 				pdfDocumentProxy: pdf,
 				zoom,
 				zoomOptions,
 			}));
+
+			// Load remaining pages in small batches in the background
+			const BATCH_SIZE = 10;
+			for (let start = eagerCount; start < totalPages; start += BATCH_SIZE) {
+				const end = Math.min(start + BATCH_SIZE, totalPages);
+				const batchProxies = await Promise.all(
+					Array.from({ length: end - start }, async (_, j) => {
+						const idx = start + j;
+						const page = await pdf.getPage(idx + 1);
+						const deltaRotate = page.rotate || 0;
+						const viewport = page.getViewport({
+							scale: 1,
+							rotation: rotation + deltaRotate,
+						});
+						return { page, viewport, idx };
+					}),
+				);
+
+				setInitialState((prev) => {
+					if (!prev) return prev;
+					const updatedViewports = [...prev.viewports];
+					const updatedProxies = [...prev.pageProxies];
+					for (const { page, viewport, idx } of batchProxies) {
+						updatedViewports[idx] = viewport;
+						updatedProxies[idx] = page;
+					}
+					return {
+						...prev,
+						viewports: updatedViewports,
+						pageProxies: updatedProxies,
+					};
+				});
+			}
 		};
 
 		const loadDocument = () => {

@@ -1,19 +1,38 @@
+type Priority = "visible" | "overscan" | "background";
+
+const PRIORITY_ORDER: Record<Priority, number> = {
+	visible: 0,
+	overscan: 1,
+	background: 2,
+};
+
 type RenderJob = {
 	execute: () => Promise<void>;
 	resolve: () => void;
 	reject: (error: unknown) => void;
 	cancelled: boolean;
+	priority: Priority;
 };
 
 /**
- * Serializes PDF page render operations so only one runs at a time.
- * This prevents multiple heavy pages from competing for CPU and blocking the UI.
+ * Serializes PDF page render operations with priority ordering and limited
+ * parallelism. Visible pages render first, overscan pages next, background last.
+ * Up to `concurrency` jobs run simultaneously to utilise GPU without starving
+ * the main thread.
  */
 class RenderQueue {
 	private queue: RenderJob[] = [];
-	private running = false;
+	private activeCount = 0;
+	private concurrency: number;
 
-	enqueue(execute: () => Promise<void>): {
+	constructor(concurrency = 3) {
+		this.concurrency = concurrency;
+	}
+
+	enqueue(
+		execute: () => Promise<void>,
+		priority: Priority = "overscan",
+	): {
 		promise: Promise<void>;
 		cancel: () => void;
 	} {
@@ -30,9 +49,19 @@ class RenderQueue {
 			resolve: resolve!,
 			reject: reject!,
 			cancelled: false,
+			priority,
 		};
 
-		this.queue.push(job);
+		// Insert sorted by priority (lower number = higher priority)
+		const insertIdx = this.queue.findIndex(
+			(j) => PRIORITY_ORDER[j.priority] > PRIORITY_ORDER[priority],
+		);
+		if (insertIdx === -1) {
+			this.queue.push(job);
+		} else {
+			this.queue.splice(insertIdx, 0, job);
+		}
+
 		this.flush();
 
 		return {
@@ -44,11 +73,8 @@ class RenderQueue {
 		};
 	}
 
-	private async flush() {
-		if (this.running) return;
-		this.running = true;
-
-		while (this.queue.length > 0) {
+	private flush() {
+		while (this.activeCount < this.concurrency && this.queue.length > 0) {
 			const job = this.queue.shift()!;
 
 			if (job.cancelled) {
@@ -56,22 +82,22 @@ class RenderQueue {
 				continue;
 			}
 
-			try {
-				await job.execute();
-				job.resolve();
-			} catch (error) {
-				job.reject(error);
-			}
+			this.activeCount++;
+			job
+				.execute()
+				.then(() => job.resolve())
+				.catch((error) => job.reject(error))
+				.finally(() => {
+					this.activeCount--;
+					this.flush();
+				});
 		}
-
-		this.running = false;
 	}
 }
 
 /**
  * Global singleton — intentionally shared across all <Root> instances.
- * Serializing renders across documents prevents overall GPU/CPU pressure
- * on the main thread (CanvasGraphics is single-threaded). The trade-off
- * is increased latency in multi-viewer setups.
+ * Allows up to 3 concurrent renders for better throughput while preventing
+ * GPU/CPU over-subscription.
  */
-export const renderQueue = new RenderQueue();
+export const renderQueue = new RenderQueue(3);

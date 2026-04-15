@@ -3,6 +3,7 @@ import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
 import { clampScaleForPage } from "../../lib/canvas-utils";
+import { canvasPool } from "../../lib/canvas-pool";
 import { renderCache } from "../../lib/render-cache";
 import { renderQueue } from "../../lib/render-queue";
 import { useDpr } from "../useDpr";
@@ -18,6 +19,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const markPageRendered = usePdf((state) => state.markPageRendered);
 	const unmarkPageRendered = usePdf((state) => state.unmarkPageRendered);
+	const currentPage = usePdf((state) => state.currentPage);
 	const documentId = usePdf(
 		(state) => state.pdfDocumentProxy.fingerprints[0] ?? "default",
 	);
@@ -113,6 +115,8 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		let activeRenderingTask: { cancel(): void } | null = null;
 
 		// Cache miss — render via queue with double-buffer (async, non-blocking)
+		const distance = Math.abs(pageNumber - currentPage);
+		const priority = distance === 0 ? "visible" as const : distance <= 2 ? "overscan" as const : "background" as const;
 		const job = renderQueue.enqueue(() => {
 			return new Promise<void>((resolve, reject) => {
 				if (cancelled || !canvasRef.current) {
@@ -120,61 +124,60 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 					return;
 				}
 
-				// Double-buffer: render to a temporary canvas, then swap onto the
-				// visible canvas in a single frame to avoid white flash
-				const buffer = document.createElement("canvas");
-				buffer.width = w;
-				buffer.height = h;
+			// Double-buffer: render to a pooled canvas, then swap onto the
+			// visible canvas in a single frame to avoid white flash
+			const buffer = canvasPool.acquire(w, h);
 
-				const bufferCtx = buffer.getContext("2d");
-				if (!bufferCtx) {
-					resolve();
-					return;
-				}
+			const bufferCtx = buffer.getContext("2d");
+			if (!bufferCtx) {
+				canvasPool.release(buffer);
+				resolve();
+				return;
+			}
 
-				const viewport = pdfPageProxy.getViewport({ scale: baseScale });
+			const viewport = pdfPageProxy.getViewport({ scale: baseScale });
 
-				const renderingTask = pdfPageProxy.render({
-					canvas: buffer,
-					canvasContext: bufferCtx,
-					viewport,
-					background,
-				});
-				activeRenderingTask = renderingTask;
+			const renderingTask = pdfPageProxy.render({
+				canvas: buffer,
+				canvasContext: bufferCtx,
+				viewport,
+				background,
+			});
+			activeRenderingTask = renderingTask;
 
-				renderingTask.promise
-					.then(() => {
-						activeRenderingTask = null;
-						if (cancelled || !canvasRef.current) {
-							resolve();
-							return;
-						}
-
-						swapToCanvas(buffer, w, h);
-						markPageRendered(pageNumber);
-
-						// Cache for instant scroll-back, then release buffer
-						renderCache
-							.set(documentId, pageNumber, baseScale, buffer, background)
-							.finally(() => {
-								// Release buffer canvas memory (Safari holds onto it)
-								// Only after createImageBitmap has read the pixels
-								buffer.width = 0;
-								buffer.height = 0;
-							});
-
+			renderingTask.promise
+				.then(() => {
+					activeRenderingTask = null;
+					if (cancelled || !canvasRef.current) {
+						canvasPool.release(buffer);
 						resolve();
-					})
-					.catch((error) => {
-						activeRenderingTask = null;
-						if (error.name === "RenderingCancelledException") {
-							resolve();
-							return;
-						}
-						reject(error);
-					});
+						return;
+					}
+
+					swapToCanvas(buffer, w, h);
+					markPageRendered(pageNumber);
+
+					// Cache for instant scroll-back, then release buffer back to pool
+					renderCache
+						.set(documentId, pageNumber, baseScale, buffer, background)
+						.finally(() => {
+							// Return to pool only after createImageBitmap has read the pixels
+							canvasPool.release(buffer);
+						});
+
+					resolve();
+				})
+				.catch((error) => {
+					activeRenderingTask = null;
+					canvasPool.release(buffer);
+					if (error.name === "RenderingCancelledException") {
+						resolve();
+						return;
+					}
+					reject(error);
 			});
 		});
+		}, priority);
 
 		return () => {
 			cancelled = true;
@@ -189,6 +192,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		pageNumber,
 		documentId,
 		markPageRendered,
+		currentPage,
 	]);
 
 	// Cleanup on unmount: release canvas memory (Safari) and unmark page

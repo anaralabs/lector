@@ -4,6 +4,7 @@ import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
 import { clampScaleForPage } from "../../lib/canvas-utils";
+import { canvasPool } from "../../lib/canvas-pool";
 import { subscribeToViewportInvalidation } from "../../lib/viewport-invalidation";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
@@ -131,14 +132,13 @@ export const useDetailCanvasLayer = ({
 			const actualWidth = visibleWidth * effectiveScale;
 			const actualHeight = visibleHeight * effectiveScale;
 
-			// Double-buffer: render to an offscreen buffer so the old detail
+			// Double-buffer: render to a pooled canvas so the old detail
 			// canvas stays visible during the render (no flash to pixelated base)
-			const buffer = document.createElement("canvas");
-			buffer.width = actualWidth;
-			buffer.height = actualHeight;
+			const buffer = canvasPool.acquire(actualWidth, actualHeight);
 
 			const bufferCtx = buffer.getContext("2d");
 			if (!bufferCtx) {
+				canvasPool.release(buffer);
 				return;
 			}
 
@@ -191,9 +191,8 @@ export const useDetailCanvasLayer = ({
 					if (renderingTask === currentRenderingTask) {
 						renderingTask = null;
 					}
-					// Always release buffer — cancellations and stale tasks leak otherwise
-					buffer.width = 0;
-					buffer.height = 0;
+					// Return buffer to pool — covers both success and cancellation paths
+					canvasPool.release(buffer);
 				});
 		};
 

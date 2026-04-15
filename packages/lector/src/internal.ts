@@ -5,6 +5,7 @@ import { createRef } from "react";
 import { createStore, useStore } from "zustand";
 
 import { clamp } from "./lib/clamp";
+import { loadPdfJs } from "./lib/pdfjs";
 import { getFitWidthZoom } from "./lib/zoom";
 import { createZustandContext } from "./lib/zustand";
 
@@ -71,6 +72,8 @@ interface PDFState {
 	setHighlight: (higlights: HighlightRect[]) => void;
 
 	getPdfPageProxy: (pageNumber: number) => PDFPageProxy;
+	ensurePageProxy: (pageNumber: number) => void;
+	_pendingPageLoads: Set<number>;
 
 	customSelectionRects: HighlightRect[];
 	setCustomSelectionRects: (rects: HighlightRect[]) => void;
@@ -164,12 +167,41 @@ export const PDFStore = createZustandContext(
 			},
 
 			pageProxies: initialState.pageProxies,
+			_pendingPageLoads: new Set(),
 			getPdfPageProxy: (pageNumber) => {
 				const proxy = get().pageProxies[pageNumber - 1];
-
-				if (!proxy) throw new Error(`Page ${pageNumber} does not exist`);
-
+				if (!proxy) throw new Error(`Page ${pageNumber} is not loaded yet`);
 				return proxy;
+			},
+			ensurePageProxy: (pageNumber) => {
+				const state = get();
+				if (state.pageProxies[pageNumber - 1]) return;
+				if (state._pendingPageLoads.has(pageNumber)) return;
+
+				state._pendingPageLoads.add(pageNumber);
+				const pdf = state.pdfDocumentProxy;
+
+				void loadPdfJs().then(async () => {
+					try {
+						const page = await pdf.getPage(pageNumber);
+						const deltaRotate = page.rotate || 0;
+						const viewport = page.getViewport({
+							scale: 1,
+							rotation: deltaRotate,
+						});
+						const current = get();
+						const updatedProxies = [...current.pageProxies];
+						const updatedViewports = [...current.viewports];
+						updatedProxies[pageNumber - 1] = page;
+						updatedViewports[pageNumber - 1] = viewport;
+						set({
+							pageProxies: updatedProxies,
+							viewports: updatedViewports,
+						});
+					} finally {
+						get()._pendingPageLoads.delete(pageNumber);
+					}
+				});
 			},
 
 			textContent: [],

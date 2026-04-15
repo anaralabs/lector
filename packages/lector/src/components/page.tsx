@@ -3,6 +3,7 @@ import {
 	type HTMLProps,
 	memo,
 	type ReactNode,
+	useEffect,
 } from "react";
 
 import { PDFPageNumberContext } from "../hooks/usePdfPageNumber";
@@ -18,6 +19,58 @@ export const Page = memo(
 	}: HTMLProps<HTMLDivElement> & {
 		children: ReactNode;
 		pageNumber?: number;
+	}) => {
+		const hasProxy = usePdf(
+			(state) => state.pageProxies[pageNumber - 1] != null,
+		);
+		const ensurePageProxy = usePdf((state) => state.ensurePageProxy);
+		const viewport = usePdf((state) => state.viewports[pageNumber - 1]);
+
+		useEffect(() => {
+			if (!hasProxy) {
+				ensurePageProxy(pageNumber);
+			}
+		}, [hasProxy, ensurePageProxy, pageNumber]);
+
+		const width = viewport?.width ?? 612;
+		const height = viewport?.height ?? 792;
+
+		if (!hasProxy) {
+			return (
+				<Primitive.div style={{ display: "block" }}>
+					<div
+						style={
+							{
+								"--scale-factor": 1,
+								"--total-scale-factor": 1,
+								backgroundColor: "white",
+								position: "relative",
+								width,
+								height,
+								...style,
+							} as CSSProperties
+						}
+						{...props}
+					/>
+				</Primitive.div>
+			);
+		}
+
+		return <LoadedPage pageNumber={pageNumber} style={style} {...props}>{children}</LoadedPage>;
+	},
+);
+
+Page.displayName = "Page";
+
+const LoadedPage = memo(
+	({
+		children,
+		pageNumber,
+		style,
+		...props
+	}: HTMLProps<HTMLDivElement> & {
+		children: ReactNode;
+		pageNumber: number;
 	}) => {
 		const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 		const viewport = usePdf((state) => state.viewports[pageNumber - 1]);
@@ -58,4 +111,4 @@ export const Page = memo(
 	},
 );
 
-Page.displayName = "Page";
+LoadedPage.displayName = "LoadedPage";
