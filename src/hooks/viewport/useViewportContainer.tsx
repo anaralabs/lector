@@ -1,11 +1,5 @@
 import { useGesture } from "@use-gesture/react";
-import {
-	type RefObject,
-	useCallback,
-	useEffect,
-	useRef,
-	useState,
-} from "react";
+import { type RefObject, useCallback, useEffect, useRef } from "react";
 
 import { usePdf } from "../../internal";
 import { clamp } from "../../lib/clamp";
@@ -25,7 +19,9 @@ export const useViewportContainer = ({
 	elementWrapperRef: RefObject<HTMLDivElement | null>;
 	elementRef: RefObject<HTMLDivElement | null>;
 }) => {
-	const [origin, setOrigin] = useState<[number, number]>([0, 0]);
+	// Ref instead of useState — the return value isn't consumed by any caller,
+	// so useState was causing a wasted React re-render on every pinch start.
+	const originRef = useRef<[number, number]>([0, 0]);
 	const wheelInertia = useRef<{
 		active: boolean;
 		lastTime: number;
@@ -59,6 +55,18 @@ export const useViewportContainer = ({
 		zoom,
 	});
 
+	// rAF handle for debouncing Zustand store updates during pinch.
+	// The imperative DOM transform runs every frame; the store update
+	// (which triggers React re-renders in all zoom subscribers) is
+	// coalesced to at most one per animation frame.
+	const zoomRafRef = useRef<number | null>(null);
+	// Track the last zoom value we pushed to the store so the sync effect
+	// can distinguish our own rAF-deferred updates from external changes
+	// (e.g. zoom slider). Without this, the sync effect sees a mismatch
+	// between the store (stale rAF value) and transformations.current
+	// (already advanced by a newer pinch frame) and snaps back.
+	const lastPushedZoomRef = useRef(zoom);
+
 	const updateTransform = useCallback(
 		(zoomUpdate?: boolean) => {
 			if (
@@ -71,26 +79,54 @@ export const useViewportContainer = ({
 
 			const { zoom, translateX, translateY } = transformations.current;
 
+			// Read natural dimensions BEFORE writing the transform — avoids
+			// forced synchronous layout. getBoundingClientRect() after a
+			// transform write forces Firefox to re-rasterize the compositor
+			// layer mid-frame, briefly flashing the canvas background color.
+			const naturalWidth =
+				parseFloat(elementRef.current.style.width) ||
+				elementRef.current.offsetWidth;
+			const naturalHeight =
+				parseFloat(elementRef.current.style.height) ||
+				elementRef.current.offsetHeight;
+
+			// Batch all writes — no layout reads after this point.
 			elementRef.current.style.transform = `scale3d(${zoom}, ${zoom}, 1)`;
-			elementRef.current.style.willChange = "scale3d";
-
-			const elementBoundingBox = elementRef.current.getBoundingClientRect();
-
-			const width = elementBoundingBox.width;
-
-			elementWrapperRef.current.style.width = `${width}px`;
-			elementWrapperRef.current.style.height = `${elementBoundingBox.height}px`;
-
+			elementWrapperRef.current.style.width = `${naturalWidth * zoom}px`;
+			elementWrapperRef.current.style.height = `${naturalHeight * zoom}px`;
 			containerRef.current.scrollTop = translateY;
 			containerRef.current.scrollLeft = translateX;
 
-			if (zoomUpdate) updateZoom(() => transformations.current.zoom);
+			if (zoomUpdate && zoomRafRef.current === null) {
+				zoomRafRef.current = requestAnimationFrame(() => {
+					zoomRafRef.current = null;
+					const z = transformations.current.zoom;
+					lastPushedZoomRef.current = z;
+					updateZoom(() => z);
+				});
+			}
 		},
 		[containerRef, elementRef, elementWrapperRef, updateZoom],
 	);
 
+	// Cancel pending rAF on unmount
+	useEffect(() => {
+		return () => {
+			if (zoomRafRef.current !== null) {
+				cancelAnimationFrame(zoomRafRef.current);
+			}
+		};
+	}, []);
+
+	// Sync external zoom changes (e.g. zoom slider, programmatic setZoom)
+	// into the imperative transform. Skip updates that originated from our
+	// own rAF-deferred store push to avoid overwriting a newer pinch value.
 	useEffect(() => {
 		if (transformations.current.zoom === zoom || !containerRef.current) {
+			return;
+		}
+
+		if (zoom === lastPushedZoomRef.current) {
 			return;
 		}
 
@@ -221,10 +257,10 @@ export const useViewportContainer = ({
 						origin[1] - containerRect.top,
 					];
 
-					setOrigin([
+					originRef.current = [
 						contentPosition[0] / currentZoom,
 						contentPosition[1] / currentZoom,
-					]);
+					];
 
 					return {
 						contentPosition,
@@ -287,6 +323,6 @@ export const useViewportContainer = ({
 	);
 
 	return {
-		origin,
+		origin: originRef.current,
 	};
 };

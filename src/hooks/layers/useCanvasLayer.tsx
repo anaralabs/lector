@@ -29,6 +29,22 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const lastBackgroundRef = useRef(background);
 	const lastPageProxyRef = useRef(pdfPageProxy);
 
+	// Cache base viewport dimensions — they never change for a given page proxy.
+	// Avoids allocating a new viewport object on every effect run.
+	const pageDimsRef = useRef<{
+		width: number;
+		height: number;
+		proxy: unknown;
+	} | null>(null);
+	if (!pageDimsRef.current || pageDimsRef.current.proxy !== pdfPageProxy) {
+		const vp = pdfPageProxy.getViewport({ scale: 1 });
+		pageDimsRef.current = {
+			width: vp.width,
+			height: vp.height,
+			proxy: pdfPageProxy,
+		};
+	}
+
 	// useLayoutEffect for cache hits — synchronous draw before paint, no flash.
 	// Cache misses enqueue async work via the render queue (non-blocking).
 	useLayoutEffect(() => {
@@ -46,9 +62,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			lastRenderedScaleRef.current = 0;
 		}
 
-		const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
-		const pageWidth = baseViewport.width;
-		const pageHeight = baseViewport.height;
+		const { width: pageWidth, height: pageHeight } = pageDimsRef.current!;
 		const bgColor = background ?? "white";
 
 		const targetBaseScale = dpr * Math.min(zoom, 1);

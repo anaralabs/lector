@@ -234,6 +234,7 @@ export const Pages = ({
 						alignItems: "center",
 						flexDirection: "column",
 						transformOrigin: "0 0",
+						willChange: "transform",
 						// width: "max-content",
 						width: largestPageWidth,
 						margin: "0 auto",
