@@ -2,6 +2,7 @@
   {
     "name": "Client",
     "passed": true,
-    "size": -16
+    "size": 38222,
+    "sizeLimit": 150000
   }
 ]
