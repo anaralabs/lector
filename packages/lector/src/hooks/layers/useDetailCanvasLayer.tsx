@@ -31,10 +31,18 @@ export const useDetailCanvasLayer = ({
 	const [zoom] = useDebounce(bouncyZoom, 200);
 
 	// Cache base viewport dimensions — they never change for a given page proxy.
-	const pageDimsRef = useRef<{ width: number; height: number; proxy: unknown } | null>(null);
+	const pageDimsRef = useRef<{
+		width: number;
+		height: number;
+		proxy: unknown;
+	} | null>(null);
 	if (!pageDimsRef.current || pageDimsRef.current.proxy !== pdfPageProxy) {
 		const vp = pdfPageProxy.getViewport({ scale: 1 });
-		pageDimsRef.current = { width: vp.width, height: vp.height, proxy: pdfPageProxy };
+		pageDimsRef.current = {
+			width: vp.width,
+			height: vp.height,
+			proxy: pdfPageProxy,
+		};
 	}
 
 	useLayoutEffect(() => {

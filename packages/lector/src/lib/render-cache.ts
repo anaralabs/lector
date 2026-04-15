@@ -48,36 +48,6 @@ class RenderCache {
 		return entry;
 	}
 
-	/**
-	 * Return the best cached entry for a page at ANY scale.
-	 * Prefers the closest scale to `targetScale`. Used as a placeholder
-	 * when the exact scale isn't cached yet (e.g. during zoom transitions).
-	 */
-	getNearest(
-		documentId: string,
-		pageNumber: number,
-		targetScale: number,
-		background?: string,
-	): CacheEntry | undefined {
-		const prefix = `${documentId}-${pageNumber}-`;
-		const suffix = `-${background ?? "white"}`;
-		let best: CacheEntry | undefined;
-		let bestDist = Infinity;
-
-		for (const [k, entry] of this.cache) {
-			if (!k.startsWith(prefix) || !k.endsWith(suffix)) continue;
-			const scaleStr = k.slice(prefix.length, k.length - suffix.length);
-			const s = Number(scaleStr);
-			if (!Number.isFinite(s)) continue;
-			const dist = Math.abs(s - targetScale);
-			if (dist < bestDist) {
-				bestDist = dist;
-				best = entry;
-			}
-		}
-		return best;
-	}
-
 	async set(
 		documentId: string,
 		pageNumber: number,

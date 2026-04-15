@@ -1,10 +1,5 @@
 import { useGesture } from "@use-gesture/react";
-import {
-	type RefObject,
-	useCallback,
-	useEffect,
-	useRef,
-} from "react";
+import { type RefObject, useCallback, useEffect, useRef } from "react";
 
 import { usePdf } from "../../internal";
 import { clamp } from "../../lib/clamp";
@@ -65,6 +60,12 @@ export const useViewportContainer = ({
 	// (which triggers React re-renders in all zoom subscribers) is
 	// coalesced to at most one per animation frame.
 	const zoomRafRef = useRef<number | null>(null);
+	// Track the last zoom value we pushed to the store so the sync effect
+	// can distinguish our own rAF-deferred updates from external changes
+	// (e.g. zoom slider). Without this, the sync effect sees a mismatch
+	// between the store (stale rAF value) and transformations.current
+	// (already advanced by a newer pinch frame) and snaps back.
+	const lastPushedZoomRef = useRef(zoom);
 
 	const updateTransform = useCallback(
 		(zoomUpdate?: boolean) => {
@@ -99,7 +100,9 @@ export const useViewportContainer = ({
 			if (zoomUpdate && zoomRafRef.current === null) {
 				zoomRafRef.current = requestAnimationFrame(() => {
 					zoomRafRef.current = null;
-					updateZoom(() => transformations.current.zoom);
+					const z = transformations.current.zoom;
+					lastPushedZoomRef.current = z;
+					updateZoom(() => z);
 				});
 			}
 		},
@@ -115,8 +118,15 @@ export const useViewportContainer = ({
 		};
 	}, []);
 
+	// Sync external zoom changes (e.g. zoom slider, programmatic setZoom)
+	// into the imperative transform. Skip updates that originated from our
+	// own rAF-deferred store push to avoid overwriting a newer pinch value.
 	useEffect(() => {
 		if (transformations.current.zoom === zoom || !containerRef.current) {
+			return;
+		}
+
+		if (zoom === lastPushedZoomRef.current) {
 			return;
 		}
 
