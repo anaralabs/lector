@@ -71,16 +71,21 @@ export const useViewportContainer = ({
 
 			const { zoom, translateX, translateY } = transformations.current;
 
+			// Read natural dimensions BEFORE writing the transform — avoids
+			// forced synchronous layout. getBoundingClientRect() after a
+			// transform write forces Firefox to re-rasterize the compositor
+			// layer mid-frame, briefly flashing the canvas background color.
+			const naturalWidth =
+				parseFloat(elementRef.current.style.width) ||
+				elementRef.current.offsetWidth;
+			const naturalHeight =
+				parseFloat(elementRef.current.style.height) ||
+				elementRef.current.offsetHeight;
+
+			// Batch all writes — no layout reads after this point.
 			elementRef.current.style.transform = `scale3d(${zoom}, ${zoom}, 1)`;
-			elementRef.current.style.willChange = "scale3d";
-
-			const elementBoundingBox = elementRef.current.getBoundingClientRect();
-
-			const width = elementBoundingBox.width;
-
-			elementWrapperRef.current.style.width = `${width}px`;
-			elementWrapperRef.current.style.height = `${elementBoundingBox.height}px`;
-
+			elementWrapperRef.current.style.width = `${naturalWidth * zoom}px`;
+			elementWrapperRef.current.style.height = `${naturalHeight * zoom}px`;
 			containerRef.current.scrollTop = translateY;
 			containerRef.current.scrollLeft = translateX;
 
