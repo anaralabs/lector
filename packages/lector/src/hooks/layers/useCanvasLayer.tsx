@@ -62,7 +62,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			lastRenderedScaleRef.current = 0;
 		}
 
-		const { width: pageWidth, height: pageHeight } = pageDimsRef.current;
+		const { width: pageWidth, height: pageHeight } = pageDimsRef.current!;
 		const bgColor = background ?? "white";
 
 		const targetBaseScale = dpr * Math.min(zoom, 1);

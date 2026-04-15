@@ -76,7 +76,7 @@ export const useDetailCanvasLayer = ({
 				return;
 			}
 
-			const { width: pageWidth, height: pageHeight } = pageDimsRef.current;
+			const { width: pageWidth, height: pageHeight } = pageDimsRef.current!;
 
 			const scrollX = scrollContainer.scrollLeft / zoom;
 			const scrollY = scrollContainer.scrollTop / zoom;
