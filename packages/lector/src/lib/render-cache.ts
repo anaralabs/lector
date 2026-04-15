@@ -19,7 +19,7 @@ class RenderCache {
 	// don't insert orphaned entries after invalidateDocument() runs.
 	private invalidatedDocs = new Set<string>();
 
-	constructor(maxEntries = 30) {
+	constructor(maxEntries = 60) {
 		this.maxEntries = maxEntries;
 	}
 
