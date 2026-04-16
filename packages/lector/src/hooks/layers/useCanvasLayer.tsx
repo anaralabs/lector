@@ -19,7 +19,7 @@ const cacheEntries: CacheEntry[] = [];
 const canvasBitmapCache = new WeakMap<PDFPageProxy, Map<number, ImageBitmap>>();
 
 export function clearBitmapCache(documentId?: string): void {
-	if (!documentId) {
+	if (documentId === undefined) {
 		for (const entry of cacheEntries) {
 			entry.bitmap.close();
 			canvasBitmapCache.get(entry.proxy)?.delete(entry.key);
@@ -50,7 +50,17 @@ function getCachedBitmap(
 	scale: number,
 	background?: string,
 ): ImageBitmap | null {
-	return canvasBitmapCache.get(proxy)?.get(cacheKey(scale, background)) ?? null;
+	const key = cacheKey(scale, background);
+	const bitmap = canvasBitmapCache.get(proxy)?.get(key);
+	if (!bitmap) return null;
+	const idx = cacheEntries.findIndex(
+		(e) => e.proxy === proxy && e.key === key,
+	);
+	if (idx !== -1 && idx !== cacheEntries.length - 1) {
+		const [entry] = cacheEntries.splice(idx, 1);
+		cacheEntries.push(entry!);
+	}
+	return bitmap;
 }
 
 function setCachedBitmap(
