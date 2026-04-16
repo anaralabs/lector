@@ -51,6 +51,8 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 	const bouncyZoom = usePdf((state) => state.zoom);
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
+	const markPageRendered = usePdf((state) => state.markPageRendered);
+	const unmarkPageRendered = usePdf((state) => state.unmarkPageRendered);
 
 	const [zoom] = useDebounce(bouncyZoom, 100);
 
@@ -112,6 +114,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const cached = getCachedBitmap(pdfPageProxy, baseScale);
 		if (cached) {
 			context.drawImage(cached, 0, 0);
+			markPageRendered(pageNumber);
 			return;
 		}
 
@@ -133,6 +136,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		renderingTask.promise
 			.then(() => {
 				baseCanvas.style.visibility = "";
+				markPageRendered(pageNumber);
 				if (typeof createImageBitmap !== "undefined") {
 					createImageBitmap(baseCanvas).then((bitmap) => {
 						setCachedBitmap(pdfPageProxy, baseScale, bitmap);
@@ -152,9 +156,10 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [pdfPageProxy, background, dpr, zoom, clampScaleForPage]);
 
-	// Release GPU memory on unmount
+	// Release GPU memory and unmark page on unmount
 	useEffect(
 		() => () => {
+			unmarkPageRendered(pageNumber);
 			if (canvasRef.current) {
 				canvasRef.current.width = 0;
 				canvasRef.current.height = 0;
