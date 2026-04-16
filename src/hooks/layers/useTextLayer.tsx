@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 
 import { usePdf } from "../../internal";
-import { loadPdfJs } from "../../lib/pdfjs";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
 // Add custom property declarations
@@ -214,11 +213,9 @@ export const useTextLayer = () => {
 			textLayerRef.current = null;
 		}
 
-		void loadPdfJs()
+		void import("pdfjs-dist/legacy/build/pdf.mjs")
 			.then(({ TextLayer }) => {
-				if (isCancelled || textContainerRef.current !== textContainer) {
-					return;
-				}
+				if (isCancelled || textContainerRef.current !== textContainer) return;
 
 				const textLayer = new TextLayer({
 					textContentSource: pdfPageProxy.streamTextContent(),
@@ -231,12 +228,7 @@ export const useTextLayer = () => {
 				return textLayer.render();
 			})
 			.then(() => {
-				const textLayer = textLayerRef.current;
-				if (
-					!textLayer ||
-					isCancelled ||
-					textContainerRef.current !== textContainer
-				) {
+				if (isCancelled || textContainerRef.current !== textContainer) {
 					return;
 				}
 
@@ -247,7 +239,7 @@ export const useTextLayer = () => {
 				bindMouseEvents(textContainer, endOfContent);
 			})
 			.catch((error) => {
-				if (error.name !== "AbortException") {
+				if (error instanceof Error && error.name !== "AbortException") {
 					console.error("TextLayer rendering error:", error);
 				}
 			})
