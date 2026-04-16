@@ -1,7 +1,7 @@
+import { TextLayer as PdfjsTextLayer } from "pdfjs-dist";
 import { useEffect, useRef } from "react";
 
 import { usePdf } from "../../internal";
-import { loadPdfJs } from "../../lib/pdfjs";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
 // Add custom property declarations
@@ -214,26 +214,18 @@ export const useTextLayer = () => {
 			textLayerRef.current = null;
 		}
 
-		void loadPdfJs()
-			.then(({ TextLayer }) => {
-				if (isCancelled || textContainerRef.current !== textContainer) {
-					return;
-				}
+		const textLayer = new PdfjsTextLayer({
+			textContentSource: pdfPageProxy.streamTextContent(),
+			container: textContainer,
+			viewport: pdfPageProxy.getViewport({ scale: 1 }),
+		});
 
-				const textLayer = new TextLayer({
-					textContentSource: pdfPageProxy.streamTextContent(),
-					container: textContainer,
-					viewport: pdfPageProxy.getViewport({ scale: 1 }),
-				});
+		textLayerRef.current = textLayer;
 
-				textLayerRef.current = textLayer;
-
-				return textLayer.render();
-			})
+		textLayer
+			.render()
 			.then(() => {
-				const textLayer = textLayerRef.current;
 				if (
-					!textLayer ||
 					isCancelled ||
 					textContainerRef.current !== textContainer
 				) {
@@ -247,7 +239,10 @@ export const useTextLayer = () => {
 				bindMouseEvents(textContainer, endOfContent);
 			})
 			.catch((error) => {
-				if (error.name !== "AbortException") {
+				if (
+					error instanceof Error &&
+					error.name !== "AbortException"
+				) {
 					console.error("TextLayer rendering error:", error);
 				}
 			})
