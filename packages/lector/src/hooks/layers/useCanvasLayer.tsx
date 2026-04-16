@@ -113,15 +113,22 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 				baseCanvas.style.visibility = "";
 				markPageRendered(pageNumber);
 				if (typeof createImageBitmap !== "undefined") {
-					createImageBitmap(baseCanvas).then((bitmap) => {
-						if (cancelled) return;
-						setCachedBitmap(pdfPageProxy, baseScale, background, bitmap);
-					});
+					createImageBitmap(baseCanvas)
+						.then((bitmap) => {
+							if (cancelled) {
+								bitmap.close();
+								return;
+							}
+							setCachedBitmap(pdfPageProxy, baseScale, background, bitmap);
+						})
+						.catch(() => {});
 				}
 			})
 			.catch((error) => {
-				if (error.name === "RenderingCancelledException") return;
-				throw error;
+				if (cancelled) return;
+				if (error?.name === "RenderingCancelledException") return;
+				baseCanvas.style.visibility = "";
+				console.error("PDF render error:", error);
 			});
 
 		return () => {
