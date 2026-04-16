@@ -7,6 +7,10 @@ import { clampScaleForPage } from "../../lib/canvas-utils";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
+const CACHE_MAX = 60;
+
+type CacheEntry = { proxy: PDFPageProxy; key: number; bitmap: ImageBitmap };
+const cacheEntries: CacheEntry[] = [];
 const canvasBitmapCache = new WeakMap<PDFPageProxy, Map<number, ImageBitmap>>();
 
 function cacheKey(scale: number, background?: string): number {
@@ -41,8 +45,22 @@ function setCachedBitmap(
 	const existing = map.get(key);
 	if (existing && existing !== bitmap) {
 		existing.close();
+		const idx = cacheEntries.findIndex(
+			(e) => e.proxy === proxy && e.key === key,
+		);
+		if (idx !== -1) cacheEntries.splice(idx, 1);
 	}
 	map.set(key, bitmap);
+	cacheEntries.push({ proxy, key, bitmap });
+
+	while (cacheEntries.length > CACHE_MAX) {
+		const evicted = cacheEntries.shift()!;
+		const evictedMap = canvasBitmapCache.get(evicted.proxy);
+		if (evictedMap?.get(evicted.key) === evicted.bitmap) {
+			evictedMap.delete(evicted.key);
+			evicted.bitmap.close();
+		}
+	}
 }
 
 export const useCanvasLayer = ({ background }: { background?: string }) => {
