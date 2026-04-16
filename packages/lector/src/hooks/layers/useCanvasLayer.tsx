@@ -184,7 +184,15 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			cancelled = true;
 			void renderingTask.cancel();
 		};
-	}, [pdfPageProxy, background, dpr, zoom, pageNumber, markPageRendered, docId]);
+	}, [
+		pdfPageProxy,
+		background,
+		dpr,
+		zoom,
+		pageNumber,
+		markPageRendered,
+		docId,
+	]);
 
 	useEffect(() => {
 		const canvas = canvasRef.current;
