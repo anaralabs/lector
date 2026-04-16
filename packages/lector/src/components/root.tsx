@@ -43,11 +43,12 @@ export const Root = forwardRef(
 			initialState?.pdfDocumentProxy ?? null,
 		);
 
+		const documentId = initialState?.pdfDocumentProxy?.fingerprints?.[0];
 		useEffect(() => {
 			return () => {
 				clearBitmapCache();
 			};
-		}, []);
+		}, [documentId]);
 
 		return (
 			<Primitive.div ref={ref} {...props}>

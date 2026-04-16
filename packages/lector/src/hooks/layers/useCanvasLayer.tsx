@@ -16,6 +16,7 @@ const canvasBitmapCache = new WeakMap<PDFPageProxy, Map<number, ImageBitmap>>();
 export function clearBitmapCache(): void {
 	for (const entry of cacheEntries) {
 		entry.bitmap.close();
+		canvasBitmapCache.get(entry.proxy)?.delete(entry.key);
 	}
 	cacheEntries.length = 0;
 }
