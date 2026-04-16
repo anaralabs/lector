@@ -4,12 +4,12 @@ import {
 	usePDFDocumentContext,
 	type usePDFDocumentParams,
 } from "../hooks/document/document";
+import { clearBitmapCache } from "../hooks/layers/useCanvasLayer";
 import {
 	PDFLinkServiceContext,
 	useCreatePDFLinkService,
 } from "../hooks/usePDFLinkService";
 import { PDFStore } from "../internal";
-import { renderCache } from "../lib/render-cache";
 import { Primitive } from "./primitive";
 
 export const Root = forwardRef(
@@ -43,12 +43,11 @@ export const Root = forwardRef(
 			initialState?.pdfDocumentProxy ?? null,
 		);
 
-		// Clean up cached bitmaps when document changes or Root unmounts
-		const documentId = initialState?.pdfDocumentProxy.fingerprints[0];
+		const documentId = initialState?.pdfDocumentProxy?.fingerprints?.[0];
 		useEffect(() => {
 			if (!documentId) return;
 			return () => {
-				renderCache.invalidateDocument(documentId);
+				clearBitmapCache(documentId);
 			};
 		}, [documentId]);
 

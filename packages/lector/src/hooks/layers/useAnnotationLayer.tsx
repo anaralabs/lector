@@ -2,8 +2,6 @@ import { useEffect, useMemo, useRef } from "react";
 
 import { usePdf } from "../../internal";
 import { ensureAnnotationLayerStyles } from "../../lib/annotation-layer-styles";
-import { cancellable } from "../../lib/cancellable";
-import { loadPdfJs } from "../../lib/pdfjs";
 import { usePdfJump } from "../pages/usePdfJump";
 import { usePDFLinkService } from "../usePDFLinkService";
 import { usePDFPageNumber } from "../usePdfPageNumber";
@@ -134,18 +132,18 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 			linkService.setDocument(pdfDocumentProxy);
 		}
 
-		// Clear the current layer
-		annotationLayerRef.current.innerHTML = "";
+		const container = annotationLayerRef.current;
+		let cancelled = false;
 
-		// Add necessary class for styling
-		annotationLayerRef.current.className = "annotationLayer";
+		container.replaceChildren();
+		container.className = "annotationLayer";
 
 		const viewport = pdfPageProxy.getViewport({ scale: 1 }).clone({
 			dontFlip: true,
 		});
 
 		const annotationLayerConfig = {
-			div: annotationLayerRef.current,
+			div: container,
 			viewport: viewport,
 			page: pdfPageProxy,
 			linkService: linkService as never,
@@ -157,28 +155,31 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 			commentManager: undefined,
 		};
 
-		const { cancel } = cancellable(
-			(async () => {
-				try {
-					const { AnnotationLayer } = await loadPdfJs();
-					const annotationLayer = new AnnotationLayer(annotationLayerConfig);
-					annotationLayerObjectRef.current = annotationLayer;
-					const annotations = await pdfPageProxy.getAnnotations();
+		(async () => {
+			try {
+				if (cancelled) return;
+				const { AnnotationLayer } = await import(
+					"pdfjs-dist/legacy/build/pdf.mjs"
+				);
+				if (cancelled) return;
+				const annotationLayer = new AnnotationLayer(annotationLayerConfig);
+				annotationLayerObjectRef.current = annotationLayer;
+				const annotations = await pdfPageProxy.getAnnotations();
+				if (cancelled) return;
 
-					await annotationLayer.render({
-						...annotationLayerConfig,
-						...mergedParams,
-						annotations,
-						linkService: linkService as never,
-					});
-				} catch (_error) {
-					// Silently handle rendering errors
-				}
-			})(),
-		);
+				await annotationLayer.render({
+					...annotationLayerConfig,
+					...mergedParams,
+					annotations,
+					linkService: linkService as never,
+				});
+			} catch (_error) {
+				// Silently handle rendering errors
+			}
+		})();
 
 		return () => {
-			cancel();
+			cancelled = true;
 		};
 	}, [pdfPageProxy, pdfDocumentProxy, mergedParams, linkService]);
 
