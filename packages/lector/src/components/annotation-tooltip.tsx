@@ -14,7 +14,7 @@ export type AnnotationTooltipContentProps = {
 interface AnnotationTooltipProps {
 	annotation: Annotation;
 	children: React.ReactNode;
-	renderTooltipContent: (
+	renderTooltipContent?: (
 		props: AnnotationTooltipContentProps,
 	) => React.ReactNode;
 	hoverTooltipContent?: React.ReactNode;
@@ -167,7 +167,7 @@ export const AnnotationTooltip = ({
 						}}
 						{...getFloatingProps()}
 					>
-						{renderTooltipContent({
+						{renderTooltipContent?.({
 							annotation,
 							onClose: () => setIsOpen(false),
 							setPosition: (position: "top" | "bottom" | undefined) =>

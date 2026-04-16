@@ -8,7 +8,7 @@ import type {
 	DocumentInitParameters,
 	TypedArray,
 } from "pdfjs-dist/types/src/display/api";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { InitialPDFState, ZoomOptions } from "../../internal";
 import { loadPdfJs } from "../../lib/pdfjs";
@@ -29,12 +29,6 @@ export interface usePDFDocumentParams {
 	isZoomFitWidth?: boolean;
 	zoom?: number;
 	zoomOptions?: ZoomOptions;
-	/**
-	 * Override or extend the PDF.js DocumentInitParameters passed to getDocument().
-	 * These take highest precedence over both the source object and lector's defaults.
-	 * Must be a stable reference (module-level constant or useMemo) to avoid reloading the document.
-	 */
-	documentOptions?: Partial<DocumentInitParameters>;
 }
 
 export type Source =
@@ -44,37 +38,6 @@ export type Source =
 	| ArrayBuffer
 	| DocumentInitParameters;
 
-function buildDocumentInitParams(
-	source: Source,
-	overrides?: Partial<DocumentInitParameters>,
-): DocumentInitParameters {
-	let params: DocumentInitParameters;
-
-	if (typeof source === "string" || source instanceof URL) {
-		params = { url: source };
-	} else if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
-		params = { data: source };
-	} else {
-		params = { ...source };
-	}
-
-	const defaults: Partial<DocumentInitParameters> = {
-		// Skip the slow _guessMax binary-search auto-detection of max canvas area.
-		// 1 GiB = 256 megapixels at 4 bytes/pixel. If the device can't allocate
-		// this, pdfjs falls back gracefully via try/catch.
-		canvasMaxAreaInBytes: 1024 * 1024 * 1024,
-		// Enable GPU-backed canvases (willReadFrequently: false). PDF viewers are
-		// render-dominated — they don't call getImageData() — so GPU compositing
-		// is the correct path. This is the browser's default when no hint is given.
-		enableHWA: true,
-		// Explicitly opt-in to OffscreenCanvas in the worker for image processing.
-		// Already the browser default, but being explicit avoids edge cases.
-		isOffscreenCanvasSupported: true,
-	};
-
-	return { ...defaults, ...params, ...overrides };
-}
-
 export const usePDFDocumentContext = ({
 	onDocumentLoad,
 	source,
@@ -82,18 +45,11 @@ export const usePDFDocumentContext = ({
 	isZoomFitWidth,
 	zoom = 1,
 	zoomOptions,
-	documentOptions,
 }: usePDFDocumentParams) => {
 	const [_, setProgress] = useState(0);
 
 	const [initialState, setInitialState] = useState<InitialPDFState | null>();
 	const [rotation] = useState<number>(initialRotation);
-
-	// Ref so the effect always reads the latest documentOptions without
-	// needing it in the dependency array (avoids reload on every render
-	// when consumers pass an inline object).
-	const documentOptionsRef = useRef(documentOptions);
-	documentOptionsRef.current = documentOptions;
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: <onDocumnetLoad,zoomOptions>
 	useEffect(() => {
@@ -116,9 +72,9 @@ export const usePDFDocumentContext = ({
 				}),
 			);
 
-			const sortedPageProxies = pageProxies.toSorted(
-				(a, b) => a.pageNumber - b.pageNumber,
-			);
+			const sortedPageProxies = pageProxies.sort((a, b) => {
+				return a.pageNumber - b.pageNumber;
+			});
 			setInitialState((prev) => ({
 				...prev,
 				isZoomFitWidth,
@@ -142,9 +98,7 @@ export const usePDFDocumentContext = ({
 						return;
 					}
 
-					loadingTask = getDocument(
-						buildDocumentInitParams(source, documentOptionsRef.current),
-					);
+					loadingTask = getDocument(source);
 					loadingTask.onProgress = (progressEvent: OnProgressParameters) => {
 						if (progressEvent.loaded === progressEvent.total) {
 							return;

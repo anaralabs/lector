@@ -1,4 +1,4 @@
-import { forwardRef, type HTMLProps, type ReactNode, useEffect } from "react";
+import { forwardRef, type HTMLProps, type ReactNode } from "react";
 
 import {
 	usePDFDocumentContext,
@@ -9,7 +9,6 @@ import {
 	useCreatePDFLinkService,
 } from "../hooks/usePDFLinkService";
 import { PDFStore } from "../internal";
-import { renderCache } from "../lib/render-cache";
 import { Primitive } from "./primitive";
 
 export const Root = forwardRef(
@@ -22,7 +21,6 @@ export const Root = forwardRef(
 			isZoomFitWidth,
 			zoom,
 			zoomOptions,
-			documentOptions,
 			...props
 		}: HTMLProps<HTMLDivElement> &
 			usePDFDocumentParams & {
@@ -36,21 +34,11 @@ export const Root = forwardRef(
 			isZoomFitWidth,
 			zoom,
 			zoomOptions,
-			documentOptions,
 		});
 
 		const linkService = useCreatePDFLinkService(
 			initialState?.pdfDocumentProxy ?? null,
 		);
-
-		// Clean up cached bitmaps when document changes or Root unmounts
-		const documentId = initialState?.pdfDocumentProxy.fingerprints[0];
-		useEffect(() => {
-			if (!documentId) return;
-			return () => {
-				renderCache.invalidateDocument(documentId);
-			};
-		}, [documentId]);
 
 		return (
 			<Primitive.div ref={ref} {...props}>
@@ -61,7 +49,7 @@ export const Root = forwardRef(
 						</PDFLinkServiceContext.Provider>
 					</PDFStore.Provider>
 				) : (
-					(loader ?? "Loading...")
+					loader || "Loading..."
 				)}
 			</Primitive.div>
 		);

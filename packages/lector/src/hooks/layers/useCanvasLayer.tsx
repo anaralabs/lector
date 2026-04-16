@@ -1,12 +1,47 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import type { PDFPageProxy } from "pdfjs-dist";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
-import { clampScaleForPage } from "../../lib/canvas-utils";
-import { renderCache } from "../../lib/render-cache";
-import { renderQueue } from "../../lib/render-queue";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
+
+const MAX_CANVAS_PIXELS = 16777216;
+const MAX_CANVAS_DIMENSION = 32767;
+
+// Cache rendered bitmaps keyed on PDFPageProxy (document-aware).
+// Different PDFs have different proxy objects, so there's no cross-doc leaking.
+// Entries are GC'd automatically when the document is released.
+const canvasBitmapCache = new WeakMap<
+	PDFPageProxy,
+	Map<number, ImageBitmap>
+>();
+
+function getCachedBitmap(
+	proxy: PDFPageProxy,
+	scale: number,
+): ImageBitmap | null {
+	const scaleKey = Math.round(scale * 1e4);
+	return canvasBitmapCache.get(proxy)?.get(scaleKey) ?? null;
+}
+
+function setCachedBitmap(
+	proxy: PDFPageProxy,
+	scale: number,
+	bitmap: ImageBitmap,
+): void {
+	const scaleKey = Math.round(scale * 1e4);
+	let map = canvasBitmapCache.get(proxy);
+	if (!map) {
+		map = new Map();
+		canvasBitmapCache.set(proxy, map);
+	}
+	const existing = map.get(scaleKey);
+	if (existing && existing !== bitmap) {
+		existing.close();
+	}
+	map.set(scaleKey, bitmap);
+}
 
 export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -18,190 +53,120 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const markPageRendered = usePdf((state) => state.markPageRendered);
 	const unmarkPageRendered = usePdf((state) => state.unmarkPageRendered);
-	const documentId = usePdf(
-		(state) => state.pdfDocumentProxy.fingerprints[0] ?? "default",
-	);
 
 	const [zoom] = useDebounce(bouncyZoom, 100);
 
-	// Track the last rendered state to skip redundant renders
-	const lastRenderedScaleRef = useRef(0);
-	const lastBackgroundRef = useRef(background);
-	const lastPageProxyRef = useRef(pdfPageProxy);
+	const clampScaleForPage = useCallback(
+		(targetScale: number, pageWidth: number, pageHeight: number) => {
+			if (!targetScale) {
+				return 0;
+			}
 
-	// Cache base viewport dimensions — they never change for a given page proxy.
-	// Avoids allocating a new viewport object on every effect run.
-	const pageDimsRef = useRef<{
-		width: number;
-		height: number;
-		proxy: unknown;
-	} | null>(null);
-	if (!pageDimsRef.current || pageDimsRef.current.proxy !== pdfPageProxy) {
-		const vp = pdfPageProxy.getViewport({ scale: 1 });
-		pageDimsRef.current = {
-			width: vp.width,
-			height: vp.height,
-			proxy: pdfPageProxy,
-		};
-	}
+			const areaLimit = Math.sqrt(
+				MAX_CANVAS_PIXELS / Math.max(pageWidth * pageHeight, 1),
+			);
+			const widthLimit = MAX_CANVAS_DIMENSION / Math.max(pageWidth, 1);
+			const heightLimit = MAX_CANVAS_DIMENSION / Math.max(pageHeight, 1);
 
-	// useLayoutEffect for cache hits — synchronous draw before paint, no flash.
-	// Cache misses enqueue async work via the render queue (non-blocking).
+			const safeScale = Math.min(
+				targetScale,
+				Number.isFinite(areaLimit) ? areaLimit : targetScale,
+				Number.isFinite(widthLimit) ? widthLimit : targetScale,
+				Number.isFinite(heightLimit) ? heightLimit : targetScale,
+			);
+
+			return Math.max(safeScale, 0);
+		},
+		[],
+	);
+
 	useLayoutEffect(() => {
 		if (!canvasRef.current) {
 			return;
 		}
 
-		// Reset when the page or background changes so we force a re-render
-		if (
-			lastPageProxyRef.current !== pdfPageProxy ||
-			lastBackgroundRef.current !== background
-		) {
-			lastPageProxyRef.current = pdfPageProxy;
-			lastBackgroundRef.current = background;
-			lastRenderedScaleRef.current = 0;
-		}
-
-		const { width: pageWidth, height: pageHeight } = pageDimsRef.current!;
-		const bgColor = background ?? "white";
+		const baseCanvas = canvasRef.current;
+		const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
+		const pageWidth = baseViewport.width;
+		const pageHeight = baseViewport.height;
 
 		const targetBaseScale = dpr * Math.min(zoom, 1);
 		const baseScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
 
-		// Skip re-render if scale hasn't changed
-		if (baseScale === lastRenderedScaleRef.current) {
+		baseCanvas.width = Math.floor(pageWidth * baseScale);
+		baseCanvas.height = Math.floor(pageHeight * baseScale);
+		baseCanvas.style.position = "absolute";
+		baseCanvas.style.top = "0";
+		baseCanvas.style.left = "0";
+		baseCanvas.style.width = `${pageWidth}px`;
+		baseCanvas.style.height = `${pageHeight}px`;
+		baseCanvas.style.transform = "translate(0px, 0px)";
+		baseCanvas.style.zIndex = "0";
+		baseCanvas.style.pointerEvents = "none";
+		baseCanvas.style.backgroundColor = background ?? "white";
+
+		const context = baseCanvas.getContext("2d");
+		if (!context) {
 			return;
 		}
 
-		const w = Math.floor(pageWidth * baseScale);
-		const h = Math.floor(pageHeight * baseScale);
-		const cssText = `position:absolute;top:0;left:0;width:${pageWidth}px;height:${pageHeight}px;transform:translate(0px,0px);z-index:0;pointer-events:none;background-color:${bgColor}`;
-
-		// Helper to paint a source onto the visible canvas
-		const swapToCanvas = (
-			source: ImageBitmap | HTMLCanvasElement,
-			sw: number,
-			sh: number,
-		) => {
-			const canvas = canvasRef.current;
-			if (!canvas) return;
-			canvas.width = sw;
-			canvas.height = sh;
-			canvas.style.cssText = cssText;
-			const ctx = canvas.getContext("2d");
-			if (ctx) {
-				ctx.drawImage(source, 0, 0);
-			}
-			lastRenderedScaleRef.current = baseScale;
-		};
-
-		// Check bitmap cache — instant synchronous draw, no PDF.js render needed.
-		// Since this is useLayoutEffect, the draw happens before browser paint = no flash.
-		const cached = renderCache.get(
-			documentId,
-			pageNumber,
-			baseScale,
-			background,
-		);
+		// Restore from cache instantly (keyed on PDFPageProxy — document-aware)
+		const cached = getCachedBitmap(pdfPageProxy, baseScale);
 		if (cached) {
-			swapToCanvas(cached.bitmap, cached.width, cached.height);
+			context.drawImage(cached, 0, 0);
 			markPageRendered(pageNumber);
 			return;
 		}
 
-		let cancelled = false;
-		let activeRenderingTask: { cancel(): void } | null = null;
+		context.setTransform(1, 0, 0, 1, 0, 0);
+		context.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
 
-		// Cache miss — render via queue with double-buffer (async, non-blocking)
-		const job = renderQueue.enqueue(() => {
-			return new Promise<void>((resolve, reject) => {
-				if (cancelled || !canvasRef.current) {
-					resolve();
-					return;
-				}
+		// Hide canvas during render to prevent flash of partial content
+		baseCanvas.style.visibility = "hidden";
 
-				// Double-buffer: render to a temporary canvas, then swap onto the
-				// visible canvas in a single frame to avoid white flash
-				const buffer = document.createElement("canvas");
-				buffer.width = w;
-				buffer.height = h;
+		const viewport = pdfPageProxy.getViewport({ scale: baseScale });
 
-				const bufferCtx = buffer.getContext("2d");
-				if (!bufferCtx) {
-					resolve();
-					return;
-				}
-
-				const viewport = pdfPageProxy.getViewport({ scale: baseScale });
-
-				const renderingTask = pdfPageProxy.render({
-					canvas: buffer,
-					canvasContext: bufferCtx,
-					viewport,
-					background,
-				});
-				activeRenderingTask = renderingTask;
-
-				renderingTask.promise
-					.then(() => {
-						activeRenderingTask = null;
-						if (cancelled || !canvasRef.current) {
-							resolve();
-							return;
-						}
-
-						swapToCanvas(buffer, w, h);
-						markPageRendered(pageNumber);
-
-						// Cache for instant scroll-back, then release buffer
-						renderCache
-							.set(documentId, pageNumber, baseScale, buffer, background)
-							.finally(() => {
-								// Release buffer canvas memory (Safari holds onto it)
-								// Only after createImageBitmap has read the pixels
-								buffer.width = 0;
-								buffer.height = 0;
-							});
-
-						resolve();
-					})
-					.catch((error) => {
-						activeRenderingTask = null;
-						if (error.name === "RenderingCancelledException") {
-							resolve();
-							return;
-						}
-						reject(error);
-					});
-			});
+		const renderingTask = pdfPageProxy.render({
+			canvas: baseCanvas,
+			canvasContext: context,
+			viewport,
+			background,
 		});
 
-		return () => {
-			cancelled = true;
-			job.cancel();
-			void activeRenderingTask?.cancel();
-		};
-	}, [
-		pdfPageProxy,
-		background,
-		dpr,
-		zoom,
-		pageNumber,
-		documentId,
-		markPageRendered,
-	]);
+		renderingTask.promise
+			.then(() => {
+				baseCanvas.style.visibility = "";
+				markPageRendered(pageNumber);
+				if (typeof createImageBitmap !== "undefined") {
+					createImageBitmap(baseCanvas).then((bitmap) => {
+						setCachedBitmap(pdfPageProxy, baseScale, bitmap);
+					});
+				}
+			})
+			.catch((error) => {
+				if (error.name === "RenderingCancelledException") {
+					return;
+				}
+				throw error;
+			});
 
-	// Cleanup on unmount: release canvas memory (Safari) and unmark page
-	useEffect(() => {
-		const canvas = canvasRef.current;
 		return () => {
-			unmarkPageRendered(pageNumber);
-			if (canvas) {
-				canvas.width = 1;
-				canvas.height = 1;
-			}
+			void renderingTask.cancel();
 		};
-	}, [pageNumber, unmarkPageRendered]);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [pdfPageProxy, background, dpr, zoom, clampScaleForPage]);
+
+	// Release GPU memory and unmark page on unmount
+	useEffect(
+		() => () => {
+			unmarkPageRendered(pageNumber);
+			if (canvasRef.current) {
+				canvasRef.current.width = 0;
+				canvasRef.current.height = 0;
+			}
+		},
+		[],
+	);
 
 	return {
 		canvasRef,

@@ -18,13 +18,8 @@ import { useViewportContainer } from "../hooks/viewport/useViewportContainer";
 import { usePdf } from "../internal";
 import { Primitive } from "./primitive";
 
-const selectLargestPageWidth = (state: {
-	viewports: Array<{ width: number }>;
-}) => state.viewports.reduce((max, vp) => Math.max(max, vp.width), 0);
-
 const DEFAULT_HEIGHT = 600;
 const EXTRA_HEIGHT = 0;
-const DEFAULT_VIRTUALIZER_OPTIONS = { overscan: 1 };
 
 interface VirtualizedPageItemProps {
 	child: ReactElement;
@@ -70,7 +65,7 @@ VirtualizedPageItem.displayName = "VirtualizedPageItem";
 export const Pages = ({
 	children,
 	gap = 10,
-	virtualizerOptions = DEFAULT_VIRTUALIZER_OPTIONS,
+	virtualizerOptions = { overscan: 1 },
 	initialOffset,
 	onOffsetChange,
 	...props
@@ -104,16 +99,12 @@ export const Pages = ({
 	const { scrollToFn } = useScrollFn();
 	const { observeElementOffset } = useObserveElement();
 
-	const viewportsRef = useRef(viewports);
-	viewportsRef.current = viewports;
-
 	const estimateSize = useCallback(
 		(index: number) => {
-			const vp = viewportsRef.current;
-			if (!vp || !vp[index]) return DEFAULT_HEIGHT;
-			return vp[index].height + EXTRA_HEIGHT;
+			if (!viewports || !viewports[index]) return DEFAULT_HEIGHT;
+			return viewports[index].height + EXTRA_HEIGHT;
 		},
-		[], // Stable — reads from ref
+		[viewports],
 	);
 
 	const virtualizer = useVirtualizer({
@@ -137,24 +128,25 @@ export const Pages = ({
 	}, [setVirtualizer, virtualizer]);
 
 	useEffect(() => {
+		if (!virtualizer) return;
+
 		let timeout: NodeJS.Timeout;
-		const virtualized = virtualizer?.getVirtualItems();
+		const virtualized = virtualizer.getVirtualItems();
 
 		if (!isPinching) {
-			virtualizer?.measure();
+			virtualizer.measure();
 
 			timeout = setTimeout(() => {
 				setTempItems([]);
 			}, 200);
-		} else if (virtualized && virtualized?.length > 0) {
+		} else if (virtualized && virtualized.length > 0) {
 			setTempItems(virtualized);
 		}
 
 		return () => {
 			clearTimeout(timeout);
 		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [isPinching, virtualizer?.measure, virtualizer?.getVirtualItems]);
+	}, [isPinching, virtualizer]);
 
 	const virtualizerItems = virtualizer?.getVirtualItems() ?? [];
 	const items = tempItems.length ? tempItems : virtualizerItems;
@@ -164,7 +156,11 @@ export const Pages = ({
 	});
 
 	useFitWidth({ viewportRef: containerRef });
-	const largestPageWidth = usePdf(selectLargestPageWidth);
+	const largestPageWidth = usePdf((state) =>
+		state.viewports.reduce((largestWidth, viewport) => {
+			return Math.max(largestWidth, viewport.width);
+		}, 0),
+	);
 
 	useEffect(() => {
 		virtualizer.getOffsetForAlignment = (
@@ -234,7 +230,6 @@ export const Pages = ({
 						alignItems: "center",
 						flexDirection: "column",
 						transformOrigin: "0 0",
-						willChange: "transform",
 						// width: "max-content",
 						width: largestPageWidth,
 						margin: "0 auto",

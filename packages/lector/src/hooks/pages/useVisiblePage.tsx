@@ -13,17 +13,29 @@ export const useVisiblePage = ({ items }: UseVisiblePageProps) => {
 	const setCurrentPage = usePdf((state) => state.setCurrentPage);
 	const scrollElement = usePdf((state) => state.viewportRef?.current);
 
-	const lastPageRef = useRef(0);
+	// Cache clientHeight to avoid forced reflow when virtualizer
+	// dirties layout by adding/removing page elements.
+	const cachedHeightRef = useRef(0);
+
+	useEffect(() => {
+		if (!scrollElement) return;
+		cachedHeightRef.current = scrollElement.clientHeight;
+
+		const observer = new ResizeObserver(() => {
+			cachedHeightRef.current = scrollElement.clientHeight;
+		});
+		observer.observe(scrollElement);
+		return () => observer.disconnect();
+	}, [scrollElement]);
 
 	const calculateVisiblePageIndex = useCallback(
 		(virtualItems: VirtualItem[]) => {
 			if (!scrollElement || virtualItems.length === 0) return 0;
 
 			const scrollTop = scrollElement.scrollTop / zoomLevel;
-			const viewportHeight = scrollElement.clientHeight / zoomLevel;
+			const viewportHeight = cachedHeightRef.current / zoomLevel;
 			const viewportCenter = scrollTop + viewportHeight / 2;
 
-			// Find the page whose center is closest to viewport center
 			let closestIndex = 0;
 			let smallestDistance = Infinity;
 
@@ -31,7 +43,6 @@ export const useVisiblePage = ({ items }: UseVisiblePageProps) => {
 				const itemCenter = item.start + item.size / 2;
 				const distance = Math.abs(itemCenter - viewportCenter);
 
-				// Add a 20% threshold to prevent frequent switches
 				if (distance < smallestDistance * 0.8) {
 					smallestDistance = distance;
 					closestIndex = item.index;
@@ -43,17 +54,17 @@ export const useVisiblePage = ({ items }: UseVisiblePageProps) => {
 		[scrollElement, zoomLevel],
 	);
 
-	useEffect(() => {
-		if (!isPinching && items.length > 0) {
-			const mostVisibleIndex = calculateVisiblePageIndex(items);
-			const page = mostVisibleIndex + 1;
+	const rafRef = useRef(0);
 
-			// Skip the state update if the page hasn't actually changed
-			if (page !== lastPageRef.current) {
-				lastPageRef.current = page;
-				setCurrentPage?.(page);
-			}
+	useEffect(() => {
+		cancelAnimationFrame(rafRef.current);
+		if (!isPinching && items.length > 0) {
+			rafRef.current = requestAnimationFrame(() => {
+				const mostVisibleIndex = calculateVisiblePageIndex(items);
+				setCurrentPage?.(mostVisibleIndex + 1);
+			});
 		}
+		return () => cancelAnimationFrame(rafRef.current);
 	}, [items, isPinching, calculateVisiblePageIndex, setCurrentPage]);
 
 	return null;

@@ -88,15 +88,8 @@ export const useThumbnail = (
 
 		renderThumbnail();
 
-		// Capture ref — React clears refs before passive cleanup runs on unmount
-		const canvas = canvasRef.current;
 		return () => {
 			renderTaskRef.current?.cancel();
-			// Release canvas memory for Safari (384 MB total canvas limit on iOS)
-			if (canvas) {
-				canvas.width = 1;
-				canvas.height = 1;
-			}
 		};
 	}, [pageProxy, isVisible, dpr, maxHeight, maxWidth]);
 

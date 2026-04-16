@@ -1,13 +1,14 @@
 import type { RenderTask } from "pdfjs-dist";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
-import { clampScaleForPage } from "../../lib/canvas-utils";
 import { subscribeToViewportInvalidation } from "../../lib/viewport-invalidation";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
+const MAX_CANVAS_PIXELS = 16777216;
+const MAX_CANVAS_DIMENSION = 32767;
 const DETAIL_RENDER_IDLE_MS = 80;
 
 export const useDetailCanvasLayer = ({
@@ -30,20 +31,45 @@ export const useDetailCanvasLayer = ({
 
 	const [zoom] = useDebounce(bouncyZoom, 200);
 
-	// Cache base viewport dimensions — they never change for a given page proxy.
-	const pageDimsRef = useRef<{
-		width: number;
-		height: number;
-		proxy: unknown;
-	} | null>(null);
-	if (!pageDimsRef.current || pageDimsRef.current.proxy !== pdfPageProxy) {
-		const vp = pdfPageProxy.getViewport({ scale: 1 });
-		pageDimsRef.current = {
-			width: vp.width,
-			height: vp.height,
-			proxy: pdfPageProxy,
-		};
-	}
+	const getDetailCanvas = useCallback(() => {
+		const detailCanvas = detailCanvasRef.current;
+		if (!detailCanvas) {
+			return null;
+		}
+
+		detailCanvas.style.position = "absolute";
+		detailCanvas.style.top = "0";
+		detailCanvas.style.left = "0";
+		detailCanvas.style.pointerEvents = "none";
+		detailCanvas.style.zIndex = "1";
+		detailCanvas.style.backgroundColor = background ?? "white";
+
+		return detailCanvas;
+	}, [background]);
+
+	const clampScaleForPage = useCallback(
+		(targetScale: number, pageWidth: number, pageHeight: number) => {
+			if (!targetScale) {
+				return 0;
+			}
+
+			const areaLimit = Math.sqrt(
+				MAX_CANVAS_PIXELS / Math.max(pageWidth * pageHeight, 1),
+			);
+			const widthLimit = MAX_CANVAS_DIMENSION / Math.max(pageWidth, 1);
+			const heightLimit = MAX_CANVAS_DIMENSION / Math.max(pageHeight, 1);
+
+			const safeScale = Math.min(
+				targetScale,
+				Number.isFinite(areaLimit) ? areaLimit : targetScale,
+				Number.isFinite(widthLimit) ? widthLimit : targetScale,
+				Number.isFinite(heightLimit) ? heightLimit : targetScale,
+			);
+
+			return Math.max(safeScale, 0);
+		},
+		[],
+	);
 
 	useLayoutEffect(() => {
 		const scrollContainer = viewportRef?.current;
@@ -51,22 +77,22 @@ export const useDetailCanvasLayer = ({
 			return;
 		}
 
-		const detailCanvas = detailCanvasRef.current;
+		const detailCanvas = getDetailCanvas();
 		const container = containerRef.current;
 		if (!detailCanvas || !container) {
 			return;
 		}
 
 		let renderingTask: RenderTask | null = null;
-		let renderTimeoutId: NodeJS.Timeout | null = null;
-
-		const bgColor = background ?? "white";
-		const detailBaseStyle = `position:absolute;top:0;left:0;pointer-events:none;z-index:1;background-color:${bgColor}`;
+		let animationFrameId: number | null = null;
+		let renderTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 		const hideDetailCanvas = () => {
 			renderingTask?.cancel();
-			detailCanvas.style.cssText = `${detailBaseStyle};display:block;opacity:0`;
-			container.style.cssText = "";
+			detailCanvas.style.display = "block";
+			detailCanvas.style.opacity = "0";
+			container.style.transform = "";
+			container.style.transformOrigin = "";
 		};
 
 		const renderDetailCanvas = () => {
@@ -76,17 +102,33 @@ export const useDetailCanvasLayer = ({
 				return;
 			}
 
-			const { width: pageWidth, height: pageHeight } = pageDimsRef.current!;
+			const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
+			const pageWidth = baseViewport.width;
+			const pageHeight = baseViewport.height;
 
+			// Check needsDetail BEFORE reading layout properties
+			const targetDetailScale = dpr * zoom * 1.3;
+			const baseTargetScale = dpr * Math.min(zoom, 1);
+			const baseScale = clampScaleForPage(
+				baseTargetScale,
+				pageWidth,
+				pageHeight,
+			);
+			const needsDetail = zoom > 1 && targetDetailScale - baseScale > 1e-3;
+
+			if (!needsDetail) {
+				hideDetailCanvas();
+				return;
+			}
+
+			// Only read layout properties when we actually need detail rendering
 			const scrollX = scrollContainer.scrollLeft / zoom;
 			const scrollY = scrollContainer.scrollTop / zoom;
-
 			const viewportWidth = scrollContainer.clientWidth / zoom;
 			const viewportHeight = scrollContainer.clientHeight / zoom;
 
 			const pageRect = pageContainer.getBoundingClientRect();
 			const containerRect = scrollContainer.getBoundingClientRect();
-
 			const pageLeft = (pageRect.left - containerRect.left) / zoom + scrollX;
 			const pageTop = (pageRect.top - containerRect.top) / zoom + scrollY;
 
@@ -104,61 +146,57 @@ export const useDetailCanvasLayer = ({
 			const visibleWidth = Math.max(0, visibleRight - visibleLeft);
 			const visibleHeight = Math.max(0, visibleBottom - visibleTop);
 
-			const targetDetailScale = dpr * zoom * 1.3;
-			const baseTargetScale = dpr * Math.min(zoom, 1);
-			const baseScale = clampScaleForPage(
-				baseTargetScale,
-				pageWidth,
-				pageHeight,
-			);
-			const needsDetail = zoom > 1 && targetDetailScale - baseScale > 1e-3;
-
-			if (
-				isPinching ||
-				!needsDetail ||
-				visibleWidth <= 0 ||
-				visibleHeight <= 0
-			) {
+			if (isPinching || visibleWidth <= 0 || visibleHeight <= 0) {
 				hideDetailCanvas();
 				return;
 			}
 
-			renderingTask?.cancel();
+			if (renderingTask) {
+				void renderingTask.cancel();
+				renderingTask = null;
+			}
 
-			const pdfOffsetX = visibleLeft;
-			const pdfOffsetY = visibleTop;
+			detailCanvas.style.display = "block";
+			detailCanvas.style.opacity = "0";
+
 			const effectiveScale = targetDetailScale;
 			const actualWidth = visibleWidth * effectiveScale;
 			const actualHeight = visibleHeight * effectiveScale;
 
-			// Double-buffer: render to an offscreen buffer so the old detail
-			// canvas stays visible during the render (no flash to pixelated base)
-			const buffer = document.createElement("canvas");
-			buffer.width = actualWidth;
-			buffer.height = actualHeight;
+			detailCanvas.width = actualWidth;
+			detailCanvas.height = actualHeight;
+			detailCanvas.style.width = `${visibleWidth * zoom}px`;
+			detailCanvas.style.height = `${visibleHeight * zoom}px`;
+			detailCanvas.style.transformOrigin = "center center";
+			detailCanvas.style.transform = `translate(${visibleLeft * zoom}px, ${
+				visibleTop * zoom
+			}px)`;
+			container.style.transform = `scale3d(${1 / zoom}, ${1 / zoom}, 1)`;
+			container.style.transformOrigin = "0 0";
 
-			const bufferCtx = buffer.getContext("2d");
-			if (!bufferCtx) {
+			const context = detailCanvas.getContext("2d");
+			if (!context) {
 				return;
 			}
 
-			bufferCtx.setTransform(1, 0, 0, 1, 0, 0);
+			context.setTransform(1, 0, 0, 1, 0, 0);
+			context.clearRect(0, 0, detailCanvas.width, detailCanvas.height);
 
 			const transform = [
 				1,
 				0,
 				0,
 				1,
-				-pdfOffsetX * effectiveScale,
-				-pdfOffsetY * effectiveScale,
+				-visibleLeft * effectiveScale,
+				-visibleTop * effectiveScale,
 			];
 			const detailViewport = pdfPageProxy.getViewport({
 				scale: effectiveScale,
 			});
 
 			const currentRenderingTask = pdfPageProxy.render({
-				canvas: buffer,
-				canvasContext: bufferCtx,
+				canvas: detailCanvas,
+				canvasContext: context,
 				viewport: detailViewport,
 				background,
 				transform,
@@ -167,17 +205,8 @@ export const useDetailCanvasLayer = ({
 
 			currentRenderingTask.promise
 				.then(() => {
-					if (renderingTask !== currentRenderingTask) return;
-
-					// Swap: update the visible detail canvas in one go
-					detailCanvas.width = actualWidth;
-					detailCanvas.height = actualHeight;
-					detailCanvas.style.cssText = `${detailBaseStyle};display:block;opacity:1;width:${visibleWidth * zoom}px;height:${visibleHeight * zoom}px;transform-origin:center center;transform:translate(${visibleLeft * zoom}px,${visibleTop * zoom}px)`;
-					container.style.cssText = `transform:scale3d(${1 / zoom},${1 / zoom},1);transform-origin:0 0`;
-
-					const ctx = detailCanvas.getContext("2d");
-					if (ctx) {
-						ctx.drawImage(buffer, 0, 0);
+					if (renderingTask === currentRenderingTask) {
+						detailCanvas.style.opacity = "1";
 					}
 				})
 				.catch((error) => {
@@ -191,39 +220,32 @@ export const useDetailCanvasLayer = ({
 					if (renderingTask === currentRenderingTask) {
 						renderingTask = null;
 					}
-					// Always release buffer — cancellations and stale tasks leak otherwise
-					buffer.width = 0;
-					buffer.height = 0;
 				});
 		};
 
-		const scheduleRender = (delay = DETAIL_RENDER_IDLE_MS) => {
+		const scheduleRender = (delayMs: number) => {
 			if (renderTimeoutId !== null) {
 				clearTimeout(renderTimeoutId);
 			}
+			if (animationFrameId !== null) {
+				cancelAnimationFrame(animationFrameId);
+			}
 
-			// Cancel any in-progress render but keep the old detail canvas
-			// visible — stale sharpness is better than a flash to pixelated base
-			renderingTask?.cancel();
-
-			renderTimeoutId = setTimeout(() => {
-				renderTimeoutId = null;
-				renderDetailCanvas();
-			}, delay);
+			if (delayMs <= 0) {
+				animationFrameId = requestAnimationFrame(renderDetailCanvas);
+			} else {
+				renderTimeoutId = setTimeout(() => {
+					animationFrameId = requestAnimationFrame(renderDetailCanvas);
+				}, delayMs);
+			}
 		};
 
-		const unsubscribe = subscribeToViewportInvalidation(
-			scrollContainer,
-			scheduleRender,
-		);
-
-		if (zoom <= 1 || isPinching) {
-			// Synchronously hide — runs before paint (useLayoutEffect),
-			// so no stale rectangle flicker on zoom-out
+		const unsubscribe = subscribeToViewportInvalidation(scrollContainer, () => {
 			hideDetailCanvas();
-		} else {
-			scheduleRender(0);
-		}
+			scheduleRender(DETAIL_RENDER_IDLE_MS);
+		});
+
+		scheduleRender(isPinching ? DETAIL_RENDER_IDLE_MS * 2 : 0);
 
 		return () => {
 			unsubscribe();
@@ -231,10 +253,11 @@ export const useDetailCanvasLayer = ({
 			if (renderTimeoutId !== null) {
 				clearTimeout(renderTimeoutId);
 			}
+			if (animationFrameId !== null) {
+				cancelAnimationFrame(animationFrameId);
+			}
 
 			void renderingTask?.cancel();
-			// Don't destroy canvas content — stale detail is better than a
-			// white flash. The next effect run will hide or replace it.
 		};
 	}, [
 		pdfPageProxy,
@@ -243,20 +266,10 @@ export const useDetailCanvasLayer = ({
 		background,
 		dpr,
 		viewportRef,
+		getDetailCanvas,
+		clampScaleForPage,
 		baseCanvasRef,
 	]);
-
-	// Release canvas memory for Safari on unmount only.
-	// Capture ref into local var — React clears refs before passive cleanup runs.
-	useEffect(() => {
-		const canvas = detailCanvasRef.current;
-		return () => {
-			if (canvas) {
-				canvas.width = 1;
-				canvas.height = 1;
-			}
-		};
-	}, []);
 
 	return {
 		detailCanvasRef,

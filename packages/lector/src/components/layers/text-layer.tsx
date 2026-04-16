@@ -12,9 +12,10 @@ export const TextLayer = memo(
 				className={clsx("textLayer", className)}
 				style={{
 					...style,
-					position: "absolute",
-					top: 0,
-					left: 0,
+				position: "absolute",
+				top: 0,
+				left: 0,
+				contain: "layout style",
 				}}
 				{...props}
 				{...{
