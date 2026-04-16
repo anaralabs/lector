@@ -1,34 +1,35 @@
 import type React from "react";
 import { useLayoutEffect } from "react";
 
-import { PDFStore, usePdf } from "../../internal";
+import { PDFStore } from "../../internal";
 import { getFitWidthZoom } from "../../lib/zoom";
 
 interface UseFitWidth {
 	viewportRef: React.RefObject<HTMLDivElement | null>;
 }
 export const useFitWidth = ({ viewportRef }: UseFitWidth) => {
-	const viewports = usePdf((state) => state.viewports);
-	const zoomOptions = usePdf((state) => state.zoomOptions);
-
-	const updateZoom = usePdf((state) => state.updateZoom);
 	const store = PDFStore.useContext();
 
 	useLayoutEffect(() => {
 		if (viewportRef.current === null) return;
+
 		const resizeObserver = new ResizeObserver((entries) => {
 			for (const entry of entries) {
-				const isFitWidth = store.getState().isZoomFitWidth;
+				if (entry.target !== viewportRef.current) continue;
 
-				if (entry.target === viewportRef.current && isFitWidth) {
-					const containerWidth = entry.contentRect.width;
-					const newZoom = getFitWidthZoom(
-						containerWidth,
-						viewports,
-						zoomOptions,
-					);
-					updateZoom(newZoom, true);
-				}
+				// Read store imperatively — avoids adding viewports/zoomOptions to
+				// the effect deps, which would reconnect the observer on every lazy
+				// page proxy load (viewports array is replaced each time).
+				const { isZoomFitWidth, viewports, zoomOptions, updateZoom } =
+					store.getState();
+				if (!isZoomFitWidth) continue;
+
+				const newZoom = getFitWidthZoom(
+					entry.contentRect.width,
+					viewports,
+					zoomOptions,
+				);
+				updateZoom(newZoom, true);
 			}
 		});
 
@@ -37,7 +38,9 @@ export const useFitWidth = ({ viewportRef }: UseFitWidth) => {
 		return () => {
 			resizeObserver.disconnect();
 		};
-	}, [store, updateZoom, viewportRef, viewports, zoomOptions]);
+		// Only re-run when the container element or store reference changes —
+		// never for viewports/zoomOptions churn.
+	}, [store, viewportRef]);
 
 	return null;
 };

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
-import { usePdf } from "../../internal";
+import { PDFStore, usePdf } from "../../internal";
 import { clampScaleForPage } from "../../lib/canvas-utils";
 import { canvasPool } from "../../lib/canvas-pool";
 import { renderCache } from "../../lib/render-cache";
@@ -19,7 +19,10 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const markPageRendered = usePdf((state) => state.markPageRendered);
 	const unmarkPageRendered = usePdf((state) => state.unmarkPageRendered);
-	const currentPage = usePdf((state) => state.currentPage);
+	// Read store reference once — used to imperatively read currentPage and
+	// isPinching at enqueue time without subscribing (avoids re-running this
+	// effect on every page turn or pinch update).
+	const store = PDFStore.useContext();
 	const documentId = usePdf(
 		(state) => state.pdfDocumentProxy.fingerprints[0] ?? "default",
 	);
@@ -114,7 +117,17 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		let cancelled = false;
 		let activeRenderingTask: { cancel(): void } | null = null;
 
-		// Cache miss — render via queue with double-buffer (async, non-blocking)
+		// Cache miss — render via queue with double-buffer (async, non-blocking).
+		// Read currentPage and isPinching imperatively so this effect doesn't
+		// need to subscribe to either — they change constantly during scroll/pinch
+		// and would trigger unnecessary layout-effect re-runs for every visible page.
+		const { currentPage, isPinching } = store.getState();
+		if (isPinching) {
+			// Don't queue renders during an active pinch gesture; the CSS transform
+			// zoom already shows a scaled version of the base canvas. Canvas work
+			// will be scheduled when the pinch ends and debounced zoom settles.
+			return;
+		}
 		const distance = Math.abs(pageNumber - currentPage);
 		const priority = distance === 0 ? "visible" as const : distance <= 2 ? "overscan" as const : "background" as const;
 		const job = renderQueue.enqueue(() => {
@@ -192,7 +205,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		pageNumber,
 		documentId,
 		markPageRendered,
-		currentPage,
+		store,
 	]);
 
 	// Cleanup on unmount: release canvas memory (Safari) and unmark page

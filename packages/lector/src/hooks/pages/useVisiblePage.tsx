@@ -1,60 +1,69 @@
 import type { VirtualItem } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 
-import { usePdf } from "../../internal";
+import { PDFStore } from "../../internal";
 
 interface UseVisiblePageProps {
 	items: VirtualItem[];
 }
 
 export const useVisiblePage = ({ items }: UseVisiblePageProps) => {
-	const zoomLevel = usePdf((state) => state.zoom);
-	const isPinching = usePdf((state) => state.isPinching);
-	const setCurrentPage = usePdf((state) => state.setCurrentPage);
-	const scrollElement = usePdf((state) => state.viewportRef?.current);
-
+	const store = PDFStore.useContext();
 	const lastPageRef = useRef(0);
+	// Keep a stable ref to the latest items so the scroll listener always
+	// sees fresh data without needing to re-subscribe.
+	const itemsRef = useRef(items);
+	itemsRef.current = items;
 
-	const calculateVisiblePageIndex = useCallback(
-		(virtualItems: VirtualItem[]) => {
-			if (!scrollElement || virtualItems.length === 0) return 0;
+	useEffect(() => {
+		const { viewportRef } = store.getState();
+		const scrollEl = viewportRef?.current;
+		if (!scrollEl) return;
 
-			const scrollTop = scrollElement.scrollTop / zoomLevel;
-			const viewportHeight = scrollElement.clientHeight / zoomLevel;
+		const handleScroll = () => {
+			const state = store.getState();
+			if (state.isPinching) return;
+
+			const currentItems = itemsRef.current;
+			if (currentItems.length === 0) return;
+
+			const zoom = state.zoom;
+			const scrollTop = scrollEl.scrollTop / zoom;
+			const viewportHeight = scrollEl.clientHeight / zoom;
 			const viewportCenter = scrollTop + viewportHeight / 2;
 
-			// Find the page whose center is closest to viewport center
 			let closestIndex = 0;
 			let smallestDistance = Infinity;
 
-			for (const item of virtualItems) {
+			for (const item of currentItems) {
 				const itemCenter = item.start + item.size / 2;
 				const distance = Math.abs(itemCenter - viewportCenter);
 
-				// Add a 20% threshold to prevent frequent switches
+				// 20% hysteresis threshold to prevent rapid switching near boundaries
 				if (distance < smallestDistance * 0.8) {
 					smallestDistance = distance;
 					closestIndex = item.index;
 				}
 			}
 
-			return closestIndex;
-		},
-		[scrollElement, zoomLevel],
-	);
-
-	useEffect(() => {
-		if (!isPinching && items.length > 0) {
-			const mostVisibleIndex = calculateVisiblePageIndex(items);
-			const page = mostVisibleIndex + 1;
-
-			// Skip the state update if the page hasn't actually changed
+			const page = closestIndex + 1;
 			if (page !== lastPageRef.current) {
 				lastPageRef.current = page;
-				setCurrentPage?.(page);
+				state.setCurrentPage(page);
 			}
-		}
-	}, [items, isPinching, calculateVisiblePageIndex, setCurrentPage]);
+		};
+
+		// Run once immediately to set the initial page
+		handleScroll();
+
+		scrollEl.addEventListener("scroll", handleScroll, { passive: true });
+		return () => {
+			scrollEl.removeEventListener("scroll", handleScroll);
+		};
+		// Re-attach only when the scroll container changes (rare) — items are
+		// read from itemsRef so this listener is always up-to-date without
+		// re-running on every scroll frame.
+	}, [store]);
 
 	return null;
 };

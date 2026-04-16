@@ -15,7 +15,7 @@ import { useObserveElement } from "../hooks/pages/useObserveElement";
 import { useScrollFn } from "../hooks/pages/useScrollFn";
 import { useVisiblePage } from "../hooks/pages/useVisiblePage";
 import { useViewportContainer } from "../hooks/viewport/useViewportContainer";
-import { usePdf } from "../internal";
+import { PDFStore, usePdf } from "../internal";
 import { Primitive } from "./primitive";
 
 const selectLargestPageWidth = (state: {
@@ -85,7 +85,6 @@ export const Pages = ({
 }) => {
 	const [tempItems, setTempItems] = useState<VirtualItem[]>([]);
 
-	const viewports = usePdf((state) => state.viewports);
 	const numPages = usePdf((state) => state.pdfDocumentProxy.numPages);
 	const isPinching = usePdf((state) => state.isPinching);
 
@@ -104,8 +103,17 @@ export const Pages = ({
 	const { scrollToFn } = useScrollFn();
 	const { observeElementOffset } = useObserveElement();
 
-	const viewportsRef = useRef(viewports);
-	viewportsRef.current = viewports;
+	// Use a ref so estimateSize and innerBoxWidth always read the latest
+	// viewports without subscribing Pages to the full array. The array is
+	// replaced on every lazy page proxy load; a subscription would force a
+	// Pages re-render (and virtualizer re-reconcile) for every background load.
+	const store = PDFStore.useContext();
+	const viewportsRef = useRef(store.getState().viewports);
+	useEffect(() => {
+		return store.subscribe((s) => {
+			viewportsRef.current = s.viewports;
+		});
+	}, [store]);
 
 	const estimateSize = useCallback(
 		(index: number) => {
