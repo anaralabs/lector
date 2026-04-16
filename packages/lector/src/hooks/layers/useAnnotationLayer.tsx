@@ -1,4 +1,3 @@
-import { AnnotationLayer as PdfjsAnnotationLayer } from "pdfjs-dist";
 import { useEffect, useMemo, useRef } from "react";
 
 import { usePdf } from "../../internal";
@@ -159,7 +158,9 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 		(async () => {
 			try {
 				if (cancelled) return;
-				const annotationLayer = new PdfjsAnnotationLayer(
+				const { AnnotationLayer } = await import("pdfjs-dist");
+				if (cancelled) return;
+				const annotationLayer = new AnnotationLayer(
 					annotationLayerConfig,
 				);
 				annotationLayerObjectRef.current = annotationLayer;

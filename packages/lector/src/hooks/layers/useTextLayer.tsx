@@ -1,4 +1,3 @@
-import { TextLayer as PdfjsTextLayer } from "pdfjs-dist";
 import { useEffect, useRef } from "react";
 
 import { usePdf } from "../../internal";
@@ -214,16 +213,20 @@ export const useTextLayer = () => {
 			textLayerRef.current = null;
 		}
 
-		const textLayer = new PdfjsTextLayer({
-			textContentSource: pdfPageProxy.streamTextContent(),
-			container: textContainer,
-			viewport: pdfPageProxy.getViewport({ scale: 1 }),
-		});
+		void import("pdfjs-dist")
+			.then(({ TextLayer }) => {
+				if (isCancelled || textContainerRef.current !== textContainer) return;
 
-		textLayerRef.current = textLayer;
+				const textLayer = new TextLayer({
+					textContentSource: pdfPageProxy.streamTextContent(),
+					container: textContainer,
+					viewport: pdfPageProxy.getViewport({ scale: 1 }),
+				});
 
-		textLayer
-			.render()
+				textLayerRef.current = textLayer;
+
+				return textLayer.render();
+			})
 			.then(() => {
 				if (
 					isCancelled ||

@@ -11,30 +11,40 @@ const MAX_CANVAS_DIMENSION = 32767;
 
 const canvasBitmapCache = new WeakMap<PDFPageProxy, Map<number, ImageBitmap>>();
 
+function cacheKey(scale: number, background?: string): number {
+	const bg = background ?? "white";
+	let hash = Math.round(scale * 1e4);
+	for (let i = 0; i < bg.length; i++) {
+		hash = (hash * 31 + bg.charCodeAt(i)) | 0;
+	}
+	return hash;
+}
+
 function getCachedBitmap(
 	proxy: PDFPageProxy,
 	scale: number,
+	background?: string,
 ): ImageBitmap | null {
-	const scaleKey = Math.round(scale * 1e4);
-	return canvasBitmapCache.get(proxy)?.get(scaleKey) ?? null;
+	return canvasBitmapCache.get(proxy)?.get(cacheKey(scale, background)) ?? null;
 }
 
 function setCachedBitmap(
 	proxy: PDFPageProxy,
 	scale: number,
+	background: string | undefined,
 	bitmap: ImageBitmap,
 ): void {
-	const scaleKey = Math.round(scale * 1e4);
+	const key = cacheKey(scale, background);
 	let map = canvasBitmapCache.get(proxy);
 	if (!map) {
 		map = new Map();
 		canvasBitmapCache.set(proxy, map);
 	}
-	const existing = map.get(scaleKey);
+	const existing = map.get(key);
 	if (existing && existing !== bitmap) {
 		existing.close();
 	}
-	map.set(scaleKey, bitmap);
+	map.set(key, bitmap);
 }
 
 export const useCanvasLayer = ({ background }: { background?: string }) => {
@@ -98,7 +108,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const context = baseCanvas.getContext("2d");
 		if (!context) return;
 
-		const cached = getCachedBitmap(pdfPageProxy, baseScale);
+		const cached = getCachedBitmap(pdfPageProxy, baseScale, background);
 		if (cached) {
 			context.drawImage(cached, 0, 0);
 			markPageRendered(pageNumber);
@@ -125,7 +135,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 				markPageRendered(pageNumber);
 				if (typeof createImageBitmap !== "undefined") {
 					createImageBitmap(baseCanvas).then((bitmap) => {
-						setCachedBitmap(pdfPageProxy, baseScale, bitmap);
+						setCachedBitmap(pdfPageProxy, baseScale, background, bitmap);
 					});
 				}
 			})
