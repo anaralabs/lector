@@ -228,10 +228,7 @@ export const useTextLayer = () => {
 				return textLayer.render();
 			})
 			.then(() => {
-				if (
-					isCancelled ||
-					textContainerRef.current !== textContainer
-				) {
+				if (isCancelled || textContainerRef.current !== textContainer) {
 					return;
 				}
 
@@ -242,10 +239,7 @@ export const useTextLayer = () => {
 				bindMouseEvents(textContainer, endOfContent);
 			})
 			.catch((error) => {
-				if (
-					error instanceof Error &&
-					error.name !== "AbortException"
-				) {
+				if (error instanceof Error && error.name !== "AbortException") {
 					console.error("TextLayer rendering error:", error);
 				}
 			})

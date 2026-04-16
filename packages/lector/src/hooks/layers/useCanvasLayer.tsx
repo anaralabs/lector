@@ -97,6 +97,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 		baseCanvas.style.visibility = "hidden";
 
+		let cancelled = false;
 		const viewport = pdfPageProxy.getViewport({ scale: baseScale });
 
 		const renderingTask = pdfPageProxy.render({
@@ -108,10 +109,12 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 		renderingTask.promise
 			.then(() => {
+				if (cancelled) return;
 				baseCanvas.style.visibility = "";
 				markPageRendered(pageNumber);
 				if (typeof createImageBitmap !== "undefined") {
 					createImageBitmap(baseCanvas).then((bitmap) => {
+						if (cancelled) return;
 						setCachedBitmap(pdfPageProxy, baseScale, background, bitmap);
 					});
 				}
@@ -122,6 +125,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			});
 
 		return () => {
+			cancelled = true;
 			void renderingTask.cancel();
 		};
 	}, [pdfPageProxy, background, dpr, zoom, pageNumber, markPageRendered]);

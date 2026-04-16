@@ -160,9 +160,7 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 				if (cancelled) return;
 				const { AnnotationLayer } = await import("pdfjs-dist");
 				if (cancelled) return;
-				const annotationLayer = new AnnotationLayer(
-					annotationLayerConfig,
-				);
+				const annotationLayer = new AnnotationLayer(annotationLayerConfig);
 				annotationLayerObjectRef.current = annotationLayer;
 				const annotations = await pdfPageProxy.getAnnotations();
 				if (cancelled) return;
