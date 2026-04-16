@@ -1,9 +1,10 @@
-import { forwardRef, type HTMLProps, type ReactNode } from "react";
+import { forwardRef, type HTMLProps, type ReactNode, useEffect } from "react";
 
 import {
 	usePDFDocumentContext,
 	type usePDFDocumentParams,
 } from "../hooks/document/document";
+import { clearBitmapCache } from "../hooks/layers/useCanvasLayer";
 import {
 	PDFLinkServiceContext,
 	useCreatePDFLinkService,
@@ -41,6 +42,12 @@ export const Root = forwardRef(
 		const linkService = useCreatePDFLinkService(
 			initialState?.pdfDocumentProxy ?? null,
 		);
+
+		useEffect(() => {
+			return () => {
+				clearBitmapCache();
+			};
+		}, []);
 
 		return (
 			<Primitive.div ref={ref} {...props}>

@@ -13,6 +13,13 @@ type CacheEntry = { proxy: PDFPageProxy; key: number; bitmap: ImageBitmap };
 const cacheEntries: CacheEntry[] = [];
 const canvasBitmapCache = new WeakMap<PDFPageProxy, Map<number, ImageBitmap>>();
 
+export function clearBitmapCache(): void {
+	for (const entry of cacheEntries) {
+		entry.bitmap.close();
+	}
+	cacheEntries.length = 0;
+}
+
 function cacheKey(scale: number, background?: string): number {
 	const bg = background ?? "white";
 	let hash = Math.round(scale * 1e4);
