@@ -1,13 +1,11 @@
 import type { PDFPageProxy } from "pdfjs-dist";
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
+import { clampScaleForPage } from "../../lib/canvas-utils";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
-
-const MAX_CANVAS_PIXELS = 16777216;
-const MAX_CANVAS_DIMENSION = 32767;
 
 const canvasBitmapCache = new WeakMap<PDFPageProxy, Map<number, ImageBitmap>>();
 
@@ -60,28 +58,6 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 	const [zoom] = useDebounce(bouncyZoom, 100);
 
-	const clampScaleForPage = useCallback(
-		(targetScale: number, pageWidth: number, pageHeight: number) => {
-			if (!targetScale) return 0;
-
-			const areaLimit = Math.sqrt(
-				MAX_CANVAS_PIXELS / Math.max(pageWidth * pageHeight, 1),
-			);
-			const widthLimit = MAX_CANVAS_DIMENSION / Math.max(pageWidth, 1);
-			const heightLimit = MAX_CANVAS_DIMENSION / Math.max(pageHeight, 1);
-
-			const safeScale = Math.min(
-				targetScale,
-				Number.isFinite(areaLimit) ? areaLimit : targetScale,
-				Number.isFinite(widthLimit) ? widthLimit : targetScale,
-				Number.isFinite(heightLimit) ? heightLimit : targetScale,
-			);
-
-			return Math.max(safeScale, 0);
-		},
-		[],
-	);
-
 	useLayoutEffect(() => {
 		if (!canvasRef.current) return;
 
@@ -104,6 +80,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		baseCanvas.style.zIndex = "0";
 		baseCanvas.style.pointerEvents = "none";
 		baseCanvas.style.backgroundColor = background ?? "white";
+		baseCanvas.style.visibility = "";
 
 		const context = baseCanvas.getContext("2d");
 		if (!context) return;
@@ -147,7 +124,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		return () => {
 			void renderingTask.cancel();
 		};
-	}, [pdfPageProxy, background, dpr, zoom, clampScaleForPage, pageNumber, markPageRendered]);
+	}, [pdfPageProxy, background, dpr, zoom, pageNumber, markPageRendered]);
 
 	useEffect(() => {
 		const canvas = canvasRef.current;
