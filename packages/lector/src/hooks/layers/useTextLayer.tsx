@@ -213,7 +213,7 @@ export const useTextLayer = () => {
 			textLayerRef.current = null;
 		}
 
-		void import("pdfjs-dist")
+		void import("pdfjs-dist/legacy/build/pdf.mjs")
 			.then(({ TextLayer }) => {
 				if (isCancelled || textContainerRef.current !== textContainer) return;
 
