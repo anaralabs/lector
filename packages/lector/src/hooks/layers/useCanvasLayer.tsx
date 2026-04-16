@@ -53,9 +53,7 @@ function getCachedBitmap(
 	const key = cacheKey(scale, background);
 	const bitmap = canvasBitmapCache.get(proxy)?.get(key);
 	if (!bitmap) return null;
-	const idx = cacheEntries.findIndex(
-		(e) => e.proxy === proxy && e.key === key,
-	);
+	const idx = cacheEntries.findIndex((e) => e.proxy === proxy && e.key === key);
 	if (idx !== -1 && idx !== cacheEntries.length - 1) {
 		const [entry] = cacheEntries.splice(idx, 1);
 		cacheEntries.push(entry!);
