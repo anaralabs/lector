@@ -28,7 +28,7 @@ export function clearBitmapCache(documentId?: string): void {
 		return;
 	}
 	for (let i = cacheEntries.length - 1; i >= 0; i--) {
-		const entry = cacheEntries[i];
+		const entry = cacheEntries[i]!;
 		if (entry.docId !== documentId) continue;
 		entry.bitmap.close();
 		canvasBitmapCache.get(entry.proxy)?.delete(entry.key);
