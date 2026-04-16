@@ -9,16 +9,31 @@ import { usePDFPageNumber } from "../usePdfPageNumber";
 
 const CACHE_MAX = 60;
 
-type CacheEntry = { proxy: PDFPageProxy; key: number; bitmap: ImageBitmap };
+type CacheEntry = {
+	docId: string;
+	proxy: PDFPageProxy;
+	key: number;
+	bitmap: ImageBitmap;
+};
 const cacheEntries: CacheEntry[] = [];
 const canvasBitmapCache = new WeakMap<PDFPageProxy, Map<number, ImageBitmap>>();
 
-export function clearBitmapCache(): void {
-	for (const entry of cacheEntries) {
+export function clearBitmapCache(documentId?: string): void {
+	if (!documentId) {
+		for (const entry of cacheEntries) {
+			entry.bitmap.close();
+			canvasBitmapCache.get(entry.proxy)?.delete(entry.key);
+		}
+		cacheEntries.length = 0;
+		return;
+	}
+	for (let i = cacheEntries.length - 1; i >= 0; i--) {
+		const entry = cacheEntries[i];
+		if (entry.docId !== documentId) continue;
 		entry.bitmap.close();
 		canvasBitmapCache.get(entry.proxy)?.delete(entry.key);
+		cacheEntries.splice(i, 1);
 	}
-	cacheEntries.length = 0;
 }
 
 function cacheKey(scale: number, background?: string): number {
@@ -39,6 +54,7 @@ function getCachedBitmap(
 }
 
 function setCachedBitmap(
+	docId: string,
 	proxy: PDFPageProxy,
 	scale: number,
 	background: string | undefined,
@@ -59,7 +75,7 @@ function setCachedBitmap(
 		if (idx !== -1) cacheEntries.splice(idx, 1);
 	}
 	map.set(key, bitmap);
-	cacheEntries.push({ proxy, key, bitmap });
+	cacheEntries.push({ docId, proxy, key, bitmap });
 
 	while (cacheEntries.length > CACHE_MAX) {
 		const evicted = cacheEntries.shift()!;
@@ -78,6 +94,9 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const dpr = useDpr();
 
 	const bouncyZoom = usePdf((state) => state.zoom);
+	const docId = usePdf(
+		(state) => state.pdfDocumentProxy.fingerprints[0] ?? "",
+	);
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const markPageRendered = usePdf((state) => state.markPageRendered);
 	const unmarkPageRendered = usePdf((state) => state.unmarkPageRendered);
@@ -145,7 +164,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 								bitmap.close();
 								return;
 							}
-							setCachedBitmap(pdfPageProxy, baseScale, background, bitmap);
+							setCachedBitmap(docId, pdfPageProxy, baseScale, background, bitmap);
 						})
 						.catch(() => {});
 				}

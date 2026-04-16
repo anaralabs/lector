@@ -45,8 +45,9 @@ export const Root = forwardRef(
 
 		const documentId = initialState?.pdfDocumentProxy?.fingerprints?.[0];
 		useEffect(() => {
+			if (!documentId) return;
 			return () => {
-				clearBitmapCache();
+				clearBitmapCache(documentId);
 			};
 		}, [documentId]);
 
