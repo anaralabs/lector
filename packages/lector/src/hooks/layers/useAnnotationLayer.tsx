@@ -158,7 +158,9 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 		(async () => {
 			try {
 				if (cancelled) return;
-				const { AnnotationLayer } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+				const { AnnotationLayer } = await import(
+					"pdfjs-dist/legacy/build/pdf.mjs"
+				);
 				if (cancelled) return;
 				const annotationLayer = new AnnotationLayer(annotationLayerConfig);
 				annotationLayerObjectRef.current = annotationLayer;
