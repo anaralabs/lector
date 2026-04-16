@@ -94,9 +94,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const dpr = useDpr();
 
 	const bouncyZoom = usePdf((state) => state.zoom);
-	const docId = usePdf(
-		(state) => state.pdfDocumentProxy.fingerprints[0] ?? "",
-	);
+	const docId = usePdf((state) => state.pdfDocumentProxy.fingerprints[0] ?? "");
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const markPageRendered = usePdf((state) => state.markPageRendered);
 	const unmarkPageRendered = usePdf((state) => state.unmarkPageRendered);
@@ -164,7 +162,13 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 								bitmap.close();
 								return;
 							}
-							setCachedBitmap(docId, pdfPageProxy, baseScale, background, bitmap);
+							setCachedBitmap(
+								docId,
+								pdfPageProxy,
+								baseScale,
+								background,
+								bitmap,
+							);
 						})
 						.catch(() => {});
 				}
@@ -180,7 +184,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			cancelled = true;
 			void renderingTask.cancel();
 		};
-	}, [pdfPageProxy, background, dpr, zoom, pageNumber, markPageRendered]);
+	}, [pdfPageProxy, background, dpr, zoom, pageNumber, markPageRendered, docId]);
 
 	useEffect(() => {
 		const canvas = canvasRef.current;
