@@ -1342,17 +1342,17 @@ var useCanvasLayer = ({ background }) => {
         console.error("PDF render error:", error);
       });
     };
-    const SCROLL_IDLE_MS = 120;
+    const SCROLL_IDLE_MS2 = 120;
     const staggerDelay = stagger(
       Math.abs(pageNumber - (currentPage || pageNumber))
     );
     const attemptStart = () => {
       if (cancelled) return;
       const sinceScroll = msSinceScroll();
-      if (sinceScroll < SCROLL_IDLE_MS) {
+      if (sinceScroll < SCROLL_IDLE_MS2) {
         startTimeoutId = setTimeout(
           attemptStart,
-          SCROLL_IDLE_MS - sinceScroll
+          SCROLL_IDLE_MS2 - sinceScroll
         );
         return;
       }
@@ -1470,6 +1470,7 @@ var subscribeToViewportInvalidation = (viewport, callback) => {
 
 // src/hooks/layers/useDetailCanvasLayer.tsx
 var DETAIL_RENDER_IDLE_MS = 80;
+var SCROLL_IDLE_MS = 120;
 var supportsOffscreenCanvas2 = typeof OffscreenCanvas !== "undefined" && (() => {
   try {
     const off = new OffscreenCanvas(1, 1);
@@ -1499,6 +1500,7 @@ var useDetailCanvasLayer = ({
   const isPinching = usePdf((state) => state.isPinching);
   const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
   const viewportRef = usePdf((state) => state.viewportRef);
+  const currentPage = usePdf((state) => state.currentPage);
   const [zoom] = useDebounce(bouncyZoom, 200);
   const pageDimsRef = useRef(null);
   if (!pageDimsRef.current || pageDimsRef.current.proxy !== pdfPageProxy) {
@@ -1668,22 +1670,33 @@ var useDetailCanvasLayer = ({
         buffer.height = 0;
       });
     };
+    const attemptRender = () => {
+      const sinceScroll = msSinceScroll();
+      if (sinceScroll < SCROLL_IDLE_MS) {
+        renderTimeoutId = setTimeout(
+          attemptRender,
+          SCROLL_IDLE_MS - sinceScroll
+        );
+        return;
+      }
+      renderTimeoutId = null;
+      renderDetailCanvas();
+    };
     const scheduleRender = (delay = DETAIL_RENDER_IDLE_MS) => {
       if (renderTimeoutId !== null) {
         clearTimeout(renderTimeoutId);
       }
       renderingTask?.cancel();
-      renderTimeoutId = setTimeout(() => {
-        renderTimeoutId = null;
-        renderDetailCanvas();
-      }, delay);
+      renderTimeoutId = setTimeout(attemptRender, delay);
     };
     const needsInvalidationSubscription = zoom > 1 && !isPinching;
     const unsubscribe = needsInvalidationSubscription ? subscribeToViewportInvalidation(scrollContainer, scheduleRender) : null;
     if (zoom <= 1 || isPinching) {
       hideDetailCanvas();
     } else {
-      scheduleRender(0);
+      const distance = Math.abs(pageNumber - (currentPage || pageNumber));
+      const staggerDelay = distance <= 1 ? 0 : Math.min(distance * 30, 200);
+      scheduleRender(staggerDelay);
     }
     return () => {
       unsubscribe?.();
@@ -2686,39 +2699,60 @@ var useTextLayer = () => {
       return;
     }
     let isCancelled = false;
-    isRenderingRef.current = true;
-    textContainer.innerHTML = "";
-    if (textLayerRef.current) {
-      textLayerRef.current.cancel();
-      textLayerRef.current = null;
-    }
-    void import('pdfjs-dist/legacy/build/pdf.mjs').then(({ TextLayer: TextLayer2 }) => {
-      if (isCancelled || textContainerRef.current !== textContainer) return;
-      const textLayer = new TextLayer2({
-        textContentSource: pdfPageProxy.streamTextContent(),
-        container: textContainer,
-        viewport: pdfPageProxy.getViewport({ scale: 1 })
+    let startTimeoutId = null;
+    const start = () => {
+      if (isCancelled) return;
+      isRenderingRef.current = true;
+      textContainer.innerHTML = "";
+      if (textLayerRef.current) {
+        textLayerRef.current.cancel();
+        textLayerRef.current = null;
+      }
+      void import('pdfjs-dist/legacy/build/pdf.mjs').then(({ TextLayer: TextLayer2 }) => {
+        if (isCancelled || textContainerRef.current !== textContainer)
+          return;
+        const textLayer = new TextLayer2({
+          textContentSource: pdfPageProxy.streamTextContent(),
+          container: textContainer,
+          viewport: pdfPageProxy.getViewport({ scale: 1 })
+        });
+        textLayerRef.current = textLayer;
+        return textLayer.render();
+      }).then(() => {
+        if (isCancelled || textContainerRef.current !== textContainer) {
+          return;
+        }
+        const endOfContent = document.createElement("div");
+        endOfContent.className = "endOfContent";
+        textContainer.appendChild(endOfContent);
+        bindMouseEvents(textContainer, endOfContent);
+      }).catch((error) => {
+        if (error instanceof Error && error.name !== "AbortException") {
+          console.error("TextLayer rendering error:", error);
+        }
+      }).finally(() => {
+        isRenderingRef.current = false;
       });
-      textLayerRef.current = textLayer;
-      return textLayer.render();
-    }).then(() => {
-      if (isCancelled || textContainerRef.current !== textContainer) {
+    };
+    const SCROLL_IDLE_MS2 = 120;
+    const attemptStart = () => {
+      if (isCancelled) return;
+      const sinceScroll = msSinceScroll();
+      if (sinceScroll < SCROLL_IDLE_MS2) {
+        startTimeoutId = setTimeout(attemptStart, SCROLL_IDLE_MS2 - sinceScroll);
         return;
       }
-      const endOfContent = document.createElement("div");
-      endOfContent.className = "endOfContent";
-      textContainer.appendChild(endOfContent);
-      bindMouseEvents(textContainer, endOfContent);
-    }).catch((error) => {
-      if (error instanceof Error && error.name !== "AbortException") {
-        console.error("TextLayer rendering error:", error);
-      }
-    }).finally(() => {
-      isRenderingRef.current = false;
-    });
+      startTimeoutId = null;
+      start();
+    };
+    attemptStart();
     return () => {
       isCancelled = true;
       isRenderingRef.current = false;
+      if (startTimeoutId !== null) {
+        clearTimeout(startTimeoutId);
+        startTimeoutId = null;
+      }
       if (textLayerRef.current) {
         textLayerRef.current.cancel();
         textLayerRef.current = null;
