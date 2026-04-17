@@ -159,12 +159,14 @@ export const AnnotationTooltip = ({
 						ref={refs.setFloating}
 						className={className}
 						data-annotation-tooltip="click"
-						style={{
-							...floatingStyles,
-							position: "absolute",
-							pointerEvents: "auto",
-							zIndex: 50,
-						}}
+						style={
+							{
+								...floatingStyles,
+								position: "absolute",
+								pointerEvents: "auto",
+								zIndex: 50,
+							} as React.CSSProperties
+						}
 						{...getFloatingProps()}
 					>
 						{renderTooltipContent({
@@ -187,12 +189,14 @@ export const AnnotationTooltip = ({
 						ref={hoverRefs.setFloating}
 						className={hoverClassName}
 						data-annotation-tooltip="hover"
-						style={{
-							...hoverFloatingStyles,
-							position: "absolute",
-							pointerEvents: "auto",
-							zIndex: 51,
-						}}
+						style={
+							{
+								...hoverFloatingStyles,
+								position: "absolute",
+								pointerEvents: "auto",
+								zIndex: 51,
+							} as React.CSSProperties
+						}
 						onMouseEnter={handleTooltipMouseEnter}
 						onMouseLeave={handleTooltipMouseLeave}
 						{...getHoverFloatingProps()}

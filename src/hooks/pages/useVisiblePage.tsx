@@ -1,5 +1,5 @@
 import type { VirtualItem } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useRef } from "react";
+import { startTransition, useCallback, useEffect, useRef } from "react";
 
 import { usePdf } from "../../internal";
 
@@ -51,7 +51,12 @@ export const useVisiblePage = ({ items }: UseVisiblePageProps) => {
 			// Skip the state update if the page hasn't actually changed
 			if (page !== lastPageRef.current) {
 				lastPageRef.current = page;
-				setCurrentPage?.(page);
+				// `currentPage` is typically consumed by non-critical UI (page
+				// indicator, thumbnails) — allow React to interrupt if a more
+				// urgent update (scroll/zoom) comes in mid-commit.
+				startTransition(() => {
+					setCurrentPage?.(page);
+				});
 			}
 		}
 	}, [items, isPinching, calculateVisiblePageIndex, setCurrentPage]);

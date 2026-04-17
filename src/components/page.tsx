@@ -34,6 +34,10 @@ export const Page = memo(
 				<Primitive.div
 					style={{
 						display: "block",
+						transform: "translateZ(0)",
+						contentVisibility: "auto",
+						containIntrinsicSize: `${width}px ${height}px`,
+						contain: "content",
 					}}
 				>
 					<div

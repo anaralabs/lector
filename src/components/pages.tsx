@@ -102,7 +102,8 @@ export const Pages = ({
 	const setVirtualizer = usePdf((state) => state.setVirtualizer);
 
 	const { scrollToFn } = useScrollFn();
-	const { observeElementOffset } = useObserveElement();
+	const { observeElementOffset, controller: scrollController } =
+		useObserveElement();
 
 	const viewportsRef = useRef(viewports);
 	viewportsRef.current = viewports;
@@ -127,10 +128,13 @@ export const Pages = ({
 		initialOffset: initialOffset,
 	});
 
+	// Route offset updates through the scroll rAF instead of a render-path
+	// effect. This avoids forcing a React commit for every scroll frame just
+	// to notify the consumer — a big source of scroll jank at zoom=1.
 	useEffect(() => {
-		if (onOffsetChange && virtualizer.scrollOffset)
-			onOffsetChange(virtualizer.scrollOffset);
-	}, [virtualizer.scrollOffset, onOffsetChange]);
+		if (!onOffsetChange) return;
+		return scrollController.addOffsetListener(onOffsetChange);
+	}, [onOffsetChange, scrollController]);
 
 	useEffect(() => {
 		setVirtualizer(virtualizer);
@@ -138,10 +142,18 @@ export const Pages = ({
 
 	useEffect(() => {
 		let timeout: NodeJS.Timeout;
+		let rafId: number | null = null;
 		const virtualized = virtualizer?.getVirtualItems();
 
 		if (!isPinching) {
-			virtualizer?.measure();
+			// Defer the expensive `measure()` to the next animation frame so
+			// the frame that handles pinch-end doesn't also get stuck doing
+			// a full virtualizer remeasure. Users feel this as the "settling"
+			// stutter after a zoom gesture.
+			rafId = requestAnimationFrame(() => {
+				rafId = null;
+				virtualizer?.measure();
+			});
 
 			timeout = setTimeout(() => {
 				setTempItems([]);
@@ -152,6 +164,7 @@ export const Pages = ({
 
 		return () => {
 			clearTimeout(timeout);
+			if (rafId !== null) cancelAnimationFrame(rafId);
 		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [isPinching, virtualizer?.measure, virtualizer?.getVirtualItems]);
@@ -234,7 +247,11 @@ export const Pages = ({
 						alignItems: "center",
 						flexDirection: "column",
 						transformOrigin: "0 0",
-						willChange: "transform",
+						// Only ask the compositor to keep this (huge) element on its
+						// own layer while the user is actively pinching. Outside of
+						// pinch, per-page `translateZ(0)` gives us per-page layers
+						// which are cheaper to composite on scroll.
+						willChange: isPinching ? "transform" : "auto",
 						// width: "max-content",
 						width: largestPageWidth,
 						margin: "0 auto",

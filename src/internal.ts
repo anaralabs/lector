@@ -222,3 +222,13 @@ export const PDFStore = createZustandContext(
 
 export const usePdf = <T>(selector: (state: PDFState) => T) =>
 	useStore(PDFStore.useContext(), selector);
+
+/**
+ * Returns the zustand store handle so consumers can imperatively read state
+ * (via `.getState()`) or subscribe outside React (via `.subscribe()`) without
+ * triggering component re-renders.
+ *
+ * Useful for things like event handlers that need the current zoom value but
+ * shouldn't re-render their component on every zoom change.
+ */
+export const usePdfStore = () => PDFStore.useContext();

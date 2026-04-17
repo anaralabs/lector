@@ -156,9 +156,7 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
 			{isOpen && (
 				<div
 					ref={refs.setFloating}
-					style={{
-						...floatingStyles,
-					}}
+					style={{ ...floatingStyles } as React.CSSProperties}
 					{...getFloatingProps()}
 				>
 					{children}
