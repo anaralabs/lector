@@ -2,6 +2,7 @@ import { debounce, type Virtualizer } from "@tanstack/react-virtual";
 import { useRef } from "react";
 
 import { PDFStore } from "../../internal";
+import { notifyScrollActivity } from "../../lib/scroll-activity";
 
 const supportsScrollend =
 	typeof window === "undefined" ? true : "onscrollend" in window;
@@ -69,6 +70,9 @@ export const useObserveElement = () => {
 			const next = latestRawOffset / zoom;
 			offset = next;
 			fallback();
+			if (pendingIsScrolling) {
+				notifyScrollActivity();
+			}
 			cb(next, pendingIsScrolling);
 			// Notify consumer listeners (e.g. scroll-position persistence)
 			// in the same rAF instead of requiring a React re-render.

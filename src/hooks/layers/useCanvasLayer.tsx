@@ -4,6 +4,7 @@ import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
 import { clampScaleForPage } from "../../lib/canvas-utils";
+import { msSinceScroll } from "../../lib/scroll-activity";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
@@ -188,7 +189,6 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		baseCanvas.style.zIndex = "0";
 		baseCanvas.style.pointerEvents = "none";
 		baseCanvas.style.backgroundColor = background ?? "white";
-		baseCanvas.style.visibility = "";
 
 		const ctx = baseCanvas.getContext("2d");
 		if (!ctx) return;
@@ -209,9 +209,12 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		let startTimeoutId: ReturnType<typeof setTimeout> | null = null;
 		let idleHandle: number | null = null;
 
-		// Hide while the (potentially staggered) render resolves so the user
-		// doesn't see a half-drawn page.
-		baseCanvas.style.visibility = "hidden";
+		// Intentionally do NOT hide the canvas here: pdfjs renders take many
+		// frames on text-heavy pages, and hiding the canvas during that
+		// window shows the parent's background (a white/dark flash). Let the
+		// previous bitmap stay visible — when the new one is ready we swap
+		// dims + drawImage synchronously so there's no user-visible gap.
+		// (This is also the Firefox pinch-flash fix the lib already shipped.)
 
 		const start = () => {
 			if (cancelled) return;
@@ -241,7 +244,6 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 						const bitmap = off.transferToImageBitmap();
 						applyDimsIfNeeded();
 						ctx.drawImage(bitmap, 0, 0);
-						baseCanvas.style.visibility = "";
 						markPageRendered(pageNumber);
 						setCachedBitmap(
 							docId,
@@ -254,7 +256,6 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 					.catch((error) => {
 						if (cancelled) return;
 						if (error?.name === "RenderingCancelledException") return;
-						baseCanvas.style.visibility = "";
 						console.error("PDF render error:", error);
 					});
 				return;
@@ -273,7 +274,6 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			renderingTask.promise
 				.then(() => {
 					if (cancelled) return;
-					baseCanvas.style.visibility = "";
 					markPageRendered(pageNumber);
 					// Idle-defer the GPU->CPU readback so it doesn't steal the
 					// frame that just finished rendering.
@@ -301,19 +301,41 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 				.catch((error) => {
 					if (cancelled) return;
 					if (error?.name === "RenderingCancelledException") return;
-					baseCanvas.style.visibility = "";
 					console.error("PDF render error:", error);
 				});
 		};
 
-		const delay = stagger(Math.abs(pageNumber - (currentPage || pageNumber)));
-		if (delay === 0) {
+		// Two delays stack:
+		//   1. stagger by distance from the current page so a burst of
+		//      mounts (e.g. after a pinch) doesn't all hit the main thread
+		//      on the same frame.
+		//   2. a scroll-idle wait so the expensive pdfjs render doesn't run
+		//      while the user is actively flicking. pdfjs renders are
+		//      synchronous main-thread work, and running them mid-flick is
+		//      the primary cause of scroll jank when new pages enter view.
+		const SCROLL_IDLE_MS = 120;
+		const staggerDelay = stagger(
+			Math.abs(pageNumber - (currentPage || pageNumber)),
+		);
+
+		const attemptStart = () => {
+			if (cancelled) return;
+			const sinceScroll = msSinceScroll();
+			if (sinceScroll < SCROLL_IDLE_MS) {
+				startTimeoutId = setTimeout(
+					attemptStart,
+					SCROLL_IDLE_MS - sinceScroll,
+				);
+				return;
+			}
+			startTimeoutId = null;
 			start();
+		};
+
+		if (staggerDelay === 0) {
+			attemptStart();
 		} else {
-			startTimeoutId = setTimeout(() => {
-				startTimeoutId = null;
-				start();
-			}, delay);
+			startTimeoutId = setTimeout(attemptStart, staggerDelay);
 		}
 
 		return () => {
