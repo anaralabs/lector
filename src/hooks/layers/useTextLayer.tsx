@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import { usePdf } from "../../internal";
+import { msSinceScroll } from "../../lib/scroll-activity";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
 // Add custom property declarations
@@ -203,53 +204,83 @@ export const useTextLayer = () => {
 		}
 
 		let isCancelled = false;
+		let startTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
-		isRenderingRef.current = true;
+		const start = () => {
+			if (isCancelled) return;
 
-		textContainer.innerHTML = "";
+			isRenderingRef.current = true;
 
-		if (textLayerRef.current) {
-			textLayerRef.current.cancel();
-			textLayerRef.current = null;
-		}
+			textContainer.innerHTML = "";
 
-		void import("pdfjs-dist/legacy/build/pdf.mjs")
-			.then(({ TextLayer }) => {
-				if (isCancelled || textContainerRef.current !== textContainer) return;
+			if (textLayerRef.current) {
+				textLayerRef.current.cancel();
+				textLayerRef.current = null;
+			}
 
-				const textLayer = new TextLayer({
-					textContentSource: pdfPageProxy.streamTextContent(),
-					container: textContainer,
-					viewport: pdfPageProxy.getViewport({ scale: 1 }),
+			void import("pdfjs-dist/legacy/build/pdf.mjs")
+				.then(({ TextLayer }) => {
+					if (isCancelled || textContainerRef.current !== textContainer)
+						return;
+
+					const textLayer = new TextLayer({
+						textContentSource: pdfPageProxy.streamTextContent(),
+						container: textContainer,
+						viewport: pdfPageProxy.getViewport({ scale: 1 }),
+					});
+
+					textLayerRef.current = textLayer;
+
+					return textLayer.render();
+				})
+				.then(() => {
+					if (isCancelled || textContainerRef.current !== textContainer) {
+						return;
+					}
+
+					const endOfContent = document.createElement("div");
+					endOfContent.className = "endOfContent";
+					textContainer.appendChild(endOfContent);
+
+					bindMouseEvents(textContainer, endOfContent);
+				})
+				.catch((error) => {
+					if (error instanceof Error && error.name !== "AbortException") {
+						console.error("TextLayer rendering error:", error);
+					}
+				})
+				.finally(() => {
+					isRenderingRef.current = false;
 				});
+		};
 
-				textLayerRef.current = textLayer;
+		// Creating the pdfjs TextLayer is the single most expensive thing a
+		// fresh page mount does — it synthesises hundreds of absolutely
+		// positioned spans synchronously. Running that work during an
+		// active scroll is the main cause of per-new-page scroll jank.
+		// Defer until the scroll has been quiet for a few frames.
+		const SCROLL_IDLE_MS = 120;
+		const attemptStart = () => {
+			if (isCancelled) return;
+			const sinceScroll = msSinceScroll();
+			if (sinceScroll < SCROLL_IDLE_MS) {
+				startTimeoutId = setTimeout(attemptStart, SCROLL_IDLE_MS - sinceScroll);
+				return;
+			}
+			startTimeoutId = null;
+			start();
+		};
 
-				return textLayer.render();
-			})
-			.then(() => {
-				if (isCancelled || textContainerRef.current !== textContainer) {
-					return;
-				}
-
-				const endOfContent = document.createElement("div");
-				endOfContent.className = "endOfContent";
-				textContainer.appendChild(endOfContent);
-
-				bindMouseEvents(textContainer, endOfContent);
-			})
-			.catch((error) => {
-				if (error instanceof Error && error.name !== "AbortException") {
-					console.error("TextLayer rendering error:", error);
-				}
-			})
-			.finally(() => {
-				isRenderingRef.current = false;
-			});
+		attemptStart();
 
 		return () => {
 			isCancelled = true;
 			isRenderingRef.current = false;
+
+			if (startTimeoutId !== null) {
+				clearTimeout(startTimeoutId);
+				startTimeoutId = null;
+			}
 
 			if (textLayerRef.current) {
 				textLayerRef.current.cancel();
