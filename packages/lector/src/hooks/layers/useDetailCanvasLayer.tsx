@@ -4,11 +4,13 @@ import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
 import { clampScaleForPage } from "../../lib/canvas-utils";
+import { msSinceScroll } from "../../lib/scroll-activity";
 import { subscribeToViewportInvalidation } from "../../lib/viewport-invalidation";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
 const DETAIL_RENDER_IDLE_MS = 80;
+const SCROLL_IDLE_MS = 120;
 
 // Feature check once at module scope.
 const supportsOffscreenCanvas =
@@ -51,6 +53,7 @@ export const useDetailCanvasLayer = ({
 	const isPinching = usePdf((state) => state.isPinching);
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const viewportRef = usePdf((state) => state.viewportRef);
+	const currentPage = usePdf((state) => state.currentPage);
 
 	const [zoom] = useDebounce(bouncyZoom, 200);
 
@@ -278,15 +281,29 @@ export const useDetailCanvasLayer = ({
 				});
 		};
 
+		// After any debounce delay, also wait for the scroll itself to be
+		// quiet. A 120 ms scroll-idle gate keeps the heavy detail pdfjs
+		// render (3-10x more expensive than the base render at zoom > 1)
+		// off the main thread while the user is still flicking.
+		const attemptRender = () => {
+			const sinceScroll = msSinceScroll();
+			if (sinceScroll < SCROLL_IDLE_MS) {
+				renderTimeoutId = setTimeout(
+					attemptRender,
+					SCROLL_IDLE_MS - sinceScroll,
+				);
+				return;
+			}
+			renderTimeoutId = null;
+			renderDetailCanvas();
+		};
+
 		const scheduleRender = (delay = DETAIL_RENDER_IDLE_MS) => {
 			if (renderTimeoutId !== null) {
 				clearTimeout(renderTimeoutId);
 			}
 			renderingTask?.cancel();
-			renderTimeoutId = setTimeout(() => {
-				renderTimeoutId = null;
-				renderDetailCanvas();
-			}, delay);
+			renderTimeoutId = setTimeout(attemptRender, delay);
 		};
 
 		// Only subscribe to scroll/resize invalidation when the detail canvas
@@ -301,7 +318,13 @@ export const useDetailCanvasLayer = ({
 		if (zoom <= 1 || isPinching) {
 			hideDetailCanvas();
 		} else {
-			scheduleRender(0);
+			// Stagger the initial post-zoom render by distance from the
+			// current page so a zoom-in with 5 visible pages doesn't fire
+			// 5 detail renders on the same frame.
+			const distance = Math.abs(pageNumber - (currentPage || pageNumber));
+			const staggerDelay =
+				distance <= 1 ? 0 : Math.min(distance * 30, 200);
+			scheduleRender(staggerDelay);
 		}
 
 		return () => {
@@ -313,6 +336,11 @@ export const useDetailCanvasLayer = ({
 
 			void renderingTask?.cancel();
 		};
+		// `currentPage` is intentionally excluded from deps: it only seeds
+		// the initial stagger delay. Letting it re-run this effect on
+		// every scrolled-past page would cancel in-flight detail renders
+		// and cause thrashing.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [
 		pdfPageProxy,
 		zoom,
