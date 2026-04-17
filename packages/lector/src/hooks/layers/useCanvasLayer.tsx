@@ -18,6 +18,32 @@ type CacheEntry = {
 const cacheEntries: CacheEntry[] = [];
 const canvasBitmapCache = new WeakMap<PDFPageProxy, Map<number, ImageBitmap>>();
 
+// GPU sprinkle: render into an OffscreenCanvas when the browser supports it.
+// This avoids the GPU->CPU readback that `createImageBitmap(liveCanvas)`
+// would otherwise require for caching, and lets `transferToImageBitmap()`
+// produce a GPU-resident bitmap that the display canvas can draw in a
+// single GPU->GPU blit.
+const supportsOffscreenCanvas =
+	typeof OffscreenCanvas !== "undefined" &&
+	// Some older browsers expose OffscreenCanvas but not a 2d context on it.
+	(() => {
+		try {
+			const off = new OffscreenCanvas(1, 1);
+			return !!off.getContext("2d");
+		} catch {
+			return false;
+		}
+	})();
+
+const idle =
+	typeof requestIdleCallback !== "undefined"
+		? (fn: () => void) => requestIdleCallback(fn, { timeout: 500 })
+		: (fn: () => void) => setTimeout(fn, 0);
+const cancelIdle =
+	typeof cancelIdleCallback !== "undefined"
+		? (id: number) => cancelIdleCallback(id)
+		: (id: number) => clearTimeout(id);
+
 export function clearBitmapCache(documentId?: string): void {
 	if (documentId === undefined) {
 		for (const entry of cacheEntries) {
@@ -37,8 +63,12 @@ export function clearBitmapCache(documentId?: string): void {
 }
 
 function cacheKey(scale: number, background?: string): number {
+	// Quantise the scale before hashing so small zoom jitter (e.g. 1.051 vs
+	// 1.052) still hits the same cache entry. Pdfjs already clamps scale to
+	// pixel-perfect values per-viewport; 2-decimal precision is plenty.
+	const quantScale = Math.round(scale * 100) / 100;
 	const bg = background ?? "white";
-	let hash = Math.round(scale * 1e4);
+	let hash = Math.round(quantScale * 1e4);
 	for (let i = 0; i < bg.length; i++) {
 		hash = (hash * 31 + bg.charCodeAt(i)) | 0;
 	}
@@ -95,6 +125,15 @@ function setCachedBitmap(
 	}
 }
 
+// Returns delay (ms) before a given page should start rendering after the
+// debounced zoom resolves. Pages near the current viewport render
+// immediately; pages farther out get staggered so they don't pile up on
+// a single frame.
+function stagger(distanceFromCurrent: number): number {
+	if (distanceFromCurrent <= 1) return 0;
+	return Math.min(distanceFromCurrent * 20, 160);
+}
+
 export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const pageNumber = usePDFPageNumber();
@@ -106,8 +145,14 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const markPageRendered = usePdf((state) => state.markPageRendered);
 	const unmarkPageRendered = usePdf((state) => state.unmarkPageRendered);
+	const currentPage = usePdf((state) => state.currentPage);
 
 	const [zoom] = useDebounce(bouncyZoom, 100);
+
+	// Remember what we last committed to the display canvas so we can skip
+	// redundant width/height writes (each write reallocates the canvas's
+	// GPU-backed texture).
+	const lastCommittedRef = useRef<{ w: number; h: number } | null>(null);
 
 	useLayoutEffect(() => {
 		if (!canvasRef.current) return;
@@ -120,8 +165,20 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const targetBaseScale = dpr * Math.min(zoom, 1);
 		const baseScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
 
-		baseCanvas.width = Math.floor(pageWidth * baseScale);
-		baseCanvas.height = Math.floor(pageHeight * baseScale);
+		const targetW = Math.floor(pageWidth * baseScale);
+		const targetH = Math.floor(pageHeight * baseScale);
+
+		const applyDimsIfNeeded = () => {
+			if (
+				lastCommittedRef.current?.w !== targetW ||
+				lastCommittedRef.current?.h !== targetH
+			) {
+				baseCanvas.width = targetW;
+				baseCanvas.height = targetH;
+				lastCommittedRef.current = { w: targetW, h: targetH };
+			}
+		};
+
 		baseCanvas.style.position = "absolute";
 		baseCanvas.style.top = "0";
 		baseCanvas.style.left = "0";
@@ -133,64 +190,143 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		baseCanvas.style.backgroundColor = background ?? "white";
 		baseCanvas.style.visibility = "";
 
-		const context = baseCanvas.getContext("2d");
-		if (!context) return;
+		const ctx = baseCanvas.getContext("2d");
+		if (!ctx) return;
 
 		const cached = getCachedBitmap(pdfPageProxy, baseScale, background);
 		if (cached) {
-			context.drawImage(cached, 0, 0);
+			applyDimsIfNeeded();
+			// Setting canvas.width/height (when it changed) already cleared
+			// the buffer. drawImage onto a GPU-backed ImageBitmap is a GPU->GPU
+			// blit, no CPU readback.
+			ctx.drawImage(cached, 0, 0);
 			markPageRendered(pageNumber);
 			return;
 		}
 
-		context.setTransform(1, 0, 0, 1, 0, 0);
-		context.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+		let cancelled = false;
+		let renderingTask: ReturnType<PDFPageProxy["render"]> | null = null;
+		let startTimeoutId: ReturnType<typeof setTimeout> | null = null;
+		let idleHandle: number | null = null;
 
+		// Hide while the (potentially staggered) render resolves so the user
+		// doesn't see a half-drawn page.
 		baseCanvas.style.visibility = "hidden";
 
-		let cancelled = false;
-		const viewport = pdfPageProxy.getViewport({ scale: baseScale });
+		const start = () => {
+			if (cancelled) return;
 
-		const renderingTask = pdfPageProxy.render({
-			canvas: baseCanvas,
-			canvasContext: context,
-			viewport,
-			background,
-		});
+			const viewport = pdfPageProxy.getViewport({ scale: baseScale });
 
-		renderingTask.promise
-			.then(() => {
-				if (cancelled) return;
-				baseCanvas.style.visibility = "";
-				markPageRendered(pageNumber);
-				if (typeof createImageBitmap !== "undefined") {
-					createImageBitmap(baseCanvas)
-						.then((bitmap) => {
-							if (cancelled) {
-								bitmap.close();
-								return;
-							}
-							setCachedBitmap(
-								docId,
-								pdfPageProxy,
-								baseScale,
-								background,
-								bitmap,
-							);
-						})
-						.catch(() => {});
-				}
-			})
-			.catch((error) => {
-				if (cancelled) return;
-				if (error?.name === "RenderingCancelledException") return;
-				baseCanvas.style.visibility = "";
-				console.error("PDF render error:", error);
+			if (supportsOffscreenCanvas) {
+				// GPU sprinkle: render into an OffscreenCanvas, then blit the
+				// resulting GPU-resident ImageBitmap to the display canvas. No
+				// GPU->CPU readback. The same bitmap is stored in the cache,
+				// so subsequent redraws reuse it.
+				const off = new OffscreenCanvas(targetW, targetH);
+				const offCtx = off.getContext("2d");
+				if (!offCtx) return;
+				renderingTask = pdfPageProxy.render({
+					// pdfjs types require HTMLCanvasElement + CanvasRenderingContext2D
+					// but accept OffscreenCanvas + OffscreenCanvasRenderingContext2D
+					// at runtime. Cast keeps the .d.ts clean.
+					canvas: off as unknown as HTMLCanvasElement,
+					canvasContext: offCtx as unknown as CanvasRenderingContext2D,
+					viewport,
+					background,
+				});
+				renderingTask.promise
+					.then(() => {
+						if (cancelled) return;
+						const bitmap = off.transferToImageBitmap();
+						applyDimsIfNeeded();
+						ctx.drawImage(bitmap, 0, 0);
+						baseCanvas.style.visibility = "";
+						markPageRendered(pageNumber);
+						setCachedBitmap(
+							docId,
+							pdfPageProxy,
+							baseScale,
+							background,
+							bitmap,
+						);
+					})
+					.catch((error) => {
+						if (cancelled) return;
+						if (error?.name === "RenderingCancelledException") return;
+						baseCanvas.style.visibility = "";
+						console.error("PDF render error:", error);
+					});
+				return;
+			}
+
+			// Fallback: render directly into the display canvas. Matches the
+			// pre-OffscreenCanvas behaviour.
+			applyDimsIfNeeded();
+			ctx.setTransform(1, 0, 0, 1, 0, 0);
+			renderingTask = pdfPageProxy.render({
+				canvas: baseCanvas,
+				canvasContext: ctx,
+				viewport,
+				background,
 			});
+			renderingTask.promise
+				.then(() => {
+					if (cancelled) return;
+					baseCanvas.style.visibility = "";
+					markPageRendered(pageNumber);
+					// Idle-defer the GPU->CPU readback so it doesn't steal the
+					// frame that just finished rendering.
+					if (typeof createImageBitmap === "undefined") return;
+					idleHandle = idle(() => {
+						idleHandle = null;
+						if (cancelled) return;
+						createImageBitmap(baseCanvas)
+							.then((bitmap) => {
+								if (cancelled) {
+									bitmap.close();
+									return;
+								}
+								setCachedBitmap(
+									docId,
+									pdfPageProxy,
+									baseScale,
+									background,
+									bitmap,
+								);
+							})
+							.catch(() => {});
+					}) as number;
+				})
+				.catch((error) => {
+					if (cancelled) return;
+					if (error?.name === "RenderingCancelledException") return;
+					baseCanvas.style.visibility = "";
+					console.error("PDF render error:", error);
+				});
+		};
+
+		const delay = stagger(Math.abs(pageNumber - (currentPage || pageNumber)));
+		if (delay === 0) {
+			start();
+		} else {
+			startTimeoutId = setTimeout(() => {
+				startTimeoutId = null;
+				start();
+			}, delay);
+		}
 
 		return () => {
 			cancelled = true;
-			void renderingTask.cancel();
+			if (startTimeoutId !== null) {
+				clearTimeout(startTimeoutId);
+				startTimeoutId = null;
+			}
+			if (idleHandle !== null) {
+				cancelIdle(idleHandle);
+				idleHandle = null;
+			}
+			void renderingTask?.cancel();
 		};
 	}, [
 		pdfPageProxy,
@@ -200,6 +336,10 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		pageNumber,
 		markPageRendered,
 		docId,
+		// currentPage only affects the initial stagger delay. Changes to
+		// it while we're already rendering shouldn't cancel the render, so
+		// we intentionally snapshot it via the closure above.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	]);
 
 	useEffect(() => {
@@ -210,6 +350,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 				canvas.width = 0;
 				canvas.height = 0;
 			}
+			lastCommittedRef.current = null;
 		};
 	}, [pageNumber, unmarkPageRendered]);
 

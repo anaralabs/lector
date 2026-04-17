@@ -10,6 +10,30 @@ import { usePDFPageNumber } from "../usePdfPageNumber";
 
 const DETAIL_RENDER_IDLE_MS = 80;
 
+// Feature check once at module scope.
+const supportsOffscreenCanvas =
+	typeof OffscreenCanvas !== "undefined" &&
+	(() => {
+		try {
+			const off = new OffscreenCanvas(1, 1);
+			return !!off.getContext("2d");
+		} catch {
+			return false;
+		}
+	})();
+const supportsBitmapRenderer =
+	typeof document !== "undefined" &&
+	(() => {
+		try {
+			const c = document.createElement("canvas");
+			return !!c.getContext("bitmaprenderer");
+		} catch {
+			return false;
+		}
+	})();
+const supportsGpuDetailHandoff =
+	supportsOffscreenCanvas && supportsBitmapRenderer;
+
 export const useDetailCanvasLayer = ({
 	background,
 	baseCanvasRef,
@@ -44,6 +68,30 @@ export const useDetailCanvasLayer = ({
 			proxy: pdfPageProxy,
 		};
 	}
+
+	// Once per canvas element, commit to a context type. `bitmaprenderer` and
+	// `2d` are mutually exclusive: the first `getContext` call wins.
+	const detailCtxRef = useRef<
+		| { kind: "gpu"; ctx: ImageBitmapRenderingContext }
+		| { kind: "2d"; ctx: CanvasRenderingContext2D }
+		| null
+	>(null);
+	const getDetailCtx = () => {
+		if (detailCtxRef.current) return detailCtxRef.current;
+		const canvas = detailCanvasRef.current;
+		if (!canvas) return null;
+		if (supportsGpuDetailHandoff) {
+			const ctx = canvas.getContext("bitmaprenderer");
+			if (ctx) {
+				detailCtxRef.current = { kind: "gpu", ctx };
+				return detailCtxRef.current;
+			}
+		}
+		const ctx = canvas.getContext("2d");
+		if (!ctx) return null;
+		detailCtxRef.current = { kind: "2d", ctx };
+		return detailCtxRef.current;
+	};
 
 	useLayoutEffect(() => {
 		const scrollContainer = viewportRef?.current;
@@ -131,19 +179,6 @@ export const useDetailCanvasLayer = ({
 			const actualWidth = visibleWidth * effectiveScale;
 			const actualHeight = visibleHeight * effectiveScale;
 
-			// Double-buffer: render to an offscreen buffer so the old detail
-			// canvas stays visible during the render (no flash to pixelated base)
-			const buffer = document.createElement("canvas");
-			buffer.width = actualWidth;
-			buffer.height = actualHeight;
-
-			const bufferCtx = buffer.getContext("2d");
-			if (!bufferCtx) {
-				return;
-			}
-
-			bufferCtx.setTransform(1, 0, 0, 1, 0, 0);
-
 			const transform = [
 				1,
 				0,
@@ -155,6 +190,62 @@ export const useDetailCanvasLayer = ({
 			const detailViewport = pdfPageProxy.getViewport({
 				scale: effectiveScale,
 			});
+
+			const ctxHandle = getDetailCtx();
+			if (!ctxHandle) return;
+
+			if (ctxHandle.kind === "gpu") {
+				// GPU sprinkle: render into OffscreenCanvas, transfer the
+				// resulting bitmap into the display canvas via bitmaprenderer.
+				// Zero-copy GPU handoff — replaces the previous buffer->drawImage
+				// dance entirely.
+				const off = new OffscreenCanvas(actualWidth, actualHeight);
+				const offCtx = off.getContext("2d");
+				if (!offCtx) return;
+				offCtx.setTransform(1, 0, 0, 1, 0, 0);
+
+				const currentRenderingTask = pdfPageProxy.render({
+					// pdfjs accepts OffscreenCanvas at runtime even though the
+					// types declare HTMLCanvasElement + CanvasRenderingContext2D.
+					canvas: off as unknown as HTMLCanvasElement,
+					canvasContext: offCtx as unknown as CanvasRenderingContext2D,
+					viewport: detailViewport,
+					background,
+					transform,
+				});
+				renderingTask = currentRenderingTask;
+
+				currentRenderingTask.promise
+					.then(() => {
+						if (renderingTask !== currentRenderingTask) return;
+						const bitmap = off.transferToImageBitmap();
+						detailCanvas.width = actualWidth;
+						detailCanvas.height = actualHeight;
+						detailCanvas.style.cssText = `${detailBaseStyle};display:block;opacity:1;width:${visibleWidth * zoom}px;height:${visibleHeight * zoom}px;transform-origin:center center;transform:translate(${visibleLeft * zoom}px,${visibleTop * zoom}px)`;
+						container.style.cssText = `transform:scale3d(${1 / zoom},${1 / zoom},1);transform-origin:0 0`;
+						ctxHandle.ctx.transferFromImageBitmap(bitmap);
+					})
+					.catch((error) => {
+						if (error.name === "RenderingCancelledException") return;
+						throw error;
+					})
+					.finally(() => {
+						if (renderingTask === currentRenderingTask) {
+							renderingTask = null;
+						}
+					});
+				return;
+			}
+
+			// 2D fallback — keep the original double-buffered flow for older
+			// browsers that don't support OffscreenCanvas + bitmaprenderer.
+			const buffer = document.createElement("canvas");
+			buffer.width = actualWidth;
+			buffer.height = actualHeight;
+
+			const bufferCtx = buffer.getContext("2d");
+			if (!bufferCtx) return;
+			bufferCtx.setTransform(1, 0, 0, 1, 0, 0);
 
 			const currentRenderingTask = pdfPageProxy.render({
 				canvas: buffer,
@@ -168,30 +259,20 @@ export const useDetailCanvasLayer = ({
 			currentRenderingTask.promise
 				.then(() => {
 					if (renderingTask !== currentRenderingTask) return;
-
-					// Swap: update the visible detail canvas in one go
 					detailCanvas.width = actualWidth;
 					detailCanvas.height = actualHeight;
 					detailCanvas.style.cssText = `${detailBaseStyle};display:block;opacity:1;width:${visibleWidth * zoom}px;height:${visibleHeight * zoom}px;transform-origin:center center;transform:translate(${visibleLeft * zoom}px,${visibleTop * zoom}px)`;
 					container.style.cssText = `transform:scale3d(${1 / zoom},${1 / zoom},1);transform-origin:0 0`;
-
-					const ctx = detailCanvas.getContext("2d");
-					if (ctx) {
-						ctx.drawImage(buffer, 0, 0);
-					}
+					ctxHandle.ctx.drawImage(buffer, 0, 0);
 				})
 				.catch((error) => {
-					if (error.name === "RenderingCancelledException") {
-						return;
-					}
-
+					if (error.name === "RenderingCancelledException") return;
 					throw error;
 				})
 				.finally(() => {
 					if (renderingTask === currentRenderingTask) {
 						renderingTask = null;
 					}
-					// Always release buffer — cancellations and stale tasks leak otherwise
 					buffer.width = 0;
 					buffer.height = 0;
 				});
@@ -201,40 +282,36 @@ export const useDetailCanvasLayer = ({
 			if (renderTimeoutId !== null) {
 				clearTimeout(renderTimeoutId);
 			}
-
-			// Cancel any in-progress render but keep the old detail canvas
-			// visible — stale sharpness is better than a flash to pixelated base
 			renderingTask?.cancel();
-
 			renderTimeoutId = setTimeout(() => {
 				renderTimeoutId = null;
 				renderDetailCanvas();
 			}, delay);
 		};
 
-		const unsubscribe = subscribeToViewportInvalidation(
-			scrollContainer,
-			scheduleRender,
-		);
+		// Only subscribe to scroll/resize invalidation when the detail canvas
+		// actually has work to do. At zoom <= 1 the renderer immediately
+		// short-circuits via `needsDetail`, so subscribing just wastes a rAF
+		// per page per scroll event.
+		const needsInvalidationSubscription = zoom > 1 && !isPinching;
+		const unsubscribe = needsInvalidationSubscription
+			? subscribeToViewportInvalidation(scrollContainer, scheduleRender)
+			: null;
 
 		if (zoom <= 1 || isPinching) {
-			// Synchronously hide — runs before paint (useLayoutEffect),
-			// so no stale rectangle flicker on zoom-out
 			hideDetailCanvas();
 		} else {
 			scheduleRender(0);
 		}
 
 		return () => {
-			unsubscribe();
+			unsubscribe?.();
 
 			if (renderTimeoutId !== null) {
 				clearTimeout(renderTimeoutId);
 			}
 
 			void renderingTask?.cancel();
-			// Don't destroy canvas content — stale detail is better than a
-			// white flash. The next effect run will hide or replace it.
 		};
 	}, [
 		pdfPageProxy,
@@ -246,8 +323,6 @@ export const useDetailCanvasLayer = ({
 		baseCanvasRef,
 	]);
 
-	// Release canvas memory for Safari on unmount only.
-	// Capture ref into local var — React clears refs before passive cleanup runs.
 	useEffect(() => {
 		const canvas = detailCanvasRef.current;
 		return () => {
@@ -255,6 +330,7 @@ export const useDetailCanvasLayer = ({
 				canvas.width = 1;
 				canvas.height = 1;
 			}
+			detailCtxRef.current = null;
 		};
 	}, []);
 

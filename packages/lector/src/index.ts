@@ -41,4 +41,9 @@ export {
 } from "./hooks/usePDFLinkService";
 export { usePDFPageNumber } from "./hooks/usePdfPageNumber";
 export { useSelectionDimensions } from "./hooks/useSelectionDimensions";
-export { type ColoredHighlight, type HighlightRect, usePdf } from "./internal";
+export {
+	type ColoredHighlight,
+	type HighlightRect,
+	usePdf,
+	usePdfStore,
+} from "./internal";
