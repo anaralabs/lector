@@ -21,41 +21,8 @@
 	"publishConfig": {
 		"access": "public"
 	},
-	"scripts": {
-		"dev": "tsup --watch --onSuccess 'yalc push'",
-		"prebuild": "rm -rf dist",
-		"build": "tsup",
-		"lint": "biome check .",
-		"format": "biome format --write .",
-		"postbuild": "size-limit --json > size.json",
-		"test": "pnpm run '/^test:/'",
-		"test:unit": "vitest run",
-		"test:size": "size-limit",
-		"prepack": "./scripts/prepack.sh"
-	},
-	"devDependencies": {
-		"@microsoft/api-extractor": "^7.48.1",
-		"@size-limit/preset-small-lib": "^11.1.6",
-		"@testing-library/react": "^16.0.0",
-		"@types/node": "^22.9.0",
-		"@types/react": "^19.0.1",
-		"@types/react-dom": "^19.0.2",
-		"@use-gesture/react": "^10.3.1",
-		"@vitejs/plugin-react": "^4.3.4",
-		"@vitest/browser": "^2.0.4",
-		"clsx": "^2.1.1",
-		"pdfjs-dist": "^5.5.207",
-		"playwright": "^1.45.3",
-		"react": "^19.1.1",
-		"size-limit": "^11.1.6",
-		"tsc-alias": "^1.8.10",
-		"tslib": "^2.6.3",
-		"tsup": "^8.3.5",
-		"typescript": "^5.5.3",
-		"vite": "^5.3.3",
-		"vitest": "^2.0.4",
-		"webdriverio": "^8.39.1"
-	},
+	"scripts": {},
+	"devDependencies": {},
 	"peerDependencies": {
 		"pdfjs-dist": "^5.5.207",
 		"react": ">=19"
