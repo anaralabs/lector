@@ -25,6 +25,20 @@ export interface usePDFDocumentParams {
 		proxy: PDFDocumentProxy;
 		source: Source;
 	}) => void;
+	/**
+	 * Called when the PDF fails to load (network error, corrupt file, etc.).
+	 * Without this, errors are silently logged to the console and the loader renders indefinitely.
+	 */
+	onError?: (error: Error) => void;
+	/**
+	 * Called when a password-protected PDF is opened.
+	 * Receives a callback to provide the password and a reason code
+	 * (NEED_PASSWORD for first attempt, INCORRECT_PASSWORD for retries).
+	 */
+	onPassword?: (
+		callback: (password: string) => void,
+		reason: number,
+	) => void;
 	initialRotation?: number;
 	isZoomFitWidth?: boolean;
 	zoom?: number;
@@ -77,6 +91,8 @@ function buildDocumentInitParams(
 
 export const usePDFDocumentContext = ({
 	onDocumentLoad,
+	onError,
+	onPassword,
 	source,
 	initialRotation = 0,
 	isZoomFitWidth,
@@ -145,6 +161,9 @@ export const usePDFDocumentContext = ({
 					loadingTask = getDocument(
 						buildDocumentInitParams(source, documentOptionsRef.current),
 					);
+					if (onPassword) {
+						loadingTask.onPassword = onPassword;
+					}
 					loadingTask.onProgress = (progressEvent: OnProgressParameters) => {
 						if (progressEvent.loaded === progressEvent.total) {
 							return;
@@ -169,7 +188,11 @@ export const usePDFDocumentContext = ({
 								return;
 							}
 
-							console.error("Error loading PDF document", error);
+							if (onError) {
+								onError(error);
+							} else {
+								console.error("Error loading PDF document", error);
+							}
 						});
 				})
 				.catch((error) => {
@@ -177,7 +200,11 @@ export const usePDFDocumentContext = ({
 						return;
 					}
 
-					console.error("Error loading PDF.js", error);
+					if (onError) {
+						onError(error);
+					} else {
+						console.error("Error loading PDF.js", error);
+					}
 				});
 
 			return () => {
