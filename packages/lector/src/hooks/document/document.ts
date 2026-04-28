@@ -11,7 +11,7 @@ import type {
 import { useEffect, useRef, useState } from "react";
 
 import type { InitialPDFState, ZoomOptions } from "../../internal";
-import { loadPdfJs } from "../../lib/pdfjs";
+import { getDefaultPdfJsAssetUrls, loadPdfJs } from "../../lib/pdfjs";
 
 export interface usePDFDocumentParams {
 	/**
@@ -46,6 +46,7 @@ export type Source =
 
 function buildDocumentInitParams(
 	source: Source,
+	pdfJsVersion: string,
 	overrides?: Partial<DocumentInitParameters>,
 ): DocumentInitParameters {
 	let params: DocumentInitParameters;
@@ -57,6 +58,8 @@ function buildDocumentInitParams(
 	} else {
 		params = { ...source };
 	}
+
+	const assetUrls = getDefaultPdfJsAssetUrls(pdfJsVersion);
 
 	const defaults: Partial<DocumentInitParameters> = {
 		// Skip the slow _guessMax binary-search auto-detection of max canvas area.
@@ -70,6 +73,21 @@ function buildDocumentInitParams(
 		// Explicitly opt-in to OffscreenCanvas in the worker for image processing.
 		// Already the browser default, but being explicit avoids edge cases.
 		isOffscreenCanvasSupported: true,
+		// PDF.js 5.x split out auxiliary resources that are loaded on demand.
+		// Without these URLs, several content types render as blank pages
+		// because pdf.js silently fails to load decoders / fonts / colour
+		// profiles. The most visible symptom: scanned PDFs with JPEG2000 or
+		// JBIG2 images (Internet Archive, government archives) render as
+		// completely blank pages — every image fails with
+		// "OpenJPEG failed to initialize". Defaulting these to a versioned
+		// jsDelivr URL gets the viewer working out of the box; production
+		// deployments should self-host and pass overrides via
+		// `documentOptions`.
+		wasmUrl: assetUrls.wasmUrl,
+		cMapUrl: assetUrls.cMapUrl,
+		cMapPacked: true,
+		standardFontDataUrl: assetUrls.standardFontDataUrl,
+		iccUrl: assetUrls.iccUrl,
 	};
 
 	return { ...defaults, ...params, ...overrides };
@@ -137,13 +155,17 @@ export const usePDFDocumentContext = ({
 			let isDisposed = false;
 
 			void loadPdfJs()
-				.then(({ getDocument }) => {
+				.then(({ getDocument, version }) => {
 					if (isDisposed) {
 						return;
 					}
 
 					loadingTask = getDocument(
-						buildDocumentInitParams(source, documentOptionsRef.current),
+						buildDocumentInitParams(
+							source,
+							version,
+							documentOptionsRef.current,
+						),
 					);
 					loadingTask.onProgress = (progressEvent: OnProgressParameters) => {
 						if (progressEvent.loaded === progressEvent.total) {
