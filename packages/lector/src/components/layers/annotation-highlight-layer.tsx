@@ -146,15 +146,21 @@ export const AnnotationHighlightLayer = ({
 					(u) => u.pageNumber === pageNumber,
 				);
 
-				if (pageHighlights.length === 0) return null;
+				// Skip when neither highlights nor underlines have anything
+				// for this page, otherwise an annotation matched on
+				// underlines alone would silently drop those underlines.
+				if (
+					pageHighlights.length === 0 &&
+					(!pageUnderlines || pageUnderlines.length === 0)
+				) {
+					return null;
+				}
 
 				// The comment icon should only show once per annotation, on
 				// the first (lowest-numbered) page that actually has any of
 				// its rectangles, so multi-page annotations don't duplicate
 				// the icon on every page they touch.
-				const firstPageWithRects = annotation.highlights.reduce<
-					number | null
-				>(
+				const firstPageWithRects = annotation.highlights.reduce<number | null>(
 					(min, h) => (min === null || h.pageNumber < min ? h.pageNumber : min),
 					null,
 				);
