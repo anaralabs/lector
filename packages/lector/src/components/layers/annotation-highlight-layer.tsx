@@ -54,8 +54,19 @@ export const AnnotationHighlightLayer = ({
 	const pageNumber = usePDFPageNumber();
 	const isPageRendered = usePdf((state) => !!state.renderedPages[pageNumber]);
 
+	// An annotation belongs to this page if either its top-level pageNumber
+	// matches OR any of its highlight/underline rectangles are on this page.
+	// This is what lets a single annotation span two pages and still render
+	// the right rectangles on each page (without spilling page-2 rects onto
+	// page-1's coordinate space and vice versa).
 	const pageAnnotations = useMemo(
-		() => annotations.filter((a) => a.pageNumber === pageNumber),
+		() =>
+			annotations.filter(
+				(a) =>
+					a.pageNumber === pageNumber ||
+					a.highlights.some((h) => h.pageNumber === pageNumber) ||
+					a.underlines?.some((u) => u.pageNumber === pageNumber),
+			),
 		[annotations, pageNumber],
 	);
 
@@ -125,6 +136,30 @@ export const AnnotationHighlightLayer = ({
 	return (
 		<div className={className} style={style}>
 			{pageAnnotations.map((annotation) => {
+				// Only render the rectangles that belong to this page. For a
+				// multi-page annotation each page renders its own slice while
+				// still sharing the same id / color / comment.
+				const pageHighlights = annotation.highlights.filter(
+					(h) => h.pageNumber === pageNumber,
+				);
+				const pageUnderlines = annotation.underlines?.filter(
+					(u) => u.pageNumber === pageNumber,
+				);
+
+				if (pageHighlights.length === 0) return null;
+
+				// The comment icon should only show once per annotation, on
+				// the first (lowest-numbered) page that actually has any of
+				// its rectangles, so multi-page annotations don't duplicate
+				// the icon on every page they touch.
+				const firstPageWithRects = annotation.highlights.reduce<
+					number | null
+				>(
+					(min, h) => (min === null || h.pageNumber < min ? h.pageNumber : min),
+					null,
+				);
+				const showCommentIcon = firstPageWithRects === pageNumber;
+
 				return (
 					<AnnotationTooltip
 						key={annotation.id}
@@ -152,7 +187,7 @@ export const AnnotationHighlightLayer = ({
 							style={{ cursor: "pointer" }}
 							onClick={() => onAnnotationClick?.(annotation)}
 						>
-							{annotation.highlights.map((highlight, index) => (
+							{pageHighlights.map((highlight, index) => (
 								<div
 									key={`highlight-${
 										// biome-ignore lint/suspicious/noArrayIndexKey: <index>
@@ -171,7 +206,7 @@ export const AnnotationHighlightLayer = ({
 								/>
 							))}
 							{annotation.comment &&
-								annotation.underlines?.map((rect, index) => (
+								pageUnderlines?.map((rect, index) => (
 									<div
 										key={`underline-${
 											// biome-ignore lint/suspicious/noArrayIndexKey: <index>
@@ -190,12 +225,12 @@ export const AnnotationHighlightLayer = ({
 									/>
 								))}
 
-							{annotation.comment && commmentIcon && (
+							{annotation.comment && commmentIcon && showCommentIcon && (
 								<div
 									className={commentIconClassName}
 									style={{
 										position: "absolute",
-										...getCommentIconPosition(annotation.highlights),
+										...getCommentIconPosition(pageHighlights),
 										color: "gray",
 										cursor: "pointer",
 										zIndex: 10,

@@ -22,8 +22,16 @@ export const ColoredHighlightLayer = ({
 	);
 	const addColoredHighlight = usePdf((state) => state.addColoredHighlight);
 
+	// Match a colored highlight to this page if its top-level pageNumber
+	// matches OR any of its rectangles are on this page. This keeps multi-page
+	// selections rendered correctly on each page they touch.
 	const pageHighlights = useMemo(
-		() => highlights.filter((s) => s.pageNumber === pageNumber),
+		() =>
+			highlights.filter(
+				(s) =>
+					s.pageNumber === pageNumber ||
+					s.rectangles.some((r) => r.pageNumber === pageNumber),
+			),
 		[highlights, pageNumber],
 	);
 

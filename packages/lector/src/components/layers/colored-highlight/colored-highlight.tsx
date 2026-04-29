@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
+import { usePDFPageNumber } from "../../../hooks/usePdfPageNumber";
 import { type ColoredHighlight, usePdf } from "../../../internal";
 import {
 	getEndOfHighlight,
@@ -17,10 +18,37 @@ export const ColoredHighlightComponent = ({
 		(state) => state.deleteColoredHighlight,
 	);
 	const [showButton, setShowButton] = useState(false);
+	const pageNumber = usePDFPageNumber();
+
+	// Only render the rectangles that live on the current page; this lets a
+	// single ColoredHighlight that spans pages render correctly on each.
+	const pageRectangles = useMemo(
+		() => selection.rectangles.filter((r) => r.pageNumber === pageNumber),
+		[selection.rectangles, pageNumber],
+	);
+
+	// Only show the delete button on the first page that contains any of the
+	// highlight's rectangles, otherwise we'd duplicate it across pages.
+	const firstPageWithRects = useMemo(
+		() =>
+			selection.rectangles.reduce<number | null>(
+				(min, r) => (min === null || r.pageNumber < min ? r.pageNumber : min),
+				null,
+			),
+		[selection.rectangles],
+	);
+	const canShowButton = firstPageWithRects === pageNumber;
+
+	if (pageRectangles.length === 0) return null;
+
+	const buttonAnchor: ColoredHighlight = {
+		...selection,
+		rectangles: pageRectangles,
+	};
 
 	return (
 		<div className="colored-highlight">
-			{selection.rectangles.map((rect, index) => (
+			{pageRectangles.map((rect, index) => (
 				<span
 					key={`${selection.uuid}-${index}`}
 					onClick={() => setShowButton(!showButton)}
@@ -40,7 +68,7 @@ export const ColoredHighlightComponent = ({
 					}}
 				/>
 			))}
-			{showButton && (
+			{showButton && canShowButton && (
 				<button
 					key={`${selection.uuid}-delete-button`}
 					style={{
@@ -51,8 +79,8 @@ export const ColoredHighlightComponent = ({
 						cursor: "pointer",
 						boxShadow: "2px 2px 5px black",
 						position: "absolute",
-						top: getMidHeightOfHighlightLine(selection),
-						left: getEndOfHighlight(selection),
+						top: getMidHeightOfHighlightLine(buttonAnchor),
+						left: getEndOfHighlight(buttonAnchor),
 						zIndex: 30,
 						transform: "translateY(-50%)",
 					}}
