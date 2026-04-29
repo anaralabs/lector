@@ -219,15 +219,24 @@ export const AnnotationHighlightLayer = ({
 								/>
 							))}
 
-						{annotation.comment &&
-							commmentIcon &&
-							showCommentIcon &&
-							pageHighlights.length > 0 && (
+						{(() => {
+							if (!annotation.comment || !commmentIcon || !showCommentIcon) {
+								return null;
+							}
+							// Anchor the icon to whichever rects exist on the
+							// primary page — prefer highlights (the typical
+							// case), fall back to underlines so an annotation
+							// whose primary page has only underlines still
+							// shows its comment icon.
+							const anchorRects =
+								pageHighlights.length > 0 ? pageHighlights : pageUnderlines;
+							if (!anchorRects || anchorRects.length === 0) return null;
+							return (
 								<div
 									className={commentIconClassName}
 									style={{
 										position: "absolute",
-										...getCommentIconPosition(pageHighlights),
+										...getCommentIconPosition(anchorRects),
 										color: "gray",
 										cursor: "pointer",
 										zIndex: 10,
@@ -236,7 +245,8 @@ export const AnnotationHighlightLayer = ({
 								>
 									{commmentIcon}
 								</div>
-							)}
+							);
+						})()}
 					</div>
 				);
 
