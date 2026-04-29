@@ -27,20 +27,12 @@ export const ColoredHighlightComponent = ({
 		[selection.rectangles, pageNumber],
 	);
 
-	// Only show the delete button on the first page that contains any of the
-	// highlight's rectangles, otherwise we'd duplicate it across pages.
-	const firstPageWithRects = useMemo(
-		() =>
-			selection.rectangles.reduce<number | null>(
-				(min, r) => (min === null || r.pageNumber < min ? r.pageNumber : min),
-				null,
-			),
-		[selection.rectangles],
-	);
-	const canShowButton = firstPageWithRects === pageNumber;
-
 	if (pageRectangles.length === 0) return null;
 
+	// `showButton` is local per-page state, so the delete button shows next to
+	// whichever page-slice the user actually clicked. The button anchors to
+	// the rectangles on _this_ page so it's always reachable, and clicking it
+	// removes the entire (possibly multi-page) highlight.
 	const buttonAnchor: ColoredHighlight = {
 		...selection,
 		rectangles: pageRectangles,
@@ -68,7 +60,7 @@ export const ColoredHighlightComponent = ({
 					}}
 				/>
 			))}
-			{showButton && canShowButton && (
+			{showButton && (
 				<button
 					key={`${selection.uuid}-delete-button`}
 					style={{

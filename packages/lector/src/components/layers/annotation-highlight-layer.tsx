@@ -156,15 +156,98 @@ export const AnnotationHighlightLayer = ({
 					return null;
 				}
 
-				// The comment icon should only show once per annotation, on
-				// the first (lowest-numbered) page that actually has any of
-				// its rectangles, so multi-page annotations don't duplicate
-				// the icon on every page they touch.
-				const firstPageWithRects = annotation.highlights.reduce<number | null>(
-					(min, h) => (min === null || h.pageNumber < min ? h.pageNumber : min),
-					null,
+				// Compute the lowest page that contains any rectangle (highlights
+				// or underlines). The annotation's "primary" rendering page is
+				// the first page with any rect; that's where the comment icon
+				// shows and where the AnnotationTooltip is mounted.
+				const minPage = (rects: { pageNumber: number }[] | undefined) =>
+					rects?.reduce<number | null>(
+						(m, r) => (m === null || r.pageNumber < m ? r.pageNumber : m),
+						null,
+					) ?? null;
+				const minHighlightPage = minPage(annotation.highlights);
+				const minUnderlinePage = minPage(annotation.underlines);
+				const firstPageWithRects =
+					minHighlightPage === null
+						? minUnderlinePage
+						: minUnderlinePage === null
+							? minHighlightPage
+							: Math.min(minHighlightPage, minUnderlinePage);
+				const isPrimaryPage = firstPageWithRects === pageNumber;
+				const showCommentIcon = isPrimaryPage;
+
+				const rectsContent = (
+					<div
+						style={{ cursor: "pointer" }}
+						onClick={() => onAnnotationClick?.(annotation)}
+					>
+						{pageHighlights.map((highlight, index) => (
+							<div
+								key={`highlight-${
+									// biome-ignore lint/suspicious/noArrayIndexKey: <index>
+									index
+								}`}
+								className={highlightClassName}
+								style={{
+									position: "absolute",
+									top: highlight.top,
+									left: highlight.left,
+									width: highlight.width,
+									height: highlight.height,
+									backgroundColor: annotation.color,
+								}}
+								data-highlight-id={annotation.id}
+							/>
+						))}
+						{annotation.comment &&
+							pageUnderlines?.map((rect, index) => (
+								<div
+									key={`underline-${
+										// biome-ignore lint/suspicious/noArrayIndexKey: <index>
+										index
+									}`}
+									className={underlineClassName}
+									style={{
+										position: "absolute",
+										top: rect.top,
+										left: rect.left,
+										width: rect.width,
+										height: 1.1,
+										backgroundColor: annotation.borderColor,
+									}}
+									data-comment-id={annotation.id}
+								/>
+							))}
+
+						{annotation.comment &&
+							commmentIcon &&
+							showCommentIcon &&
+							pageHighlights.length > 0 && (
+								<div
+									className={commentIconClassName}
+									style={{
+										position: "absolute",
+										...getCommentIconPosition(pageHighlights),
+										color: "gray",
+										cursor: "pointer",
+										zIndex: 10,
+									}}
+									data-comment-icon-id={annotation.id}
+								>
+									{commmentIcon}
+								</div>
+							)}
+					</div>
 				);
-				const showCommentIcon = firstPageWithRects === pageNumber;
+
+				// Only the primary page mounts the AnnotationTooltip, otherwise
+				// each page would create its own portal and we'd render the
+				// tooltip twice when the user has both pages on screen.
+				// Secondary pages still render their rect slice with the click
+				// handler so focusing the annotation still works.
+				if (!isPrimaryPage) {
+					return <div key={annotation.id}>{rectsContent}</div>;
+				}
 
 				return (
 					<AnnotationTooltip
@@ -189,64 +272,7 @@ export const AnnotationHighlightLayer = ({
 							onClose: () => {},
 						})}
 					>
-						<div
-							style={{ cursor: "pointer" }}
-							onClick={() => onAnnotationClick?.(annotation)}
-						>
-							{pageHighlights.map((highlight, index) => (
-								<div
-									key={`highlight-${
-										// biome-ignore lint/suspicious/noArrayIndexKey: <index>
-										index
-									}`}
-									className={highlightClassName}
-									style={{
-										position: "absolute",
-										top: highlight.top,
-										left: highlight.left,
-										width: highlight.width,
-										height: highlight.height,
-										backgroundColor: annotation.color,
-									}}
-									data-highlight-id={annotation.id}
-								/>
-							))}
-							{annotation.comment &&
-								pageUnderlines?.map((rect, index) => (
-									<div
-										key={`underline-${
-											// biome-ignore lint/suspicious/noArrayIndexKey: <index>
-											index
-										}`}
-										className={underlineClassName}
-										style={{
-											position: "absolute",
-											top: rect.top,
-											left: rect.left,
-											width: rect.width,
-											height: 1.1,
-											backgroundColor: annotation.borderColor,
-										}}
-										data-comment-id={annotation.id}
-									/>
-								))}
-
-							{annotation.comment && commmentIcon && showCommentIcon && (
-								<div
-									className={commentIconClassName}
-									style={{
-										position: "absolute",
-										...getCommentIconPosition(pageHighlights),
-										color: "gray",
-										cursor: "pointer",
-										zIndex: 10,
-									}}
-									data-comment-icon-id={annotation.id}
-								>
-									{commmentIcon}
-								</div>
-							)}
-						</div>
+						{rectsContent}
 					</AnnotationTooltip>
 				);
 			})}
