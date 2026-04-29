@@ -9,6 +9,8 @@ type CollapsibleSelection = {
 	isCollapsed: boolean;
 };
 
+type TextNodeRect = { rect: DOMRect; element: Element | null };
+
 /**
  * Collect per-line client rects for the selection by walking the text nodes
  * inside the range and getting rects for each text node sub-range.
@@ -18,15 +20,24 @@ type CollapsibleSelection = {
  * selection spans two PDF pages, those wrappers contribute full-page-sized
  * rectangles, which then get rendered as giant "highlight the whole page"
  * boxes. Iterating only text nodes guarantees we get tight line-sized rects.
+ *
+ * Each rect is paired with the parent element of its source text node so
+ * downstream callers can do per-rect DOM checks (e.g. super/sub detection)
+ * without relying on `elementFromPoint`, which fails for off-viewport rects
+ * in multi-page selections.
  */
-const getTextNodeClientRects = (range: Range): DOMRect[] => {
+const getTextNodeClientRects = (range: Range): TextNodeRect[] => {
 	const root = range.commonAncestorContainer;
 	const ownerDoc = root.ownerDocument ?? document;
 
 	// If the common ancestor is itself a text node (single-node selection),
 	// just clone the range and return its rects directly.
 	if (root.nodeType === Node.TEXT_NODE) {
-		return Array.from(range.getClientRects());
+		const parentElement = (root as Text).parentElement;
+		return Array.from(range.getClientRects()).map((rect) => ({
+			rect,
+			element: parentElement,
+		}));
 	}
 
 	const walker = ownerDoc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
@@ -47,10 +58,11 @@ const getTextNodeClientRects = (range: Range): DOMRect[] => {
 		},
 	});
 
-	const rects: DOMRect[] = [];
+	const results: TextNodeRect[] = [];
 	let current = walker.nextNode();
 	while (current) {
 		const textNode = current as Text;
+		const parentElement = textNode.parentElement;
 		const length = textNode.nodeValue?.length ?? 0;
 		const isStartNode = textNode === range.startContainer;
 		const isEndNode = textNode === range.endContainer;
@@ -64,7 +76,7 @@ const getTextNodeClientRects = (range: Range): DOMRect[] => {
 				const subRects = sub.getClientRects();
 				for (let i = 0; i < subRects.length; i++) {
 					const r = subRects[i];
-					if (r) rects.push(r);
+					if (r) results.push({ rect: r, element: parentElement });
 				}
 			} catch {
 				// Ignore broken ranges (e.g. detached nodes during virtualization)
@@ -75,7 +87,7 @@ const getTextNodeClientRects = (range: Range): DOMRect[] => {
 		current = walker.nextNode();
 	}
 
-	return rects;
+	return results;
 };
 
 const shouldMergeRects = (
@@ -280,9 +292,12 @@ export const useSelectionDimensions = () => {
 
 		// Use per-text-node rects so multi-page selections don't pick up the
 		// block-level rects of `.textLayer` / page wrappers (which would
-		// otherwise produce giant full-page highlights).
+		// otherwise produce giant full-page highlights). Each rect carries
+		// its source element so we can do DOM checks (super/sub detection)
+		// without falling back to elementFromPoint, which is null for any
+		// rect outside the current viewport.
 		const clientRects = getTextNodeClientRects(range).filter(
-			(rect) => rect.width > 2 && rect.height > 2,
+			({ rect }) => rect.width > 2 && rect.height > 2,
 		);
 
 		// Pre-compute every visible text layer + its viewport rect once so we
@@ -325,7 +340,7 @@ export const useSelectionDimensions = () => {
 			return null;
 		};
 
-		clientRects.forEach((clientRect) => {
+		clientRects.forEach(({ rect: clientRect, element: sourceElement }) => {
 			const textLayer = layerForRect(clientRect);
 			if (!textLayer) return;
 
@@ -340,12 +355,13 @@ export const useSelectionDimensions = () => {
 				clientRect.right <= layerRect.right + 1;
 			if (!fitsInLayer) return;
 
-			// elementFromPoint result for super/sub detection — cheap because
-			// only invoked when the layer is on screen.
-			const element = document.elementFromPoint(
-				clientRect.left + clientRect.width / 2,
-				clientRect.top + clientRect.height / 2,
-			);
+			// Use the rect's source text-node parent element for super/sub
+			// detection. This works regardless of whether the rect is inside
+			// the current viewport (unlike elementFromPoint, which returns
+			// null for off-screen coordinates and would silently disable
+			// super/sub detection on the off-screen page of a multi-page
+			// selection).
+			const element = sourceElement;
 
 			// Check if the element is part of a superscript or subscript
 			const isSuperOrSubScript = (el: Element | null): boolean => {
@@ -644,14 +660,14 @@ export const useSelectionDimensions = () => {
 		// Use per-text-node rects so multi-page selections don't pick up the
 		// block-level rects of `.textLayer` / page wrappers.
 		const clientRects = getTextNodeClientRects(range).filter(
-			(rect) => rect.width > 2 && rect.height > 2,
+			({ rect }) => rect.width > 2 && rect.height > 2,
 		);
 
 		const textLayerEntries = Array.from(
 			document.querySelectorAll<HTMLElement>(".textLayer"),
 		).map((el) => ({ el, rect: el.getBoundingClientRect() }));
 
-		clientRects.forEach((clientRect) => {
+		clientRects.forEach(({ rect: clientRect }) => {
 			const cx = clientRect.left + clientRect.width / 2;
 			const cy = clientRect.top + clientRect.height / 2;
 			// Geometric match works for off-screen rects too (multi-page case
