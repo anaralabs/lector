@@ -25,7 +25,7 @@ export const Root = forwardRef(
 			zoomOptions,
 			documentOptions,
 			...props
-		}: HTMLProps<HTMLDivElement> &
+		}: Omit<HTMLProps<HTMLDivElement>, "onError"> &
 			usePDFDocumentParams & {
 				loader?: ReactNode;
 			},
