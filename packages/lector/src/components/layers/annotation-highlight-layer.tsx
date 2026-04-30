@@ -55,7 +55,13 @@ export const AnnotationHighlightLayer = ({
 	const isPageRendered = usePdf((state) => !!state.renderedPages[pageNumber]);
 
 	const pageAnnotations = useMemo(
-		() => annotations.filter((a) => a.pageNumber === pageNumber),
+		() =>
+			annotations.filter(
+				(a) =>
+					a.pageNumber === pageNumber ||
+					a.highlights.some((h) => h.pageNumber === pageNumber) ||
+					a.underlines?.some((u) => u.pageNumber === pageNumber),
+			),
 		[annotations, pageNumber],
 	);
 
@@ -125,6 +131,111 @@ export const AnnotationHighlightLayer = ({
 	return (
 		<div className={className} style={style}>
 			{pageAnnotations.map((annotation) => {
+				const pageHighlights = annotation.highlights.filter(
+					(h) => h.pageNumber === pageNumber,
+				);
+				const pageUnderlines = annotation.underlines?.filter(
+					(u) => u.pageNumber === pageNumber,
+				);
+
+				if (
+					pageHighlights.length === 0 &&
+					(!pageUnderlines || pageUnderlines.length === 0)
+				) {
+					return null;
+				}
+
+				// Primary page = lowest page with any rect; owns icon + tooltip.
+				const minPage = (rects: { pageNumber: number }[] | undefined) =>
+					rects?.reduce<number | null>(
+						(m, r) => (m === null || r.pageNumber < m ? r.pageNumber : m),
+						null,
+					) ?? null;
+				const minHighlightPage = minPage(annotation.highlights);
+				const minUnderlinePage = minPage(annotation.underlines);
+				const firstPageWithRects =
+					minHighlightPage === null
+						? minUnderlinePage
+						: minUnderlinePage === null
+							? minHighlightPage
+							: Math.min(minHighlightPage, minUnderlinePage);
+				const isPrimaryPage = firstPageWithRects === pageNumber;
+				const showCommentIcon = isPrimaryPage;
+
+				const rectsContent = (
+					<div
+						style={{ cursor: "pointer" }}
+						onClick={() => onAnnotationClick?.(annotation)}
+					>
+						{pageHighlights.map((highlight, index) => (
+							<div
+								key={`highlight-${
+									// biome-ignore lint/suspicious/noArrayIndexKey: <index>
+									index
+								}`}
+								className={highlightClassName}
+								style={{
+									position: "absolute",
+									top: highlight.top,
+									left: highlight.left,
+									width: highlight.width,
+									height: highlight.height,
+									backgroundColor: annotation.color,
+								}}
+								data-highlight-id={annotation.id}
+							/>
+						))}
+						{annotation.comment &&
+							pageUnderlines?.map((rect, index) => (
+								<div
+									key={`underline-${
+										// biome-ignore lint/suspicious/noArrayIndexKey: <index>
+										index
+									}`}
+									className={underlineClassName}
+									style={{
+										position: "absolute",
+										top: rect.top,
+										left: rect.left,
+										width: rect.width,
+										height: 1.1,
+										backgroundColor: annotation.borderColor,
+									}}
+									data-comment-id={annotation.id}
+								/>
+							))}
+
+						{(() => {
+							if (!annotation.comment || !commmentIcon || !showCommentIcon) {
+								return null;
+							}
+							const anchorRects =
+								pageHighlights.length > 0 ? pageHighlights : pageUnderlines;
+							if (!anchorRects || anchorRects.length === 0) return null;
+							return (
+								<div
+									className={commentIconClassName}
+									style={{
+										position: "absolute",
+										...getCommentIconPosition(anchorRects),
+										color: "gray",
+										cursor: "pointer",
+										zIndex: 10,
+									}}
+									data-comment-icon-id={annotation.id}
+								>
+									{commmentIcon}
+								</div>
+							);
+						})()}
+					</div>
+				);
+
+				// Only the primary page mounts the tooltip portal.
+				if (!isPrimaryPage) {
+					return <div key={annotation.id}>{rectsContent}</div>;
+				}
+
 				return (
 					<AnnotationTooltip
 						key={annotation.id}
@@ -148,64 +259,7 @@ export const AnnotationHighlightLayer = ({
 							onClose: () => {},
 						})}
 					>
-						<div
-							style={{ cursor: "pointer" }}
-							onClick={() => onAnnotationClick?.(annotation)}
-						>
-							{annotation.highlights.map((highlight, index) => (
-								<div
-									key={`highlight-${
-										// biome-ignore lint/suspicious/noArrayIndexKey: <index>
-										index
-									}`}
-									className={highlightClassName}
-									style={{
-										position: "absolute",
-										top: highlight.top,
-										left: highlight.left,
-										width: highlight.width,
-										height: highlight.height,
-										backgroundColor: annotation.color,
-									}}
-									data-highlight-id={annotation.id}
-								/>
-							))}
-							{annotation.comment &&
-								annotation.underlines?.map((rect, index) => (
-									<div
-										key={`underline-${
-											// biome-ignore lint/suspicious/noArrayIndexKey: <index>
-											index
-										}`}
-										className={underlineClassName}
-										style={{
-											position: "absolute",
-											top: rect.top,
-											left: rect.left,
-											width: rect.width,
-											height: 1.1,
-											backgroundColor: annotation.borderColor,
-										}}
-										data-comment-id={annotation.id}
-									/>
-								))}
-
-							{annotation.comment && commmentIcon && (
-								<div
-									className={commentIconClassName}
-									style={{
-										position: "absolute",
-										...getCommentIconPosition(annotation.highlights),
-										color: "gray",
-										cursor: "pointer",
-										zIndex: 10,
-									}}
-									data-comment-icon-id={annotation.id}
-								>
-									{commmentIcon}
-								</div>
-							)}
-						</div>
+						{rectsContent}
 					</AnnotationTooltip>
 				);
 			})}

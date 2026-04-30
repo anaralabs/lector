@@ -23,7 +23,12 @@ export const ColoredHighlightLayer = ({
 	const addColoredHighlight = usePdf((state) => state.addColoredHighlight);
 
 	const pageHighlights = useMemo(
-		() => highlights.filter((s) => s.pageNumber === pageNumber),
+		() =>
+			highlights.filter(
+				(s) =>
+					s.pageNumber === pageNumber ||
+					s.rectangles.some((r) => r.pageNumber === pageNumber),
+			),
 		[highlights, pageNumber],
 	);
 

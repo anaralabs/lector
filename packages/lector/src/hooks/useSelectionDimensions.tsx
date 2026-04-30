@@ -9,6 +9,142 @@ type CollapsibleSelection = {
 	isCollapsed: boolean;
 };
 
+type TextNodeRect = { rect: DOMRect; element: Element | null };
+
+type MappedSelectionRect = {
+	clientRect: DOMRect;
+	sourceElement: Element | null;
+	layer: HTMLElement;
+	layerRect: DOMRect;
+	pageNumber: number;
+};
+
+/**
+ * Per-text-node client rects for a selection. Avoids the block-level rects
+ * that `range.getClientRects()` returns for `.textLayer` / page wrappers,
+ * which would render as full-page highlights on multi-page selections.
+ */
+const getTextNodeClientRects = (range: Range): TextNodeRect[] => {
+	const root = range.commonAncestorContainer;
+	const ownerDoc = root.ownerDocument ?? document;
+
+	if (root.nodeType === Node.TEXT_NODE) {
+		const parentElement = (root as Text).parentElement;
+		return Array.from(range.getClientRects()).map((rect) => ({
+			rect,
+			element: parentElement,
+		}));
+	}
+
+	const walker = ownerDoc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+		acceptNode(node) {
+			if (!node.nodeValue || node.nodeValue.length === 0) {
+				return NodeFilter.FILTER_REJECT;
+			}
+			try {
+				return range.intersectsNode(node)
+					? NodeFilter.FILTER_ACCEPT
+					: NodeFilter.FILTER_REJECT;
+			} catch {
+				return NodeFilter.FILTER_REJECT;
+			}
+		},
+	});
+
+	const results: TextNodeRect[] = [];
+	let current = walker.nextNode();
+	while (current) {
+		const textNode = current as Text;
+		const parentElement = textNode.parentElement;
+		const length = textNode.nodeValue?.length ?? 0;
+		const isStartNode = textNode === range.startContainer;
+		const isEndNode = textNode === range.endContainer;
+		const start = isStartNode ? range.startOffset : 0;
+		const end = isEndNode ? range.endOffset : length;
+		if (end > start) {
+			const sub = ownerDoc.createRange();
+			try {
+				sub.setStart(textNode, start);
+				sub.setEnd(textNode, end);
+				const subRects = sub.getClientRects();
+				for (let i = 0; i < subRects.length; i++) {
+					const r = subRects[i];
+					if (r) results.push({ rect: r, element: parentElement });
+				}
+			} catch {
+			} finally {
+				sub.detach?.();
+			}
+		}
+		current = walker.nextNode();
+	}
+
+	return results;
+};
+
+/**
+ * Map each selection rect to the `.textLayer` it belongs to. Geometric
+ * containment first (works for off-viewport rects, where elementFromPoint
+ * returns null), with a 5-point elementFromPoint fallback.
+ */
+const mapSelectionRectsToLayers = (range: Range): MappedSelectionRect[] => {
+	const clientRects = getTextNodeClientRects(range).filter(
+		({ rect }) => rect.width > 2 && rect.height > 2,
+	);
+
+	const textLayerEntries = Array.from(
+		document.querySelectorAll<HTMLElement>(".textLayer"),
+	).map((el) => ({ el, rect: el.getBoundingClientRect() }));
+
+	const layerForRect = (rect: DOMRect): HTMLElement | null => {
+		const cx = rect.left + rect.width / 2;
+		const cy = rect.top + rect.height / 2;
+		const geomMatch = textLayerEntries.find(
+			({ rect: lr }) =>
+				cx >= lr.left - 1 &&
+				cx <= lr.right + 1 &&
+				cy >= lr.top - 1 &&
+				cy <= lr.bottom + 1,
+		);
+		if (geomMatch) return geomMatch.el;
+
+		const points: Array<[number, number]> = [
+			[rect.left + 1, cy],
+			[cx, cy],
+			[rect.right - 1, cy],
+			[cx, rect.top + 1],
+			[cx, rect.bottom - 1],
+		];
+		for (const [px, py] of points) {
+			const el = document.elementFromPoint(px, py);
+			const layer = el?.closest<HTMLElement>(".textLayer");
+			if (layer) return layer;
+		}
+		return null;
+	};
+
+	const result: MappedSelectionRect[] = [];
+	for (const { rect: clientRect, element: sourceElement } of clientRects) {
+		const layer = layerForRect(clientRect);
+		if (!layer) continue;
+
+		const layerRect = layer.getBoundingClientRect();
+		const fitsInLayer =
+			clientRect.top >= layerRect.top - 1 &&
+			clientRect.bottom <= layerRect.bottom + 1 &&
+			clientRect.left >= layerRect.left - 1 &&
+			clientRect.right <= layerRect.right + 1;
+		if (!fitsInLayer) continue;
+
+		const pageNumber = parseInt(
+			layer.getAttribute("data-page-number") || "1",
+			10,
+		);
+		result.push({ clientRect, sourceElement, layer, layerRect, pageNumber });
+	}
+	return result;
+};
+
 const shouldMergeRects = (
 	rect1: HighlightRect,
 	rect2: HighlightRect,
@@ -209,51 +345,11 @@ export const useSelectionDimensions = () => {
 		const textLayerMapHighlight = new Map<number, HighlightRect[]>();
 		const textLayerMapUnderline = new Map<number, HighlightRect[]>();
 
-		// Get valid client rects and filter out tiny ones
-		const clientRects = Array.from(range.getClientRects()).filter(
-			(rect) => rect.width > 2 && rect.height > 2,
-		);
+		const mapped = mapSelectionRectsToLayers(range);
+		const zoom = store.getState().zoom;
 
-		clientRects.forEach((clientRect) => {
-			// Try multiple points to find the text layer, in case the first point misses
-			let element = document.elementFromPoint(
-				clientRect.left + 1,
-				clientRect.top + clientRect.height / 2,
-			);
-
-			// If no element found, try center of rect
-			if (!element) {
-				element = document.elementFromPoint(
-					clientRect.left + clientRect.width / 2,
-					clientRect.top + clientRect.height / 2,
-				);
-			}
-
-			// If still no element, try right side
-			if (!element) {
-				element = document.elementFromPoint(
-					clientRect.right - 1,
-					clientRect.top + clientRect.height / 2,
-				);
-			}
-
-			// Try top and bottom of rect as well
-			if (!element) {
-				element = document.elementFromPoint(
-					clientRect.left + clientRect.width / 2,
-					clientRect.top + 1,
-				);
-			}
-
-			if (!element) {
-				element = document.elementFromPoint(
-					clientRect.left + clientRect.width / 2,
-					clientRect.bottom - 1,
-				);
-			}
-
-			const textLayer = element?.closest(".textLayer");
-			if (!textLayer) return;
+		mapped.forEach(({ clientRect, sourceElement, layerRect, pageNumber }) => {
+			const element = sourceElement;
 
 			// Check if the element is part of a superscript or subscript
 			const isSuperOrSubScript = (el: Element | null): boolean => {
@@ -305,19 +401,11 @@ export const useSelectionDimensions = () => {
 				return false;
 			};
 
-			const pageNumber = parseInt(
-				textLayer.getAttribute("data-page-number") || "1",
-				10,
-			);
-			const textLayerRect = textLayer.getBoundingClientRect();
-			const zoom = store.getState().zoom;
-
-			// Always create highlight rectangle
 			const highlightRect: HighlightRect = {
 				width: clientRect.width / zoom,
 				height: clientRect.height / zoom,
-				top: (clientRect.top - textLayerRect.top) / zoom,
-				left: (clientRect.left - textLayerRect.left) / zoom,
+				top: (clientRect.top - layerRect.top) / zoom,
+				left: (clientRect.left - layerRect.left) / zoom,
 				pageNumber,
 			};
 
@@ -336,8 +424,8 @@ export const useSelectionDimensions = () => {
 				const underlineRect: HighlightRect = {
 					width: clientRect.width / zoom,
 					height: underlineHeight / zoom,
-					top: (clientRect.top - textLayerRect.top + baselineOffset) / zoom,
-					left: (clientRect.left - textLayerRect.left) / zoom,
+					top: (clientRect.top - layerRect.top + baselineOffset) / zoom,
+					left: (clientRect.left - layerRect.left) / zoom,
 					pageNumber,
 				};
 
@@ -550,32 +638,15 @@ export const useSelectionDimensions = () => {
 		const highlights: HighlightRect[] = [];
 		const textLayerMap = new Map<number, HighlightRect[]>();
 
-		// Get valid client rects and filter out tiny ones
-		const clientRects = Array.from(range.getClientRects()).filter(
-			(rect) => rect.width > 2 && rect.height > 2,
-		);
+		const mapped = mapSelectionRectsToLayers(range);
+		const zoom = store.getState().zoom;
 
-		clientRects.forEach((clientRect) => {
-			const element = document.elementFromPoint(
-				clientRect.left + 1,
-				clientRect.top + clientRect.height / 2,
-			);
-
-			const textLayer = element?.closest(".textLayer");
-			if (!textLayer) return;
-
-			const pageNumber = parseInt(
-				textLayer.getAttribute("data-page-number") || "1",
-				10,
-			);
-			const textLayerRect = textLayer.getBoundingClientRect();
-			const zoom = store.getState().zoom;
-
+		mapped.forEach(({ clientRect, layerRect, pageNumber }) => {
 			const rect: HighlightRect = {
 				width: clientRect.width / zoom,
 				height: clientRect.height / zoom,
-				top: (clientRect.top - textLayerRect.top) / zoom,
-				left: (clientRect.left - textLayerRect.left) / zoom,
+				top: (clientRect.top - layerRect.top) / zoom,
+				left: (clientRect.left - layerRect.left) / zoom,
 				pageNumber,
 			};
 
