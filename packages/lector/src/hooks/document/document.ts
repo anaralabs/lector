@@ -26,10 +26,13 @@ export interface usePDFDocumentParams {
 		source: Source;
 	}) => void;
 	/**
-	 * Called when the document fails to load. Two failure modes:
+	 * Called when the document fails to load. Three failure modes:
 	 *  - `phase: "pdfjs-load"` — the PDF.js worker / runtime itself failed to load.
 	 *  - `phase: "document-load"` — `getDocument()` rejected (network error,
-	 *    parse error, password required, etc).
+	 *    parse error, password required, etc). `onDocumentLoad` has NOT fired.
+	 *  - `phase: "viewport-generation"` — the document loaded successfully and
+	 *    `onDocumentLoad` already fired, but resolving page proxies / viewports
+	 *    afterwards failed (e.g. corrupted page, transient pdf.js error).
 	 * The callback fires in addition to the existing console.error, so existing
 	 * consumers see no behavior change.
 	 */
@@ -39,7 +42,7 @@ export interface usePDFDocumentParams {
 		source,
 	}: {
 		error: unknown;
-		phase: "pdfjs-load" | "document-load";
+		phase: "pdfjs-load" | "document-load" | "viewport-generation";
 		source: Source;
 	}) => void;
 	initialRotation?: number;
@@ -199,7 +202,7 @@ export const usePDFDocumentContext = ({
 					};
 
 					return loadingTask.promise
-						.then((proxy) => {
+						.then(async (proxy) => {
 							if (isDisposed || loadingTask?.destroyed) {
 								return;
 							}
@@ -207,7 +210,20 @@ export const usePDFDocumentContext = ({
 							onDocumentLoad?.({ proxy, source });
 							setProgress(1);
 
-							return generateViewports(proxy);
+							try {
+								await generateViewports(proxy);
+							} catch (error) {
+								if (isDisposed || loadingTask?.destroyed) {
+									return;
+								}
+
+								console.error("Error generating PDF viewports", error);
+								onErrorRef.current?.({
+									error,
+									phase: "viewport-generation",
+									source,
+								});
+							}
 						})
 						.catch((error) => {
 							if (isDisposed || loadingTask?.destroyed) {
