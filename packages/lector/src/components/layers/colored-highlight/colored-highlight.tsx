@@ -27,8 +27,7 @@ export const ColoredHighlightComponent = ({
 
 	if (pageRectangles.length === 0) return null;
 
-	// Anchor the delete button to this page's rectangles so it's always
-	// reachable from whichever page-slice the user clicked.
+	// Anchor the delete button to this page's rectangles.
 	const buttonAnchor: ColoredHighlight = {
 		...selection,
 		rectangles: pageRectangles,

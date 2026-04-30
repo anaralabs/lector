@@ -22,8 +22,6 @@ export const ColoredHighlightLayer = ({
 	);
 	const addColoredHighlight = usePdf((state) => state.addColoredHighlight);
 
-	// Match by top-level pageNumber or any rectangle on this page so multi-
-	// page selections render slices on each page they touch.
 	const pageHighlights = useMemo(
 		() =>
 			highlights.filter(

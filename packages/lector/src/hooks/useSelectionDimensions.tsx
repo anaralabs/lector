@@ -20,15 +20,9 @@ type MappedSelectionRect = {
 };
 
 /**
- * Collect per-line client rects for a selection by walking only the text
- * nodes inside the range. `range.getClientRects()` also returns rects for
- * block-level wrappers (`.textLayer`, page containers), which on multi-page
- * selections produce full-page-sized rects that render as giant "highlight
- * the whole page" boxes.
- *
- * Each rect is paired with its source text node's parent element so callers
- * can do DOM checks (e.g. super/sub detection) without `elementFromPoint`,
- * which returns null for any rect outside the current viewport.
+ * Per-text-node client rects for a selection. Avoids the block-level rects
+ * that `range.getClientRects()` returns for `.textLayer` / page wrappers,
+ * which would render as full-page highlights on multi-page selections.
  */
 const getTextNodeClientRects = (range: Range): TextNodeRect[] => {
 	const root = range.commonAncestorContainer;
@@ -78,7 +72,6 @@ const getTextNodeClientRects = (range: Range): TextNodeRect[] => {
 					if (r) results.push({ rect: r, element: parentElement });
 				}
 			} catch {
-				// detached nodes during virtualization
 			} finally {
 				sub.detach?.();
 			}
@@ -90,12 +83,9 @@ const getTextNodeClientRects = (range: Range): TextNodeRect[] => {
 };
 
 /**
- * Resolve every per-text-node rect of `range` to the `.textLayer` it belongs
- * to. Uses geometric containment first so off-viewport rects (multi-page
- * selections) still attribute correctly, with `elementFromPoint` as a
- * fallback for visually overlapping/transformed layouts. Rects that don't
- * fit cleanly inside their layer are dropped to keep stray block-level rects
- * from leaking through.
+ * Map each selection rect to the `.textLayer` it belongs to. Geometric
+ * containment first (works for off-viewport rects, where elementFromPoint
+ * returns null), with a 5-point elementFromPoint fallback.
  */
 const mapSelectionRectsToLayers = (range: Range): MappedSelectionRect[] => {
 	const clientRects = getTextNodeClientRects(range).filter(
@@ -118,7 +108,6 @@ const mapSelectionRectsToLayers = (range: Range): MappedSelectionRect[] => {
 		);
 		if (geomMatch) return geomMatch.el;
 
-		// Fallback for visually overlapping layers (transformed/scaled layouts).
 		const points: Array<[number, number]> = [
 			[rect.left + 1, cy],
 			[cx, cy],
