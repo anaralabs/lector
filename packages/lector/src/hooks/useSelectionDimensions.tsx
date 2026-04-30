@@ -11,6 +11,14 @@ type CollapsibleSelection = {
 
 type TextNodeRect = { rect: DOMRect; element: Element | null };
 
+type MappedSelectionRect = {
+	clientRect: DOMRect;
+	sourceElement: Element | null;
+	layer: HTMLElement;
+	layerRect: DOMRect;
+	pageNumber: number;
+};
+
 /**
  * Collect per-line client rects for a selection by walking only the text
  * nodes inside the range. `range.getClientRects()` also returns rects for
@@ -79,6 +87,73 @@ const getTextNodeClientRects = (range: Range): TextNodeRect[] => {
 	}
 
 	return results;
+};
+
+/**
+ * Resolve every per-text-node rect of `range` to the `.textLayer` it belongs
+ * to. Uses geometric containment first so off-viewport rects (multi-page
+ * selections) still attribute correctly, with `elementFromPoint` as a
+ * fallback for visually overlapping/transformed layouts. Rects that don't
+ * fit cleanly inside their layer are dropped to keep stray block-level rects
+ * from leaking through.
+ */
+const mapSelectionRectsToLayers = (range: Range): MappedSelectionRect[] => {
+	const clientRects = getTextNodeClientRects(range).filter(
+		({ rect }) => rect.width > 2 && rect.height > 2,
+	);
+
+	const textLayerEntries = Array.from(
+		document.querySelectorAll<HTMLElement>(".textLayer"),
+	).map((el) => ({ el, rect: el.getBoundingClientRect() }));
+
+	const layerForRect = (rect: DOMRect): HTMLElement | null => {
+		const cx = rect.left + rect.width / 2;
+		const cy = rect.top + rect.height / 2;
+		const geomMatch = textLayerEntries.find(
+			({ rect: lr }) =>
+				cx >= lr.left - 1 &&
+				cx <= lr.right + 1 &&
+				cy >= lr.top - 1 &&
+				cy <= lr.bottom + 1,
+		);
+		if (geomMatch) return geomMatch.el;
+
+		// Fallback for visually overlapping layers (transformed/scaled layouts).
+		const points: Array<[number, number]> = [
+			[rect.left + 1, cy],
+			[cx, cy],
+			[rect.right - 1, cy],
+			[cx, rect.top + 1],
+			[cx, rect.bottom - 1],
+		];
+		for (const [px, py] of points) {
+			const el = document.elementFromPoint(px, py);
+			const layer = el?.closest<HTMLElement>(".textLayer");
+			if (layer) return layer;
+		}
+		return null;
+	};
+
+	const result: MappedSelectionRect[] = [];
+	for (const { rect: clientRect, element: sourceElement } of clientRects) {
+		const layer = layerForRect(clientRect);
+		if (!layer) continue;
+
+		const layerRect = layer.getBoundingClientRect();
+		const fitsInLayer =
+			clientRect.top >= layerRect.top - 1 &&
+			clientRect.bottom <= layerRect.bottom + 1 &&
+			clientRect.left >= layerRect.left - 1 &&
+			clientRect.right <= layerRect.right + 1;
+		if (!fitsInLayer) continue;
+
+		const pageNumber = parseInt(
+			layer.getAttribute("data-page-number") || "1",
+			10,
+		);
+		result.push({ clientRect, sourceElement, layer, layerRect, pageNumber });
+	}
+	return result;
 };
 
 const shouldMergeRects = (
@@ -281,58 +356,10 @@ export const useSelectionDimensions = () => {
 		const textLayerMapHighlight = new Map<number, HighlightRect[]>();
 		const textLayerMapUnderline = new Map<number, HighlightRect[]>();
 
-		const clientRects = getTextNodeClientRects(range).filter(
-			({ rect }) => rect.width > 2 && rect.height > 2,
-		);
+		const mapped = mapSelectionRectsToLayers(range);
+		const zoom = store.getState().zoom;
 
-		const textLayerEntries = Array.from(
-			document.querySelectorAll<HTMLElement>(".textLayer"),
-		).map((el) => ({ el, rect: el.getBoundingClientRect() }));
-
-		const layerForRect = (rect: DOMRect) => {
-			const cx = rect.left + rect.width / 2;
-			const cy = rect.top + rect.height / 2;
-			// Geometric match works even for rects outside the viewport
-			// (multi-page selections), where elementFromPoint returns null.
-			const geomMatch = textLayerEntries.find(
-				({ rect: lr }) =>
-					cx >= lr.left - 1 &&
-					cx <= lr.right + 1 &&
-					cy >= lr.top - 1 &&
-					cy <= lr.bottom + 1,
-			);
-			if (geomMatch) return geomMatch.el;
-
-			// Fallback for visually overlapping layers (transformed/scaled layouts).
-			const points: Array<[number, number]> = [
-				[rect.left + 1, cy],
-				[cx, cy],
-				[rect.right - 1, cy],
-				[cx, rect.top + 1],
-				[cx, rect.bottom - 1],
-			];
-			for (const [px, py] of points) {
-				const el = document.elementFromPoint(px, py);
-				const layer = el?.closest<HTMLElement>(".textLayer");
-				if (layer) return layer;
-			}
-			return null;
-		};
-
-		clientRects.forEach(({ rect: clientRect, element: sourceElement }) => {
-			const textLayer = layerForRect(clientRect);
-			if (!textLayer) return;
-
-			// Reject rects that aren't actually inside their text layer
-			// (defends against stray block-level rects that survived the walk).
-			const layerRect = textLayer.getBoundingClientRect();
-			const fitsInLayer =
-				clientRect.top >= layerRect.top - 1 &&
-				clientRect.bottom <= layerRect.bottom + 1 &&
-				clientRect.left >= layerRect.left - 1 &&
-				clientRect.right <= layerRect.right + 1;
-			if (!fitsInLayer) return;
-
+		mapped.forEach(({ clientRect, sourceElement, layerRect, pageNumber }) => {
 			const element = sourceElement;
 
 			// Check if the element is part of a superscript or subscript
@@ -385,13 +412,6 @@ export const useSelectionDimensions = () => {
 				return false;
 			};
 
-			const pageNumber = parseInt(
-				textLayer.getAttribute("data-page-number") || "1",
-				10,
-			);
-			const zoom = store.getState().zoom;
-
-			// Always create highlight rectangle
 			const highlightRect: HighlightRect = {
 				width: clientRect.width / zoom,
 				height: clientRect.height / zoom,
@@ -629,47 +649,10 @@ export const useSelectionDimensions = () => {
 		const highlights: HighlightRect[] = [];
 		const textLayerMap = new Map<number, HighlightRect[]>();
 
-		const clientRects = getTextNodeClientRects(range).filter(
-			({ rect }) => rect.width > 2 && rect.height > 2,
-		);
+		const mapped = mapSelectionRectsToLayers(range);
+		const zoom = store.getState().zoom;
 
-		const textLayerEntries = Array.from(
-			document.querySelectorAll<HTMLElement>(".textLayer"),
-		).map((el) => ({ el, rect: el.getBoundingClientRect() }));
-
-		clientRects.forEach(({ rect: clientRect }) => {
-			const cx = clientRect.left + clientRect.width / 2;
-			const cy = clientRect.top + clientRect.height / 2;
-			// Geometric match works for off-screen rects (multi-page selections).
-			let textLayer: HTMLElement | null =
-				textLayerEntries.find(
-					({ rect: lr }) =>
-						cx >= lr.left - 1 &&
-						cx <= lr.right + 1 &&
-						cy >= lr.top - 1 &&
-						cy <= lr.bottom + 1,
-				)?.el ?? null;
-
-			if (!textLayer) {
-				const el = document.elementFromPoint(clientRect.left + 1, cy);
-				textLayer = el?.closest<HTMLElement>(".textLayer") ?? null;
-			}
-			if (!textLayer) return;
-
-			const layerRect = textLayer.getBoundingClientRect();
-			const fitsInLayer =
-				clientRect.top >= layerRect.top - 1 &&
-				clientRect.bottom <= layerRect.bottom + 1 &&
-				clientRect.left >= layerRect.left - 1 &&
-				clientRect.right <= layerRect.right + 1;
-			if (!fitsInLayer) return;
-
-			const pageNumber = parseInt(
-				textLayer.getAttribute("data-page-number") || "1",
-				10,
-			);
-			const zoom = store.getState().zoom;
-
+		mapped.forEach(({ clientRect, layerRect, pageNumber }) => {
 			const rect: HighlightRect = {
 				width: clientRect.width / zoom,
 				height: clientRect.height / zoom,
