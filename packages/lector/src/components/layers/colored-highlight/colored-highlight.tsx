@@ -20,8 +20,6 @@ export const ColoredHighlightComponent = ({
 	const [showButton, setShowButton] = useState(false);
 	const pageNumber = usePDFPageNumber();
 
-	// Only render the rectangles that live on the current page; this lets a
-	// single ColoredHighlight that spans pages render correctly on each.
 	const pageRectangles = useMemo(
 		() => selection.rectangles.filter((r) => r.pageNumber === pageNumber),
 		[selection.rectangles, pageNumber],
@@ -29,10 +27,8 @@ export const ColoredHighlightComponent = ({
 
 	if (pageRectangles.length === 0) return null;
 
-	// `showButton` is local per-page state, so the delete button shows next to
-	// whichever page-slice the user actually clicked. The button anchors to
-	// the rectangles on _this_ page so it's always reachable, and clicking it
-	// removes the entire (possibly multi-page) highlight.
+	// Anchor the delete button to this page's rectangles so it's always
+	// reachable from whichever page-slice the user clicked.
 	const buttonAnchor: ColoredHighlight = {
 		...selection,
 		rectangles: pageRectangles,

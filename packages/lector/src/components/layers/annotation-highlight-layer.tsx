@@ -54,11 +54,8 @@ export const AnnotationHighlightLayer = ({
 	const pageNumber = usePDFPageNumber();
 	const isPageRendered = usePdf((state) => !!state.renderedPages[pageNumber]);
 
-	// An annotation belongs to this page if either its top-level pageNumber
-	// matches OR any of its highlight/underline rectangles are on this page.
-	// This is what lets a single annotation span two pages and still render
-	// the right rectangles on each page (without spilling page-2 rects onto
-	// page-1's coordinate space and vice versa).
+	// Match annotations whose top-level pageNumber or any rectangle is on
+	// this page, so multi-page annotations render slices on each page.
 	const pageAnnotations = useMemo(
 		() =>
 			annotations.filter(
@@ -136,9 +133,6 @@ export const AnnotationHighlightLayer = ({
 	return (
 		<div className={className} style={style}>
 			{pageAnnotations.map((annotation) => {
-				// Only render the rectangles that belong to this page. For a
-				// multi-page annotation each page renders its own slice while
-				// still sharing the same id / color / comment.
 				const pageHighlights = annotation.highlights.filter(
 					(h) => h.pageNumber === pageNumber,
 				);
@@ -146,9 +140,6 @@ export const AnnotationHighlightLayer = ({
 					(u) => u.pageNumber === pageNumber,
 				);
 
-				// Skip when neither highlights nor underlines have anything
-				// for this page, otherwise an annotation matched on
-				// underlines alone would silently drop those underlines.
 				if (
 					pageHighlights.length === 0 &&
 					(!pageUnderlines || pageUnderlines.length === 0)
@@ -156,10 +147,8 @@ export const AnnotationHighlightLayer = ({
 					return null;
 				}
 
-				// Compute the lowest page that contains any rectangle (highlights
-				// or underlines). The annotation's "primary" rendering page is
-				// the first page with any rect; that's where the comment icon
-				// shows and where the AnnotationTooltip is mounted.
+				// The "primary" page is the lowest page containing any rect;
+				// it owns the comment icon and the AnnotationTooltip portal.
 				const minPage = (rects: { pageNumber: number }[] | undefined) =>
 					rects?.reduce<number | null>(
 						(m, r) => (m === null || r.pageNumber < m ? r.pageNumber : m),
@@ -223,11 +212,9 @@ export const AnnotationHighlightLayer = ({
 							if (!annotation.comment || !commmentIcon || !showCommentIcon) {
 								return null;
 							}
-							// Anchor the icon to whichever rects exist on the
-							// primary page — prefer highlights (the typical
-							// case), fall back to underlines so an annotation
-							// whose primary page has only underlines still
-							// shows its comment icon.
+							// Prefer highlights, fall back to underlines, so the
+							// icon still anchors when the primary page has only
+							// underlines.
 							const anchorRects =
 								pageHighlights.length > 0 ? pageHighlights : pageUnderlines;
 							if (!anchorRects || anchorRects.length === 0) return null;
@@ -250,11 +237,9 @@ export const AnnotationHighlightLayer = ({
 					</div>
 				);
 
-				// Only the primary page mounts the AnnotationTooltip, otherwise
-				// each page would create its own portal and we'd render the
-				// tooltip twice when the user has both pages on screen.
-				// Secondary pages still render their rect slice with the click
-				// handler so focusing the annotation still works.
+				// Mount the tooltip only on the primary page so a multi-page
+				// annotation visible across pages doesn't render two portals.
+				// Secondary pages still forward clicks via onAnnotationClick.
 				if (!isPrimaryPage) {
 					return <div key={annotation.id}>{rectsContent}</div>;
 				}
