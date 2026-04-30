@@ -25,6 +25,23 @@ export interface usePDFDocumentParams {
 		proxy: PDFDocumentProxy;
 		source: Source;
 	}) => void;
+	/**
+	 * Called when the document fails to load. Two failure modes:
+	 *  - `phase: "pdfjs-load"` — the PDF.js worker / runtime itself failed to load.
+	 *  - `phase: "document-load"` — `getDocument()` rejected (network error,
+	 *    parse error, password required, etc).
+	 * The callback fires in addition to the existing console.error, so existing
+	 * consumers see no behavior change.
+	 */
+	onError?: ({
+		error,
+		phase,
+		source,
+	}: {
+		error: unknown;
+		phase: "pdfjs-load" | "document-load";
+		source: Source;
+	}) => void;
 	initialRotation?: number;
 	isZoomFitWidth?: boolean;
 	zoom?: number;
@@ -95,6 +112,7 @@ function buildDocumentInitParams(
 
 export const usePDFDocumentContext = ({
 	onDocumentLoad,
+	onError,
 	source,
 	initialRotation = 0,
 	isZoomFitWidth,
@@ -112,6 +130,11 @@ export const usePDFDocumentContext = ({
 	// when consumers pass an inline object).
 	const documentOptionsRef = useRef(documentOptions);
 	documentOptionsRef.current = documentOptions;
+
+	// Same reasoning as documentOptionsRef: keep the effect stable while
+	// always invoking the latest callback.
+	const onErrorRef = useRef(onError);
+	onErrorRef.current = onError;
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: <onDocumnetLoad,zoomOptions>
 	useEffect(() => {
@@ -192,6 +215,11 @@ export const usePDFDocumentContext = ({
 							}
 
 							console.error("Error loading PDF document", error);
+							onErrorRef.current?.({
+								error,
+								phase: "document-load",
+								source,
+							});
 						});
 				})
 				.catch((error) => {
@@ -200,6 +228,11 @@ export const usePDFDocumentContext = ({
 					}
 
 					console.error("Error loading PDF.js", error);
+					onErrorRef.current?.({
+						error,
+						phase: "pdfjs-load",
+						source,
+					});
 				});
 
 			return () => {
