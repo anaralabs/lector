@@ -129,13 +129,6 @@ const mapSelectionRectsToLayers = (range: Range): MappedSelectionRect[] => {
 		if (!layer) continue;
 
 		const layerRect = layer.getBoundingClientRect();
-		const fitsInLayer =
-			clientRect.top >= layerRect.top - 1 &&
-			clientRect.bottom <= layerRect.bottom + 1 &&
-			clientRect.left >= layerRect.left - 1 &&
-			clientRect.right <= layerRect.right + 1;
-		if (!fitsInLayer) continue;
-
 		const pageNumber = parseInt(
 			layer.getAttribute("data-page-number") || "1",
 			10,
