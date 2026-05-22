@@ -1,19 +1,13 @@
-import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import {
 	cloneElement,
 	type HTMLProps,
 	memo,
 	type ReactElement,
-	useCallback,
 	useEffect,
 	useRef,
-	useState,
 } from "react";
 
 import { useFitWidth } from "../hooks/pages/useFitWidth";
-import { useObserveElement } from "../hooks/pages/useObserveElement";
-import { useScrollFn } from "../hooks/pages/useScrollFn";
-import { useVisiblePage } from "../hooks/pages/useVisiblePage";
 import { useViewportContainer } from "../hooks/viewport/useViewportContainer";
 import { usePdf } from "../internal";
 import { Primitive } from "./primitive";
@@ -22,55 +16,41 @@ const selectLargestPageWidth = (state: {
 	viewports: Array<{ width: number }>;
 }) => state.viewports.reduce((max, vp) => Math.max(max, vp.width), 0);
 
-const DEFAULT_HEIGHT = 600;
-const EXTRA_HEIGHT = 0;
-const DEFAULT_VIRTUALIZER_OPTIONS = { overscan: 1 };
-
-interface VirtualizedPageItemProps {
+interface FlatPageItemProps {
 	child: ReactElement;
-	virtualItem: VirtualItem;
+	index: number;
 	innerBoxWidth: number;
+	innerBoxHeight: number;
+	gap: number;
 }
 
-const VirtualizedPageItem = memo(
-	({ child, virtualItem, innerBoxWidth }: VirtualizedPageItemProps) => {
+const FlatPageItem = memo(
+	({ child, index, innerBoxWidth, innerBoxHeight, gap }: FlatPageItemProps) => {
 		return (
 			<div
 				style={{
 					width: innerBoxWidth,
-					height: "0px",
+					height: innerBoxHeight,
+					marginBottom: gap,
 				}}
 			>
-				<div
-					style={{
-						height: `${virtualItem.size}px`,
-						transform: `translateY(${virtualItem.start}px)`,
-					}}
-				>
-					{cloneElement(child, {
-						key: virtualItem.key,
-						//@ts-expect-error pageNumber is not a valid react key
-						pageNumber: virtualItem.index + 1,
-					})}
-				</div>
+				{cloneElement(child, {
+					key: index,
+					// @ts-expect-error pageNumber is not on the generic child element type
+					pageNumber: index + 1,
+				})}
 			</div>
 		);
 	},
-	(prev, next) =>
-		prev.child === next.child &&
-		prev.innerBoxWidth === next.innerBoxWidth &&
-		prev.virtualItem.key === next.virtualItem.key &&
-		prev.virtualItem.index === next.virtualItem.index &&
-		prev.virtualItem.size === next.virtualItem.size &&
-		prev.virtualItem.start === next.virtualItem.start,
 );
 
-VirtualizedPageItem.displayName = "VirtualizedPageItem";
+FlatPageItem.displayName = "FlatPageItem";
 
 export const Pages = ({
 	children,
 	gap = 10,
-	virtualizerOptions = DEFAULT_VIRTUALIZER_OPTIONS,
+	// kept for API compatibility — ignored in this experiment
+	virtualizerOptions: _virtualizerOptions,
 	initialOffset,
 	onOffsetChange,
 	...props
@@ -83,11 +63,8 @@ export const Pages = ({
 	initialOffset?: number;
 	onOffsetChange?: (offset: number) => void;
 }) => {
-	const [tempItems, setTempItems] = useState<VirtualItem[]>([]);
-
 	const viewports = usePdf((state) => state.viewports);
 	const numPages = usePdf((state) => state.pdfDocumentProxy.numPages);
-	const isPinching = usePdf((state) => state.isPinching);
 
 	const elementWrapperRef = useRef<HTMLDivElement>(null);
 	const elementRef = useRef<HTMLDivElement>(null);
@@ -99,112 +76,22 @@ export const Pages = ({
 		containerRef,
 	});
 
-	const setVirtualizer = usePdf((state) => state.setVirtualizer);
-
-	const { scrollToFn } = useScrollFn();
-	const { observeElementOffset } = useObserveElement();
-
-	const viewportsRef = useRef(viewports);
-	viewportsRef.current = viewports;
-
-	const estimateSize = useCallback(
-		(index: number) => {
-			const vp = viewportsRef.current;
-			if (!vp || !vp[index]) return DEFAULT_HEIGHT;
-			return vp[index].height + EXTRA_HEIGHT;
-		},
-		[], // Stable — reads from ref
-	);
-
-	const virtualizer = useVirtualizer({
-		count: numPages || 0,
-		getScrollElement: () => containerRef.current,
-		estimateSize,
-		observeElementOffset,
-		overscan: virtualizerOptions?.overscan ?? 0,
-		scrollToFn,
-		gap,
-		initialOffset: initialOffset,
-	});
-
-	useEffect(() => {
-		if (onOffsetChange && virtualizer.scrollOffset)
-			onOffsetChange(virtualizer.scrollOffset);
-	}, [virtualizer.scrollOffset, onOffsetChange]);
-
-	useEffect(() => {
-		setVirtualizer(virtualizer);
-	}, [setVirtualizer, virtualizer]);
-
-	useEffect(() => {
-		let timeout: NodeJS.Timeout;
-		const virtualized = virtualizer?.getVirtualItems();
-
-		if (!isPinching) {
-			virtualizer?.measure();
-
-			timeout = setTimeout(() => {
-				setTempItems([]);
-			}, 200);
-		} else if (virtualized && virtualized?.length > 0) {
-			setTempItems(virtualized);
-		}
-
-		return () => {
-			clearTimeout(timeout);
-		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [isPinching, virtualizer?.measure, virtualizer?.getVirtualItems]);
-
-	const virtualizerItems = virtualizer?.getVirtualItems() ?? [];
-	const items = tempItems.length ? tempItems : virtualizerItems;
-
-	useVisiblePage({
-		items,
-	});
-
 	useFitWidth({ viewportRef: containerRef });
 	const largestPageWidth = usePdf(selectLargestPageWidth);
 
 	useEffect(() => {
-		virtualizer.getOffsetForAlignment = (
-			toOffset: number,
-			align: "start" | "center" | "end" | "auto",
-			itemSize = 0,
-		) => {
-			//@ts-expect-error this is a private stuff
-			const size = virtualizer.getSize();
+		const container = containerRef.current;
+		if (!container || initialOffset == null) return;
+		container.scrollTop = initialOffset;
+	}, [initialOffset]);
 
-			//@ts-expect-error this is a private stuff
-			const scrollOffset = virtualizer.getScrollOffset();
-
-			if (align === "auto") {
-				align = toOffset >= scrollOffset + size ? "end" : "start";
-			}
-
-			if (align === "center") {
-				// When aligning to a particular item (e.g. with scrollToIndex),
-				// adjust offset by the size of the item to center on the item
-				toOffset += (itemSize - size) / 2;
-			} else if (align === "end") {
-				toOffset -= size;
-			}
-
-			const scrollSizeProp = virtualizer.options.horizontal
-				? "scrollWidth"
-				: "scrollHeight";
-			const scrollSize = virtualizer.scrollElement
-				? "document" in virtualizer.scrollElement
-					? //@ts-expect-error this is a private stuff
-						virtualizer.scrollElement.document.documentElement[scrollSizeProp]
-					: virtualizer.scrollElement[scrollSizeProp]
-				: 0;
-
-			const _maxOffset = scrollSize - size;
-
-			return Math.max(toOffset, 0);
-		};
-	}, [virtualizer]);
+	useEffect(() => {
+		const container = containerRef.current;
+		if (!container || !onOffsetChange) return;
+		const handler = () => onOffsetChange(container.scrollTop);
+		container.addEventListener("scroll", handler, { passive: true });
+		return () => container.removeEventListener("scroll", handler);
+	}, [onOffsetChange]);
 
 	return (
 		<Primitive.div
@@ -228,31 +115,30 @@ export const Pages = ({
 				<div
 					ref={elementRef}
 					style={{
-						height: `${virtualizer.getTotalSize()}px`,
-						position: "absolute",
 						display: "flex",
 						alignItems: "center",
 						flexDirection: "column",
 						transformOrigin: "0 0",
 						willChange: "transform",
-						// width: "max-content",
 						width: largestPageWidth,
 						margin: "0 auto",
 					}}
 				>
-					{items.map((virtualItem) => {
-						const innerBoxWidth = viewports?.[virtualItem.index]
-							? viewports[virtualItem.index]?.width
-							: 0;
+					{Array.from({ length: numPages || 0 }, (_, index) => {
+						const vp = viewports?.[index];
+						const innerBoxWidth = vp?.width ?? 0;
+						const innerBoxHeight = vp?.height ?? 0;
 
 						if (!innerBoxWidth) return null;
 
 						return (
-							<VirtualizedPageItem
-								key={virtualItem.key}
+							<FlatPageItem
+								key={index}
 								child={children}
-								virtualItem={virtualItem}
+								index={index}
 								innerBoxWidth={innerBoxWidth}
+								innerBoxHeight={innerBoxHeight}
+								gap={gap}
 							/>
 						);
 					})}
