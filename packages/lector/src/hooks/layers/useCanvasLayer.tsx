@@ -34,7 +34,8 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const pageWidth = baseViewport.width;
 		const pageHeight = baseViewport.height;
 
-		const targetBaseScale = dpr * Math.min(zoom, 1);
+		const RESOLUTION_SCALE = 0.5;
+		const targetBaseScale = dpr * Math.min(zoom, 1) * RESOLUTION_SCALE;
 		const baseScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
 
 		baseCanvas.width = Math.floor(pageWidth * baseScale);

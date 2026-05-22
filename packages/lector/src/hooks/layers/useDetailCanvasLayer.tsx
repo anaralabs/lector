@@ -104,8 +104,9 @@ export const useDetailCanvasLayer = ({
 			const visibleWidth = Math.max(0, visibleRight - visibleLeft);
 			const visibleHeight = Math.max(0, visibleBottom - visibleTop);
 
-			const targetDetailScale = dpr * zoom * 1.3;
-			const baseTargetScale = dpr * Math.min(zoom, 1);
+			const RESOLUTION_SCALE = 0.5;
+			const targetDetailScale = dpr * zoom * 1.3 * RESOLUTION_SCALE;
+			const baseTargetScale = dpr * Math.min(zoom, 1) * RESOLUTION_SCALE;
 			const baseScale = clampScaleForPage(
 				baseTargetScale,
 				pageWidth,
