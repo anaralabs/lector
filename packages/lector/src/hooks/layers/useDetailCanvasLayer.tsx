@@ -2,6 +2,19 @@ import type { RenderTask } from "pdfjs-dist";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
+function stubRender(
+	ctx: CanvasRenderingContext2D,
+	w: number,
+	h: number,
+): RenderTask {
+	ctx.fillStyle = "#f0f0f0";
+	ctx.fillRect(0, 0, w, h);
+	return {
+		promise: Promise.resolve(),
+		cancel: () => {},
+	} as unknown as RenderTask;
+}
+
 import { usePdf } from "../../internal";
 import { clampScaleForPage } from "../../lib/canvas-utils";
 import { subscribeToViewportInvalidation } from "../../lib/viewport-invalidation";
@@ -155,14 +168,14 @@ export const useDetailCanvasLayer = ({
 			const detailViewport = pdfPageProxy.getViewport({
 				scale: effectiveScale,
 			});
+			void detailViewport;
+			void transform;
 
-			const currentRenderingTask = pdfPageProxy.render({
-				canvas: buffer,
-				canvasContext: bufferCtx,
-				viewport: detailViewport,
-				background,
-				transform,
-			});
+			const currentRenderingTask = stubRender(
+				bufferCtx,
+				actualWidth,
+				actualHeight,
+			);
 			renderingTask = currentRenderingTask;
 
 			currentRenderingTask.promise

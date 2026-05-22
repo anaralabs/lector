@@ -7,6 +7,16 @@ import { clampScaleForPage } from "../../lib/canvas-utils";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
+function stubRender(
+	ctx: CanvasRenderingContext2D,
+	w: number,
+	h: number,
+): { promise: Promise<void>; cancel: () => void } {
+	ctx.fillStyle = "#f0f0f0";
+	ctx.fillRect(0, 0, w, h);
+	return { promise: Promise.resolve(), cancel: () => {} };
+}
+
 const CACHE_MAX = 60;
 
 type CacheEntry = {
@@ -150,13 +160,9 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 		let cancelled = false;
 		const viewport = pdfPageProxy.getViewport({ scale: baseScale });
+		void viewport;
 
-		const renderingTask = pdfPageProxy.render({
-			canvas: baseCanvas,
-			canvasContext: context,
-			viewport,
-			background,
-		});
+		const renderingTask = stubRender(context, baseCanvas.width, baseCanvas.height);
 
 		renderingTask.promise
 			.then(() => {
