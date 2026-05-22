@@ -1,13 +1,11 @@
 import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import {
-	cloneElement,
 	type HTMLProps,
-	memo,
 	type ReactElement,
 	useCallback,
 	useEffect,
+	useMemo,
 	useRef,
-	useState,
 } from "react";
 
 import { useFitWidth } from "../hooks/pages/useFitWidth";
@@ -26,49 +24,8 @@ const DEFAULT_HEIGHT = 600;
 const EXTRA_HEIGHT = 0;
 const DEFAULT_VIRTUALIZER_OPTIONS = { overscan: 1 };
 
-interface VirtualizedPageItemProps {
-	child: ReactElement;
-	virtualItem: VirtualItem;
-	innerBoxWidth: number;
-}
-
-const VirtualizedPageItem = memo(
-	({ child, virtualItem, innerBoxWidth }: VirtualizedPageItemProps) => {
-		return (
-			<div
-				style={{
-					width: innerBoxWidth,
-					height: "0px",
-				}}
-			>
-				<div
-					style={{
-						height: `${virtualItem.size}px`,
-						transform: `translateY(${virtualItem.start}px)`,
-					}}
-				>
-					{cloneElement(child, {
-						key: virtualItem.key,
-						//@ts-expect-error pageNumber is not a valid react key
-						pageNumber: virtualItem.index + 1,
-					})}
-				</div>
-			</div>
-		);
-	},
-	(prev, next) =>
-		prev.child === next.child &&
-		prev.innerBoxWidth === next.innerBoxWidth &&
-		prev.virtualItem.key === next.virtualItem.key &&
-		prev.virtualItem.index === next.virtualItem.index &&
-		prev.virtualItem.size === next.virtualItem.size &&
-		prev.virtualItem.start === next.virtualItem.start,
-);
-
-VirtualizedPageItem.displayName = "VirtualizedPageItem";
-
 export const Pages = ({
-	children,
+	children: _children,
 	gap = 10,
 	virtualizerOptions = DEFAULT_VIRTUALIZER_OPTIONS,
 	initialOffset,
@@ -83,15 +40,15 @@ export const Pages = ({
 	initialOffset?: number;
 	onOffsetChange?: (offset: number) => void;
 }) => {
-	const [tempItems, setTempItems] = useState<VirtualItem[]>([]);
-
 	const viewports = usePdf((state) => state.viewports);
 	const numPages = usePdf((state) => state.pdfDocumentProxy.numPages);
-	const isPinching = usePdf((state) => state.isPinching);
+	const pageProxies = usePdf((state) => state.pageProxies);
+	const markPageRendered = usePdf((state) => state.markPageRendered);
 
 	const elementWrapperRef = useRef<HTMLDivElement>(null);
 	const elementRef = useRef<HTMLDivElement>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
+	const flatGridRef = useRef<HTMLDivElement>(null);
 
 	useViewportContainer({
 		elementRef: elementRef,
@@ -113,7 +70,7 @@ export const Pages = ({
 			if (!vp || !vp[index]) return DEFAULT_HEIGHT;
 			return vp[index].height + EXTRA_HEIGHT;
 		},
-		[], // Stable — reads from ref
+		[],
 	);
 
 	const virtualizer = useVirtualizer({
@@ -136,32 +93,28 @@ export const Pages = ({
 		setVirtualizer(virtualizer);
 	}, [setVirtualizer, virtualizer]);
 
-	useEffect(() => {
-		let timeout: NodeJS.Timeout;
-		const virtualized = virtualizer?.getVirtualItems();
-
-		if (!isPinching) {
-			virtualizer?.measure();
-
-			timeout = setTimeout(() => {
-				setTempItems([]);
-			}, 200);
-		} else if (virtualized && virtualized?.length > 0) {
-			setTempItems(virtualized);
+	// Build a stable, full-list-of-pages "virtual items" array. This is computed
+	// once per (numPages, viewports, gap) and never updates on scroll — so any
+	// hook that consumes it (useVisiblePage) won't churn on scroll either.
+	const fullItems = useMemo<VirtualItem[]>(() => {
+		const items: VirtualItem[] = [];
+		let offset = 0;
+		for (let i = 0; i < (numPages || 0); i++) {
+			const h = viewports?.[i]?.height ?? DEFAULT_HEIGHT;
+			items.push({
+				key: i,
+				index: i,
+				start: offset,
+				end: offset + h,
+				size: h,
+				lane: 0,
+			});
+			offset += h + gap;
 		}
+		return items;
+	}, [numPages, viewports, gap]);
 
-		return () => {
-			clearTimeout(timeout);
-		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [isPinching, virtualizer?.measure, virtualizer?.getVirtualItems]);
-
-	const virtualizerItems = virtualizer?.getVirtualItems() ?? [];
-	const items = tempItems.length ? tempItems : virtualizerItems;
-
-	useVisiblePage({
-		items,
-	});
+	useVisiblePage({ items: fullItems });
 
 	useFitWidth({ viewportRef: containerRef });
 	const largestPageWidth = usePdf(selectLargestPageWidth);
@@ -183,28 +136,111 @@ export const Pages = ({
 			}
 
 			if (align === "center") {
-				// When aligning to a particular item (e.g. with scrollToIndex),
-				// adjust offset by the size of the item to center on the item
 				toOffset += (itemSize - size) / 2;
 			} else if (align === "end") {
 				toOffset -= size;
 			}
 
-			const scrollSizeProp = virtualizer.options.horizontal
-				? "scrollWidth"
-				: "scrollHeight";
-			const scrollSize = virtualizer.scrollElement
-				? "document" in virtualizer.scrollElement
-					? //@ts-expect-error this is a private stuff
-						virtualizer.scrollElement.document.documentElement[scrollSizeProp]
-					: virtualizer.scrollElement[scrollSizeProp]
-				: 0;
-
-			const _maxOffset = scrollSize - size;
-
 			return Math.max(toOffset, 0);
 		};
 	}, [virtualizer]);
+
+	// ── Wild path: imperative flat-DOM canvas grid ──────────────────────────────
+	// One mount-once effect that paints every page exactly once when numPages
+	// and pageProxies are known. Scroll is native browser scroll over absolute-
+	// positioned canvases — zero React commits below <Pages> per tick.
+	useEffect(() => {
+		const grid = flatGridRef.current;
+		if (!grid) return;
+		if (!numPages || pageProxies.length === 0) return;
+
+		grid.innerHTML = "";
+
+		const canvases: HTMLCanvasElement[] = [];
+		const cancellers: Array<() => void> = [];
+		const dpr =
+			typeof window !== "undefined" && window.devicePixelRatio
+				? window.devicePixelRatio
+				: 1;
+
+		let offsetY = 0;
+		for (let i = 0; i < numPages; i++) {
+			const proxy = pageProxies[i];
+			if (!proxy) continue;
+			const baseViewport = proxy.getViewport({ scale: 1 });
+			const w = baseViewport.width;
+			const h = baseViewport.height;
+
+			const pageWrap = document.createElement("div");
+			pageWrap.style.position = "absolute";
+			pageWrap.style.left = "50%";
+			pageWrap.style.transform = `translateX(-50%) translateY(${offsetY}px)`;
+			pageWrap.style.width = `${w}px`;
+			pageWrap.style.height = `${h}px`;
+			pageWrap.style.backgroundColor = "white";
+			pageWrap.dataset.pageNumber = String(i + 1);
+
+			const canvas = document.createElement("canvas");
+			canvas.style.position = "absolute";
+			canvas.style.top = "0";
+			canvas.style.left = "0";
+			canvas.style.width = `${w}px`;
+			canvas.style.height = `${h}px`;
+			canvas.width = Math.floor(w * dpr);
+			canvas.height = Math.floor(h * dpr);
+
+			pageWrap.appendChild(canvas);
+			grid.appendChild(pageWrap);
+			canvases.push(canvas);
+
+			const ctx = canvas.getContext("2d");
+			if (ctx) {
+				const scaledVp = proxy.getViewport({ scale: dpr });
+				const task = proxy.render({
+					canvas: canvas as never,
+					canvasContext: ctx as never,
+					viewport: scaledVp,
+				} as never);
+				cancellers.push(() => {
+					try {
+						(task as { cancel: () => void }).cancel();
+					} catch {
+						// ignore
+					}
+				});
+				task.promise
+					.then(() => {
+						markPageRendered(i + 1);
+					})
+					.catch(() => {
+						// ignore (cancellation or worker errors)
+					});
+			}
+
+			offsetY += h + gap;
+		}
+
+		// Size the inner element so the existing zoom/pinch transform math
+		// (which reads elementRef.style.width/height) keeps working.
+		const grid_h = offsetY > 0 ? offsetY - gap : 0;
+		if (elementRef.current) {
+			elementRef.current.style.height = `${grid_h}px`;
+		}
+
+		return () => {
+			for (const c of cancellers) c();
+			for (const c of canvases) {
+				c.width = 0;
+				c.height = 0;
+			}
+			grid.innerHTML = "";
+		};
+		// Intentionally mount-once when numPages + pageProxies are known.
+		// We do NOT re-run on viewports/gap changes — scroll must not trigger this.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [numPages, pageProxies]);
+
+	const totalSize = virtualizer.getTotalSize();
 
 	return (
 		<Primitive.div
@@ -228,34 +264,23 @@ export const Pages = ({
 				<div
 					ref={elementRef}
 					style={{
-						height: `${virtualizer.getTotalSize()}px`,
+						height: `${totalSize}px`,
 						position: "absolute",
-						display: "flex",
-						alignItems: "center",
-						flexDirection: "column",
+						display: "block",
 						transformOrigin: "0 0",
 						willChange: "transform",
-						// width: "max-content",
 						width: largestPageWidth,
 						margin: "0 auto",
 					}}
 				>
-					{items.map((virtualItem) => {
-						const innerBoxWidth = viewports?.[virtualItem.index]
-							? viewports[virtualItem.index]?.width
-							: 0;
-
-						if (!innerBoxWidth) return null;
-
-						return (
-							<VirtualizedPageItem
-								key={virtualItem.key}
-								child={children}
-								virtualItem={virtualItem}
-								innerBoxWidth={innerBoxWidth}
-							/>
-						);
-					})}
+					<div
+						ref={flatGridRef}
+						style={{
+							position: "relative",
+							width: "100%",
+							height: "100%",
+						}}
+					/>
 				</div>
 			</div>
 		</Primitive.div>
