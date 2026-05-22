@@ -12,6 +12,10 @@ import { useEffect, useRef, useState } from "react";
 
 import type { InitialPDFState, ZoomOptions } from "../../internal";
 import { getDefaultPdfJsAssetUrls, loadPdfJs } from "../../lib/pdfjs";
+import {
+	prerasterizeAllPages,
+	type PrerasterizeHandle,
+} from "../../lib/prerasterize";
 
 export interface usePDFDocumentParams {
 	/**
@@ -139,6 +143,8 @@ export const usePDFDocumentContext = ({
 	const onErrorRef = useRef(onError);
 	onErrorRef.current = onError;
 
+	const prerasterizeHandleRef = useRef<PrerasterizeHandle | null>(null);
+
 	// biome-ignore lint/correctness/useExhaustiveDependencies: <onDocumnetLoad,zoomOptions>
 	useEffect(() => {
 		const generateViewports = async (pdf: PDFDocumentProxy) => {
@@ -172,6 +178,13 @@ export const usePDFDocumentContext = ({
 				zoom,
 				zoomOptions,
 			}));
+
+			const docId = pdf.fingerprints[0] ?? "";
+			prerasterizeHandleRef.current?.cancel();
+			prerasterizeHandleRef.current = prerasterizeAllPages(
+				docId,
+				sortedPageProxies,
+			);
 		};
 
 		const loadDocument = () => {
@@ -253,6 +266,8 @@ export const usePDFDocumentContext = ({
 
 			return () => {
 				isDisposed = true;
+				prerasterizeHandleRef.current?.cancel();
+				prerasterizeHandleRef.current = null;
 				void loadingTask?.destroy();
 			};
 		};
