@@ -121,7 +121,7 @@ export const Pages = ({
 		getScrollElement: () => containerRef.current,
 		estimateSize,
 		observeElementOffset,
-		overscan: virtualizerOptions?.overscan ?? 0,
+		overscan: virtualizerOptions?.overscan ?? 3,
 		scrollToFn,
 		gap,
 		initialOffset: initialOffset,
