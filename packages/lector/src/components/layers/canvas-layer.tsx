@@ -11,7 +11,7 @@ export const CanvasLayer = memo(
 	}: HTMLProps<HTMLCanvasElement> & {
 		background?: string;
 	}) => {
-		const { canvasRef } = useCanvasLayer({ background });
+		const { canvasRef, imgRef } = useCanvasLayer({ background });
 		const { detailCanvasRef, containerRef } = useDetailCanvasLayer({
 			background,
 			baseCanvasRef: canvasRef,
@@ -20,6 +20,7 @@ export const CanvasLayer = memo(
 		return (
 			<>
 				<canvas {...props} ref={canvasRef} style={style} />
+				<img ref={imgRef} alt="" aria-hidden="true" style={style} />
 				<div
 					ref={containerRef}
 					className="absolute top-0 left-0 w-full h-full flex items-center justify-center"

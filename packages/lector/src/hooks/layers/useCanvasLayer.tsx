@@ -95,8 +95,29 @@ function setCachedBitmap(
 	}
 }
 
+function promoteCanvasToImg(
+	canvas: HTMLCanvasElement,
+	img: HTMLImageElement,
+	previousUrlRef: { current: string | null },
+): void {
+	canvas.toBlob((blob) => {
+		if (!blob) return;
+		const url = URL.createObjectURL(blob);
+		const prev = previousUrlRef.current;
+		previousUrlRef.current = url;
+		img.onload = () => {
+			canvas.style.visibility = "hidden";
+			img.style.visibility = "";
+			if (prev) URL.revokeObjectURL(prev);
+		};
+		img.src = url;
+	});
+}
+
 export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
+	const imgRef = useRef<HTMLImageElement | null>(null);
+	const objectUrlRef = useRef<string | null>(null);
 	const pageNumber = usePDFPageNumber();
 
 	const dpr = useDpr();
@@ -113,6 +134,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		if (!canvasRef.current) return;
 
 		const baseCanvas = canvasRef.current;
+		const baseImg = imgRef.current;
 		const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
 		const pageWidth = baseViewport.width;
 		const pageHeight = baseViewport.height;
@@ -133,6 +155,18 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		baseCanvas.style.backgroundColor = background ?? "white";
 		baseCanvas.style.visibility = "";
 
+		if (baseImg) {
+			baseImg.style.position = "absolute";
+			baseImg.style.top = "0";
+			baseImg.style.left = "0";
+			baseImg.style.width = `${pageWidth}px`;
+			baseImg.style.height = `${pageHeight}px`;
+			baseImg.style.zIndex = "0";
+			baseImg.style.pointerEvents = "none";
+			baseImg.style.backgroundColor = background ?? "white";
+			baseImg.style.visibility = "hidden";
+		}
+
 		const context = baseCanvas.getContext("2d");
 		if (!context) return;
 
@@ -140,6 +174,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		if (cached) {
 			context.drawImage(cached, 0, 0);
 			markPageRendered(pageNumber);
+			if (baseImg) promoteCanvasToImg(baseCanvas, baseImg, objectUrlRef);
 			return;
 		}
 
@@ -163,6 +198,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 				if (cancelled) return;
 				baseCanvas.style.visibility = "";
 				markPageRendered(pageNumber);
+				if (baseImg) promoteCanvasToImg(baseCanvas, baseImg, objectUrlRef);
 				if (typeof createImageBitmap !== "undefined") {
 					createImageBitmap(baseCanvas)
 						.then((bitmap) => {
@@ -204,16 +240,22 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 	useEffect(() => {
 		const canvas = canvasRef.current;
+		const urlRef = objectUrlRef;
 		return () => {
 			unmarkPageRendered(pageNumber);
 			if (canvas) {
 				canvas.width = 0;
 				canvas.height = 0;
 			}
+			if (urlRef.current) {
+				URL.revokeObjectURL(urlRef.current);
+				urlRef.current = null;
+			}
 		};
 	}, [pageNumber, unmarkPageRendered]);
 
 	return {
 		canvasRef,
+		imgRef,
 	};
 };
