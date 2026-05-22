@@ -106,8 +106,11 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const markPageRendered = usePdf((state) => state.markPageRendered);
 	const unmarkPageRendered = usePdf((state) => state.unmarkPageRendered);
+	const currentPage = usePdf((state) => state.currentPage);
 
 	const [zoom] = useDebounce(bouncyZoom, 100);
+
+	const isActive = pageNumber === currentPage;
 
 	useLayoutEffect(() => {
 		if (!canvasRef.current) return;
@@ -116,6 +119,23 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
 		const pageWidth = baseViewport.width;
 		const pageHeight = baseViewport.height;
+
+		if (!isActive) {
+			baseCanvas.width = 1;
+			baseCanvas.height = 1;
+			baseCanvas.style.position = "absolute";
+			baseCanvas.style.top = "0";
+			baseCanvas.style.left = "0";
+			baseCanvas.style.width = `${pageWidth}px`;
+			baseCanvas.style.height = `${pageHeight}px`;
+			baseCanvas.style.transform = "translate(0px, 0px)";
+			baseCanvas.style.zIndex = "0";
+			baseCanvas.style.pointerEvents = "none";
+			baseCanvas.style.backgroundColor = "#f0f0f0";
+			baseCanvas.style.visibility = "";
+			markPageRendered(pageNumber);
+			return;
+		}
 
 		const targetBaseScale = dpr * Math.min(zoom, 1);
 		const baseScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
@@ -200,6 +220,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		pageNumber,
 		markPageRendered,
 		docId,
+		isActive,
 	]);
 
 	useEffect(() => {
