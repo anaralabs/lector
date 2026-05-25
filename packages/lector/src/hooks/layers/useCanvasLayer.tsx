@@ -102,6 +102,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const dpr = useDpr();
 
 	const bouncyZoom = usePdf((state) => state.zoom);
+	const isResizing = usePdf((state) => state.isResizing);
 	const docId = usePdf((state) => state.pdfDocumentProxy.fingerprints[0] ?? "");
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const markPageRendered = usePdf((state) => state.markPageRendered);
@@ -116,6 +117,12 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
 		const pageWidth = baseViewport.width;
 		const pageHeight = baseViewport.height;
+
+		if (isResizing && baseCanvas.width > 0 && baseCanvas.height > 0) {
+			baseCanvas.style.width = `${pageWidth}px`;
+			baseCanvas.style.height = `${pageHeight}px`;
+			return;
+		}
 
 		const targetBaseScale = dpr * Math.min(zoom, 1);
 		const baseScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
@@ -233,6 +240,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		background,
 		dpr,
 		zoom,
+		isResizing,
 		pageNumber,
 		markPageRendered,
 		docId,
