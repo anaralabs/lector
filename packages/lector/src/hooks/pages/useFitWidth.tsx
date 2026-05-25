@@ -67,6 +67,10 @@ export const useFitWidth = ({ viewportRef }: UseFitWidth) => {
 				cancelAnimationFrame(pendingFrameRef.current);
 				pendingFrameRef.current = null;
 			}
+			// Clear isResizing on unmount — otherwise tearing down mid-drag
+			// leaves the store stuck in resizing mode and useCanvasLayer
+			// keeps skipping render() for pages that already have a bitmap.
+			if (store.getState().isResizing) setIsResizing(false);
 		};
 	}, [store, updateZoom, setIsResizing, viewportRef, viewports, zoomOptions]);
 

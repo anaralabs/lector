@@ -119,6 +119,10 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const pageHeight = baseViewport.height;
 
 		if (isResizing && baseCanvas.width > 0 && baseCanvas.height > 0) {
+			// Restore visibility — if a render started, hid the canvas, then
+			// got interrupted by isResizing flipping true, we'd otherwise
+			// leave the page blank for the entire drag.
+			baseCanvas.style.visibility = "";
 			baseCanvas.style.width = `${pageWidth}px`;
 			baseCanvas.style.height = `${pageHeight}px`;
 			return;
