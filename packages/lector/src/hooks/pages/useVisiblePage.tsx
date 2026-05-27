@@ -5,9 +5,17 @@ import { usePdf } from "../../internal";
 
 interface UseVisiblePageProps {
 	items: VirtualItem[];
+	/**
+	 * The virtualizer's tracked scroll offset (px). Passed in so we never read
+	 * `scrollElement.scrollTop` here — reading layout in this per-scroll effect
+	 * forces a synchronous reflow on every frame, which is pathologically
+	 * expensive under large stylesheets (e.g. Tailwind v4's registered
+	 * @property custom properties amplify forced style-recalc ~8x).
+	 */
+	scrollOffset: number;
 }
 
-export const useVisiblePage = ({ items }: UseVisiblePageProps) => {
+export const useVisiblePage = ({ items, scrollOffset }: UseVisiblePageProps) => {
 	const zoomLevel = usePdf((state) => state.zoom);
 	const isPinching = usePdf((state) => state.isPinching);
 	const setCurrentPage = usePdf((state) => state.setCurrentPage);
@@ -15,12 +23,27 @@ export const useVisiblePage = ({ items }: UseVisiblePageProps) => {
 
 	const lastPageRef = useRef(0);
 
+	// Cache the viewport height — it only changes on resize, so reading
+	// `clientHeight` on every scroll would force a layout reflow each frame.
+	const viewportHeightRef = useRef(0);
+	useEffect(() => {
+		if (!scrollElement) return;
+		viewportHeightRef.current = scrollElement.clientHeight;
+		const observer = new ResizeObserver(() => {
+			viewportHeightRef.current = scrollElement.clientHeight;
+		});
+		observer.observe(scrollElement);
+		return () => observer.disconnect();
+	}, [scrollElement]);
+
 	const calculateVisiblePageIndex = useCallback(
 		(virtualItems: VirtualItem[]) => {
-			if (!scrollElement || virtualItems.length === 0) return 0;
+			if (virtualItems.length === 0) return 0;
 
-			const scrollTop = scrollElement.scrollTop / zoomLevel;
-			const viewportHeight = scrollElement.clientHeight / zoomLevel;
+			// Derive everything from cached/virtualizer values — no DOM layout
+			// reads, so this never forces a reflow during scroll.
+			const scrollTop = scrollOffset / zoomLevel;
+			const viewportHeight = viewportHeightRef.current / zoomLevel;
 			const viewportCenter = scrollTop + viewportHeight / 2;
 
 			// Find the page whose center is closest to viewport center
@@ -40,7 +63,7 @@ export const useVisiblePage = ({ items }: UseVisiblePageProps) => {
 
 			return closestIndex;
 		},
-		[scrollElement, zoomLevel],
+		[scrollOffset, zoomLevel],
 	);
 
 	useEffect(() => {

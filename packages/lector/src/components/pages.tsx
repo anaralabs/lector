@@ -161,6 +161,7 @@ export const Pages = ({
 
 	useVisiblePage({
 		items,
+		scrollOffset: virtualizer.scrollOffset ?? 0,
 	});
 
 	useFitWidth({ viewportRef: containerRef });
