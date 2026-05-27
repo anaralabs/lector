@@ -15,7 +15,10 @@ interface UseVisiblePageProps {
 	scrollOffset: number;
 }
 
-export const useVisiblePage = ({ items, scrollOffset }: UseVisiblePageProps) => {
+export const useVisiblePage = ({
+	items,
+	scrollOffset,
+}: UseVisiblePageProps) => {
 	const zoomLevel = usePdf((state) => state.zoom);
 	const isPinching = usePdf((state) => state.isPinching);
 	const setCurrentPage = usePdf((state) => state.setCurrentPage);
