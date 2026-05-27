@@ -34,13 +34,16 @@ export const useVisiblePage = ({
 	const [viewportHeight, setViewportHeight] = useState(0);
 	useEffect(() => {
 		if (!scrollElement) return;
-		// Measure once on attach regardless; only wire up the observer where the
-		// API exists (older embedded browsers / jsdom consumer tests lack it).
-		setViewportHeight(scrollElement.clientHeight);
-		if (typeof ResizeObserver === "undefined") return;
-		const observer = new ResizeObserver(() => {
-			setViewportHeight(scrollElement.clientHeight);
-		});
+		const measure = () => setViewportHeight(scrollElement.clientHeight);
+		measure();
+		// Prefer ResizeObserver (catches container resizes, not just window
+		// ones); fall back to window `resize` where it's unavailable (older
+		// embedded browsers / jsdom consumer tests) so the height still updates.
+		if (typeof ResizeObserver === "undefined") {
+			window.addEventListener("resize", measure);
+			return () => window.removeEventListener("resize", measure);
+		}
+		const observer = new ResizeObserver(measure);
 		observer.observe(scrollElement);
 		return () => observer.disconnect();
 	}, [scrollElement]);
