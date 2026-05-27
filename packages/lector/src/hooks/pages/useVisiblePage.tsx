@@ -34,7 +34,10 @@ export const useVisiblePage = ({
 	const [viewportHeight, setViewportHeight] = useState(0);
 	useEffect(() => {
 		if (!scrollElement) return;
+		// Measure once on attach regardless; only wire up the observer where the
+		// API exists (older embedded browsers / jsdom consumer tests lack it).
 		setViewportHeight(scrollElement.clientHeight);
+		if (typeof ResizeObserver === "undefined") return;
 		const observer = new ResizeObserver(() => {
 			setViewportHeight(scrollElement.clientHeight);
 		});
@@ -74,7 +77,10 @@ export const useVisiblePage = ({
 	);
 
 	useEffect(() => {
-		if (!isPinching && items.length > 0) {
+		// Wait for a real viewport height before publishing — at height 0 the
+		// center collapses to the viewport top, which can briefly report the
+		// wrong page on mount or a restored/deep-linked scroll position.
+		if (!isPinching && items.length > 0 && viewportHeight > 0) {
 			const mostVisibleIndex = calculateVisiblePageIndex(items);
 			const page = mostVisibleIndex + 1;
 
@@ -84,7 +90,13 @@ export const useVisiblePage = ({
 				setCurrentPage?.(page);
 			}
 		}
-	}, [items, isPinching, calculateVisiblePageIndex, setCurrentPage]);
+	}, [
+		items,
+		isPinching,
+		calculateVisiblePageIndex,
+		setCurrentPage,
+		viewportHeight,
+	]);
 
 	return null;
 };
