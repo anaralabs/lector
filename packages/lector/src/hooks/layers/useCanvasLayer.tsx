@@ -161,7 +161,13 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		buffer.width = baseCanvas.width;
 		buffer.height = baseCanvas.height;
 		const bufferCtx = buffer.getContext("2d");
-		if (!bufferCtx) return;
+		if (!bufferCtx) {
+			// Restore visibility — we hid the canvas above for the rerender, and
+			// without a buffer context there's nothing to draw, so otherwise the
+			// page would stay blank.
+			baseCanvas.style.visibility = "";
+			return;
+		}
 
 		const renderingTask = pdfPageProxy.render({
 			canvas: buffer,
@@ -181,6 +187,11 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 					releaseBuffer();
 					return;
 				}
+				// Clear before blitting: drawImage composites source-over, so on a
+				// page with transparent regions (or a transparent background) any
+				// pixels already on the canvas would show through. The render task
+				// resolves async, so don't rely on the clear at effect start.
+				context.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
 				context.drawImage(buffer, 0, 0);
 				baseCanvas.style.visibility = "";
 				markPageRendered(pageNumber);

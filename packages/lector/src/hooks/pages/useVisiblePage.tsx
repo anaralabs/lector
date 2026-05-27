@@ -1,5 +1,5 @@
 import type { VirtualItem } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { usePdf } from "../../internal";
 
@@ -26,14 +26,17 @@ export const useVisiblePage = ({
 
 	const lastPageRef = useRef(0);
 
-	// Cache the viewport height — it only changes on resize, so reading
-	// `clientHeight` on every scroll would force a layout reflow each frame.
-	const viewportHeightRef = useRef(0);
+	// Track viewport height in state — it only changes on resize (and when the
+	// scroll element first attaches), never on scroll, so the per-scroll path
+	// stays free of `clientHeight` reads (which would force a reflow each
+	// frame), while a resize still re-runs page detection below (it feeds
+	// `calculateVisiblePageIndex`'s deps).
+	const [viewportHeight, setViewportHeight] = useState(0);
 	useEffect(() => {
 		if (!scrollElement) return;
-		viewportHeightRef.current = scrollElement.clientHeight;
+		setViewportHeight(scrollElement.clientHeight);
 		const observer = new ResizeObserver(() => {
-			viewportHeightRef.current = scrollElement.clientHeight;
+			setViewportHeight(scrollElement.clientHeight);
 		});
 		observer.observe(scrollElement);
 		return () => observer.disconnect();
@@ -46,8 +49,7 @@ export const useVisiblePage = ({
 			// Derive everything from cached/virtualizer values — no DOM layout
 			// reads, so this never forces a reflow during scroll.
 			const scrollTop = scrollOffset / zoomLevel;
-			const viewportHeight = viewportHeightRef.current / zoomLevel;
-			const viewportCenter = scrollTop + viewportHeight / 2;
+			const viewportCenter = scrollTop + viewportHeight / zoomLevel / 2;
 
 			// Find the page whose center is closest to viewport center
 			let closestIndex = 0;
@@ -66,7 +68,7 @@ export const useVisiblePage = ({
 
 			return closestIndex;
 		},
-		[scrollOffset, zoomLevel],
+		[scrollOffset, zoomLevel, viewportHeight],
 	);
 
 	useEffect(() => {
