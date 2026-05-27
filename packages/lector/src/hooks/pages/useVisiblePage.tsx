@@ -11,8 +11,10 @@ interface UseVisiblePageProps {
 	 * forces a synchronous reflow on every frame, which is pathologically
 	 * expensive under large stylesheets (e.g. Tailwind v4's registered
 	 * @property custom properties amplify forced style-recalc ~8x).
+	 * Null before the virtualizer has measured its offset — page detection is
+	 * skipped until then so we never publish a stale top-of-document page.
 	 */
-	scrollOffset: number;
+	scrollOffset: number | null;
 }
 
 export const useVisiblePage = ({
@@ -50,7 +52,7 @@ export const useVisiblePage = ({
 
 	const calculateVisiblePageIndex = useCallback(
 		(virtualItems: VirtualItem[]) => {
-			if (virtualItems.length === 0) return 0;
+			if (virtualItems.length === 0 || scrollOffset == null) return 0;
 
 			// Derive everything from cached/virtualizer values — no DOM layout
 			// reads, so this never forces a reflow during scroll. `scrollOffset`
@@ -83,7 +85,12 @@ export const useVisiblePage = ({
 		// Wait for a real viewport height before publishing — at height 0 the
 		// center collapses to the viewport top, which can briefly report the
 		// wrong page on mount or a restored/deep-linked scroll position.
-		if (!isPinching && items.length > 0 && viewportHeight > 0) {
+		if (
+			!isPinching &&
+			items.length > 0 &&
+			viewportHeight > 0 &&
+			scrollOffset != null
+		) {
 			const mostVisibleIndex = calculateVisiblePageIndex(items);
 			const page = mostVisibleIndex + 1;
 
@@ -99,6 +106,7 @@ export const useVisiblePage = ({
 		calculateVisiblePageIndex,
 		setCurrentPage,
 		viewportHeight,
+		scrollOffset,
 	]);
 
 	return null;

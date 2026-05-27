@@ -161,7 +161,10 @@ export const Pages = ({
 
 	useVisiblePage({
 		items,
-		scrollOffset: virtualizer.scrollOffset ?? 0,
+		// Pass through nullish (pre-measure) rather than coercing to 0, so the
+		// hook doesn't publish a top-of-document page before the real offset
+		// (incl. a restored/deep-linked one) arrives.
+		scrollOffset: virtualizer.scrollOffset ?? null,
 	});
 
 	useFitWidth({ viewportRef: containerRef });
