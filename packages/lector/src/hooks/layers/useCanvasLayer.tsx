@@ -151,20 +151,41 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		let cancelled = false;
 		const viewport = pdfPageProxy.getViewport({ scale: baseScale });
 
+		// Render into a detached buffer, never the in-DOM canvas: pdf.js calls
+		// ctx.font / measureText during rendering, and those force a full
+		// document style-recalc when run on an attached canvas — pathological
+		// under large stylesheets (Tailwind v4's @property custom props), to the
+		// tune of ~6ms per call. Off-DOM the same ops are free; we blit the
+		// finished frame onto the visible canvas in one drawImage.
+		const buffer = document.createElement("canvas");
+		buffer.width = baseCanvas.width;
+		buffer.height = baseCanvas.height;
+		const bufferCtx = buffer.getContext("2d");
+		if (!bufferCtx) return;
+
 		const renderingTask = pdfPageProxy.render({
-			canvas: baseCanvas,
-			canvasContext: context,
+			canvas: buffer,
+			canvasContext: bufferCtx,
 			viewport,
 			background,
 		});
 
+		const releaseBuffer = () => {
+			buffer.width = 0;
+			buffer.height = 0;
+		};
+
 		renderingTask.promise
 			.then(() => {
-				if (cancelled) return;
+				if (cancelled) {
+					releaseBuffer();
+					return;
+				}
+				context.drawImage(buffer, 0, 0);
 				baseCanvas.style.visibility = "";
 				markPageRendered(pageNumber);
 				if (typeof createImageBitmap !== "undefined") {
-					createImageBitmap(baseCanvas)
+					createImageBitmap(buffer)
 						.then((bitmap) => {
 							if (cancelled) {
 								bitmap.close();
@@ -178,10 +199,14 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 								bitmap,
 							);
 						})
-						.catch(() => {});
+						.catch(() => {})
+						.finally(releaseBuffer);
+				} else {
+					releaseBuffer();
 				}
 			})
 			.catch((error) => {
+				releaseBuffer();
 				if (cancelled) return;
 				if (error?.name === "RenderingCancelledException") return;
 				baseCanvas.style.visibility = "";
