@@ -47,9 +47,11 @@ export const useVisiblePage = ({
 			if (virtualItems.length === 0) return 0;
 
 			// Derive everything from cached/virtualizer values — no DOM layout
-			// reads, so this never forces a reflow during scroll.
-			const scrollTop = scrollOffset / zoomLevel;
-			const viewportCenter = scrollTop + viewportHeight / zoomLevel / 2;
+			// reads, so this never forces a reflow during scroll. `scrollOffset`
+			// is already zoom-normalized by the virtualizer (useObserveElement
+			// divides scrollTop by zoom), and item start/size live in that same
+			// unzoomed space — so only the raw viewport height needs dividing.
+			const viewportCenter = scrollOffset + viewportHeight / zoomLevel / 2;
 
 			// Find the page whose center is closest to viewport center
 			let closestIndex = 0;
