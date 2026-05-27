@@ -82,6 +82,19 @@ export const useVisiblePage = ({
 	);
 
 	useEffect(() => {
+		// Self-heal a stale 0 height: if the element now has a real height but
+		// our cached value is still 0 (e.g. mounted hidden in a tab/accordion in
+		// an environment without ResizeObserver, then shown without a window
+		// resize), pick it up here. Gated on `=== 0`, so steady-state scrolling
+		// never reads layout — no reflow on the hot path.
+		if (viewportHeight === 0 && scrollElement) {
+			const h = scrollElement.clientHeight;
+			if (h > 0) {
+				setViewportHeight(h);
+				return;
+			}
+		}
+
 		// Wait for a real viewport height before publishing — at height 0 the
 		// center collapses to the viewport top, which can briefly report the
 		// wrong page on mount or a restored/deep-linked scroll position.
@@ -107,6 +120,7 @@ export const useVisiblePage = ({
 		setCurrentPage,
 		viewportHeight,
 		scrollOffset,
+		scrollElement,
 	]);
 
 	return null;

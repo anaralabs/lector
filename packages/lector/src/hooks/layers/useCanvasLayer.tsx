@@ -156,22 +156,20 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		// document style-recalc when run on an attached canvas — pathological
 		// under large stylesheets (Tailwind v4's @property custom props), to the
 		// tune of ~6ms per call. Off-DOM the same ops are free; we blit the
-		// finished frame onto the visible canvas in one drawImage.
+		// finished frame onto the visible canvas in one drawImage. If a second
+		// 2D context can't be allocated (canvas memory pressure), fall back to
+		// rendering directly into the visible canvas so the page still renders.
 		const buffer = document.createElement("canvas");
 		buffer.width = baseCanvas.width;
 		buffer.height = baseCanvas.height;
 		const bufferCtx = buffer.getContext("2d");
-		if (!bufferCtx) {
-			// Restore visibility — we hid the canvas above for the rerender, and
-			// without a buffer context there's nothing to draw, so otherwise the
-			// page would stay blank.
-			baseCanvas.style.visibility = "";
-			return;
-		}
+		const useBuffer = bufferCtx !== null;
+		const renderCanvas = useBuffer ? buffer : baseCanvas;
+		const renderCtx = bufferCtx ?? context;
 
 		const renderingTask = pdfPageProxy.render({
-			canvas: buffer,
-			canvasContext: bufferCtx,
+			canvas: renderCanvas,
+			canvasContext: renderCtx,
 			viewport,
 			background,
 		});
@@ -187,16 +185,18 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 					releaseBuffer();
 					return;
 				}
-				// Clear before blitting: drawImage composites source-over, so on a
-				// page with transparent regions (or a transparent background) any
-				// pixels already on the canvas would show through. The render task
-				// resolves async, so don't rely on the clear at effect start.
-				context.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
-				context.drawImage(buffer, 0, 0);
+				if (useBuffer) {
+					// Clear before blitting: drawImage composites source-over, so on
+					// a page with transparent regions (or a transparent background)
+					// any pixels already on the canvas would show through. The render
+					// task resolves async, so don't rely on the clear at effect start.
+					context.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+					context.drawImage(buffer, 0, 0);
+				}
 				baseCanvas.style.visibility = "";
 				markPageRendered(pageNumber);
 				if (typeof createImageBitmap !== "undefined") {
-					createImageBitmap(buffer)
+					createImageBitmap(renderCanvas)
 						.then((bitmap) => {
 							if (cancelled) {
 								bitmap.close();
