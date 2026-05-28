@@ -9,7 +9,6 @@ overrides:
   brace-expansion@2: ^2.0.3
   fast-xml-parser: ^4.5.4
   handlebars: ^4.7.9
-  ip-address: ^10.1.1
   '@babel/helpers': ^7.26.10
   '@babel/runtime': ^7.26.10
   '@octokit/endpoint': ^10.1.3
@@ -31,6 +30,7 @@ overrides:
   yaml@2: ^2.8.3
   vite@5: ^5.4.21
   vite@6: ^6.4.2
+  socks: ^2.8.9
 
 importers:
 
@@ -4698,8 +4698,8 @@ packages:
     resolution: {integrity: sha512-HehCEsotFqbPW9sJ8WVYB6UbmIMv7kUUORIF2Nncq4VQvBfNBLibW9YZR5dlYCSUhwcD628pRllm7n+E+YTzJw==}
     engines: {node: '>= 14'}
 
-  socks@2.8.3:
-    resolution: {integrity: sha512-l5x7VUUWbjVFbafGLxPWkYsHIhEvmF85tbIeFZWc8ZPtoMyybuEhL7Jye/ooC4/d48FgOjSJXgsF/AJPYCW8Zw==}
+  socks@2.8.9:
+    resolution: {integrity: sha512-LJhUYUvItdQ0LkJTmPeaEObWXAqFyfmP85x0tch/ez9cahmhlBBLbIqDFnvBnUJGagb0JbIQrkBs1wJ+yRYpEw==}
     engines: {node: '>= 10.0.0', npm: '>= 3.0.0'}
 
   source-map-js@1.2.1:
@@ -10208,11 +10208,11 @@ snapshots:
     dependencies:
       agent-base: 7.1.3
       debug: 4.4.0
-      socks: 2.8.3
+      socks: 2.8.9
     transitivePeerDependencies:
       - supports-color
 
-  socks@2.8.3:
+  socks@2.8.9:
     dependencies:
       ip-address: 10.2.0
       smart-buffer: 4.2.0

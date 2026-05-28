@@ -82,7 +82,6 @@
       "brace-expansion@2": "^2.0.3",
       "fast-xml-parser": "^4.5.4",
       "handlebars": "^4.7.9",
-      "ip-address": "^10.1.1",
       "@babel/helpers": "^7.26.10",
       "@babel/runtime": "^7.26.10",
       "@octokit/endpoint": "^10.1.3",
@@ -103,7 +102,8 @@
       "ws@8": "^8.20.1",
       "yaml@2": "^2.8.3",
       "vite@5": "^5.4.21",
-      "vite@6": "^6.4.2"
+      "vite@6": "^6.4.2",
+      "socks": "^2.8.9"
     }
   }
 }
