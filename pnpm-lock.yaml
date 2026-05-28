@@ -31,7 +31,6 @@ overrides:
   yaml@2: ^2.8.3
   vite@5: ^5.4.21
   vite@6: ^6.4.2
-  turbo: ^2.9.14
   esbuild@<0.25.0: 0.25.10
 
 importers:

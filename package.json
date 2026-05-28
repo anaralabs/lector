@@ -17,7 +17,7 @@
     "@biomejs/biome": "^2.2.4",
     "@commitlint/config-conventional": "^19.6.0",
     "commitlint": "^19.6.1",
-    "turbo": "^2.3.3"
+    "turbo": "^2.9.14"
   },
   "keywords": [
     "pdf",
@@ -104,7 +104,6 @@
       "yaml@2": "^2.8.3",
       "vite@5": "^5.4.21",
       "vite@6": "^6.4.2",
-      "turbo": "^2.9.14",
       "esbuild@<0.25.0": "0.25.10"
     }
   }
