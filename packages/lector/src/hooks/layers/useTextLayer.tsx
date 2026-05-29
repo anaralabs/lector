@@ -185,71 +185,76 @@ const createTextSelectionManager = () => {
 
 const bindMouseEvents = createTextSelectionManager();
 
+// Pages flicked past during a fast scroll mount and unmount within a few frames.
+// Building their text layer (stream all text content from the pdf worker + lay
+// out one span per glyph-run) is pure waste then — you can't select text you're
+// flying past — and it's the dominant scroll cost on text-dense PDFs. Defer the
+// build until the page has stayed mounted for this long; flown-past pages never
+// build. Text selection / search work as soon as scrolling settles.
+const TEXT_BUILD_IDLE_MS = 300;
+
 export const useTextLayer = () => {
 	const textContainerRef = useRef<TextLayerDivElement>(null);
 	const textLayerRef = useRef<{
 		cancel: () => void;
 		render: () => Promise<void>;
 	} | null>(null);
-	const isRenderingRef = useRef(false);
 
 	const pageNumber = usePDFPageNumber();
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 
 	useEffect(() => {
 		const textContainer = textContainerRef.current;
-		if (!textContainer || isRenderingRef.current) {
+		if (!textContainer) {
 			return;
 		}
 
 		let isCancelled = false;
 
-		isRenderingRef.current = true;
+		const buildTimer = setTimeout(() => {
+			if (isCancelled || textContainerRef.current !== textContainer) return;
 
-		textContainer.innerHTML = "";
+			textContainer.innerHTML = "";
+			if (textLayerRef.current) {
+				textLayerRef.current.cancel();
+				textLayerRef.current = null;
+			}
 
-		if (textLayerRef.current) {
-			textLayerRef.current.cancel();
-			textLayerRef.current = null;
-		}
+			void import("pdfjs-dist/legacy/build/pdf.mjs")
+				.then(({ TextLayer }) => {
+					if (isCancelled || textContainerRef.current !== textContainer) return;
 
-		void import("pdfjs-dist/legacy/build/pdf.mjs")
-			.then(({ TextLayer }) => {
-				if (isCancelled || textContainerRef.current !== textContainer) return;
+					const textLayer = new TextLayer({
+						textContentSource: pdfPageProxy.streamTextContent(),
+						container: textContainer,
+						viewport: pdfPageProxy.getViewport({ scale: 1 }),
+					});
 
-				const textLayer = new TextLayer({
-					textContentSource: pdfPageProxy.streamTextContent(),
-					container: textContainer,
-					viewport: pdfPageProxy.getViewport({ scale: 1 }),
+					textLayerRef.current = textLayer;
+
+					return textLayer.render();
+				})
+				.then(() => {
+					if (isCancelled || textContainerRef.current !== textContainer) {
+						return;
+					}
+
+					const endOfContent = document.createElement("div");
+					endOfContent.className = "endOfContent";
+					textContainer.appendChild(endOfContent);
+
+					bindMouseEvents(textContainer, endOfContent);
+				})
+				.catch((error) => {
+					if (error instanceof Error && error.name !== "AbortException") {
+						console.error("TextLayer rendering error:", error);
+					}
 				});
-
-				textLayerRef.current = textLayer;
-
-				return textLayer.render();
-			})
-			.then(() => {
-				if (isCancelled || textContainerRef.current !== textContainer) {
-					return;
-				}
-
-				const endOfContent = document.createElement("div");
-				endOfContent.className = "endOfContent";
-				textContainer.appendChild(endOfContent);
-
-				bindMouseEvents(textContainer, endOfContent);
-			})
-			.catch((error) => {
-				if (error instanceof Error && error.name !== "AbortException") {
-					console.error("TextLayer rendering error:", error);
-				}
-			})
-			.finally(() => {
-				isRenderingRef.current = false;
-			});
+		}, TEXT_BUILD_IDLE_MS);
 
 		return () => {
 			isCancelled = true;
-			isRenderingRef.current = false;
+			clearTimeout(buildTimer);
 
 			if (textLayerRef.current) {
 				textLayerRef.current.cancel();
