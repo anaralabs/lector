@@ -24,7 +24,7 @@ const selectLargestPageWidth = (state: {
 
 const DEFAULT_HEIGHT = 600;
 const EXTRA_HEIGHT = 0;
-const DEFAULT_VIRTUALIZER_OPTIONS = { overscan: 1 };
+const DEFAULT_VIRTUALIZER_OPTIONS = { overscan: 3 };
 
 interface VirtualizedPageItemProps {
 	child: ReactElement;
