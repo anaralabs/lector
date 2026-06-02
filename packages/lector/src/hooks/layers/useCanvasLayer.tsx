@@ -97,6 +97,7 @@ function setCachedBitmap(
 
 export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
+	const hasContentRef = useRef(false);
 	const pageNumber = usePDFPageNumber();
 
 	const dpr = useDpr();
@@ -118,15 +119,16 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const pageWidth = baseViewport.width;
 		const pageHeight = baseViewport.height;
 
-		if (isResizing && baseCanvas.width > 0 && baseCanvas.height > 0) {
-			// Restore visibility — if a render started, hid the canvas, then
-			// got interrupted by isResizing flipping true, we'd otherwise
-			// leave the page blank for the entire drag.
+		// Mid-resize, reuse the painted frame via CSS — but only if one exists,
+		// else we'd un-hide a cleared, never-painted canvas (blank for the drag).
+		if (isResizing && hasContentRef.current) {
 			baseCanvas.style.visibility = "";
 			baseCanvas.style.width = `${pageWidth}px`;
 			baseCanvas.style.height = `${pageHeight}px`;
 			return;
 		}
+
+		hasContentRef.current = false;
 
 		const targetBaseScale = dpr * Math.min(zoom, 1);
 		const baseScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
@@ -151,6 +153,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		if (cached) {
 			context.drawImage(cached, 0, 0);
 			markPageRendered(pageNumber);
+			hasContentRef.current = true;
 			return;
 		}
 
@@ -206,6 +209,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 				}
 				baseCanvas.style.visibility = "";
 				markPageRendered(pageNumber);
+				hasContentRef.current = true;
 				if (typeof createImageBitmap !== "undefined") {
 					createImageBitmap(renderCanvas)
 						.then((bitmap) => {
