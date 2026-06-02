@@ -27,18 +27,22 @@ export const useFitWidth = ({ viewportRef }: UseFitWidth) => {
 		const resizeObserver = new ResizeObserver((entries) => {
 			for (const entry of entries) {
 				if (entry.target !== viewportRef.current) continue;
+				const prevWidth = latestWidthRef.current;
 				latestWidthRef.current = entry.contentRect.width;
 
-				// Flip isResizing immediately on every entry; clear once the
-				// observer has been quiet for RESIZE_QUIET_MS. useCanvasLayer
-				// reads this flag and skips pdfPageProxy.render() during the
-				// drag, just stretching the existing bitmap via CSS.
-				if (!store.getState().isResizing) setIsResizing(true);
-				if (quietTimer) clearTimeout(quietTimer);
-				quietTimer = setTimeout(() => {
-					setIsResizing(false);
-					quietTimer = null;
-				}, RESIZE_QUIET_MS);
+				// Enter resizing mode on a real width change only. The initial
+				// observe() callback (and height-only resizes) must not flip it:
+				// useCanvasLayer cancels in-flight renders on the change, so that
+				// would restart every page's first render on mount. Cleared once
+				// the observer has been quiet for RESIZE_QUIET_MS.
+				if (prevWidth !== null && prevWidth !== entry.contentRect.width) {
+					if (!store.getState().isResizing) setIsResizing(true);
+					if (quietTimer) clearTimeout(quietTimer);
+					quietTimer = setTimeout(() => {
+						setIsResizing(false);
+						quietTimer = null;
+					}, RESIZE_QUIET_MS);
+				}
 
 				// rAF-coalesce the zoom update: any number of ResizeObserver
 				// entries that land in the same frame produce one updateZoom.
