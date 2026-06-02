@@ -30,12 +30,17 @@ export const useFitWidth = ({ viewportRef }: UseFitWidth) => {
 				const prevWidth = latestWidthRef.current;
 				latestWidthRef.current = entry.contentRect.width;
 
-				// Enter resizing mode on a real width change only. The initial
-				// observe() callback (and height-only resizes) must not flip it:
-				// useCanvasLayer cancels in-flight renders on the change, so that
-				// would restart every page's first render on mount. Cleared once
+				// Enter resizing mode only when a real width change will actually
+				// re-render pages: fit-width mode, where the resize drives zoom.
+				// Outside fit-width — and on the initial observe() / height-only
+				// resizes — flipping isResizing is pure churn, since useCanvasLayer
+				// re-runs every visible canvas effect on the change. Cleared once
 				// the observer has been quiet for RESIZE_QUIET_MS.
-				if (prevWidth !== null && prevWidth !== entry.contentRect.width) {
+				if (
+					store.getState().isZoomFitWidth &&
+					prevWidth !== null &&
+					prevWidth !== entry.contentRect.width
+				) {
 					if (!store.getState().isResizing) setIsResizing(true);
 					if (quietTimer) clearTimeout(quietTimer);
 					quietTimer = setTimeout(() => {
