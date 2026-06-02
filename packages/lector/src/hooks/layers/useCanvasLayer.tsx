@@ -97,11 +97,13 @@ function setCachedBitmap(
 
 export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
+	const hasContentRef = useRef(false);
 	const pageNumber = usePDFPageNumber();
 
 	const dpr = useDpr();
 
 	const bouncyZoom = usePdf((state) => state.zoom);
+	const isResizing = usePdf((state) => state.isResizing);
 	const docId = usePdf((state) => state.pdfDocumentProxy.fingerprints[0] ?? "");
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const markPageRendered = usePdf((state) => state.markPageRendered);
@@ -116,6 +118,17 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
 		const pageWidth = baseViewport.width;
 		const pageHeight = baseViewport.height;
+
+		// Mid-resize, reuse the painted frame via CSS — but only if one exists,
+		// else we'd un-hide a cleared, never-painted canvas (blank for the drag).
+		if (isResizing && hasContentRef.current) {
+			baseCanvas.style.visibility = "";
+			baseCanvas.style.width = `${pageWidth}px`;
+			baseCanvas.style.height = `${pageHeight}px`;
+			return;
+		}
+
+		hasContentRef.current = false;
 
 		const targetBaseScale = dpr * Math.min(zoom, 1);
 		const baseScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
@@ -140,6 +153,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		if (cached) {
 			context.drawImage(cached, 0, 0);
 			markPageRendered(pageNumber);
+			hasContentRef.current = true;
 			return;
 		}
 
@@ -195,6 +209,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 				}
 				baseCanvas.style.visibility = "";
 				markPageRendered(pageNumber);
+				hasContentRef.current = true;
 				if (typeof createImageBitmap !== "undefined") {
 					createImageBitmap(renderCanvas)
 						.then((bitmap) => {
@@ -233,6 +248,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		background,
 		dpr,
 		zoom,
+		isResizing,
 		pageNumber,
 		markPageRendered,
 		docId,
