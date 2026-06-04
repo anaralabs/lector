@@ -51,6 +51,9 @@ interface PDFState {
 	isPinching: boolean;
 	setIsPinching: (isPinching: boolean) => void;
 
+	isResizing: boolean;
+	setIsResizing: (isResizing: boolean) => void;
+
 	currentPage: number;
 	setCurrentPage: (pageNumber: number) => void;
 
@@ -153,6 +156,13 @@ export const PDFStore = createZustandContext(
 			setIsPinching: (val) => {
 				set({
 					isPinching: val,
+				});
+			},
+
+			isResizing: false,
+			setIsResizing: (val) => {
+				set({
+					isResizing: val,
 				});
 			},
 

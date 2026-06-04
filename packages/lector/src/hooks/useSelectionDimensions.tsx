@@ -1,6 +1,7 @@
 import { type HighlightRect, PDFStore } from "../internal";
 
 const MERGE_THRESHOLD = 2; // Reduced threshold for more precise merging
+const LAYER_ATTRIBUTION_TOLERANCE_PX = 4;
 
 type CollapsibleSelection = {
 	highlights: HighlightRect[];
@@ -99,12 +100,13 @@ const mapSelectionRectsToLayers = (range: Range): MappedSelectionRect[] => {
 	const layerForRect = (rect: DOMRect): HTMLElement | null => {
 		const cx = rect.left + rect.width / 2;
 		const cy = rect.top + rect.height / 2;
+		const T = LAYER_ATTRIBUTION_TOLERANCE_PX;
 		const geomMatch = textLayerEntries.find(
 			({ rect: lr }) =>
-				cx >= lr.left - 1 &&
-				cx <= lr.right + 1 &&
-				cy >= lr.top - 1 &&
-				cy <= lr.bottom + 1,
+				cx >= lr.left - T &&
+				cx <= lr.right + T &&
+				cy >= lr.top - T &&
+				cy <= lr.bottom + T,
 		);
 		if (geomMatch) return geomMatch.el;
 
@@ -129,13 +131,6 @@ const mapSelectionRectsToLayers = (range: Range): MappedSelectionRect[] => {
 		if (!layer) continue;
 
 		const layerRect = layer.getBoundingClientRect();
-		const fitsInLayer =
-			clientRect.top >= layerRect.top - 1 &&
-			clientRect.bottom <= layerRect.bottom + 1 &&
-			clientRect.left >= layerRect.left - 1 &&
-			clientRect.right <= layerRect.right + 1;
-		if (!fitsInLayer) continue;
-
 		const pageNumber = parseInt(
 			layer.getAttribute("data-page-number") || "1",
 			10,

@@ -17,7 +17,7 @@
     "@biomejs/biome": "^2.2.4",
     "@commitlint/config-conventional": "^19.6.0",
     "commitlint": "^19.6.1",
-    "turbo": "^2.3.3"
+    "turbo": "^2.9.14"
   },
   "keywords": [
     "pdf",
@@ -74,6 +74,36 @@
         "always",
         true
       ]
+    }
+  },
+  "pnpm": {
+    "overrides": {
+      "brace-expansion@1": "^1.1.13",
+      "brace-expansion@2": "^2.0.3",
+      "fast-xml-parser": "^4.5.4",
+      "handlebars": "^4.7.9",
+      "@babel/helpers": "^7.26.10",
+      "@babel/runtime": "^7.26.10",
+      "@octokit/endpoint": "^10.1.3",
+      "@octokit/plugin-paginate-rest": "^11.4.1",
+      "@octokit/request-error": "^6.1.7",
+      "@octokit/request": "^9.2.1",
+      "ajv@8": "^8.18.0",
+      "estree-util-value-to-estree": "^3.3.3",
+      "js-yaml@3": "^3.14.2",
+      "js-yaml@4": "^4.1.1",
+      "lodash": "^4.18.0",
+      "lodash-es": "^4.18.1",
+      "mdast-util-to-hast": "^13.2.1",
+      "picomatch@2": "^2.3.2",
+      "picomatch@4": "^4.0.4",
+      "postcss@8": "^8.5.10",
+      "uuid": "^11.1.1",
+      "ws@8": "^8.20.1",
+      "yaml@2": "^2.8.3",
+      "vite@5": "^6.4.2",
+      "vite@6": "^6.4.2",
+      "socks": "^2.8.9"
     }
   }
 }

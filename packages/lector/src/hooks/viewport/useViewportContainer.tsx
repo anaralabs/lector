@@ -247,14 +247,22 @@ export const useViewportContainer = ({
 					const containerRect = currentContainer.getBoundingClientRect();
 					const currentZoom = transformations.current.zoom;
 
+					// containerRect is the border box, but the inner element
+					// sits in the padding box. Bake padding into containerPosition
+					// so the pinch math doesn't drop scrollTop by paddingTop on
+					// the first frame when the scroll container has padding.
+					const containerStyle = getComputedStyle(currentContainer);
+					const paddingTop = parseFloat(containerStyle.paddingTop) || 0;
+					const paddingLeft = parseFloat(containerStyle.paddingLeft) || 0;
+
 					const contentPosition: [number, number] = [
 						origin[0] - elementRect.left,
 						origin[1] - elementRect.top,
 					];
 
 					const containerPosition: [number, number] = [
-						origin[0] - containerRect.left,
-						origin[1] - containerRect.top,
+						origin[0] - containerRect.left - paddingLeft,
+						origin[1] - containerRect.top - paddingTop,
 					];
 
 					originRef.current = [

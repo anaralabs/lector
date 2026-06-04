@@ -97,11 +97,13 @@ function setCachedBitmap(
 
 export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
+	const hasContentRef = useRef(false);
 	const pageNumber = usePDFPageNumber();
 
 	const dpr = useDpr();
 
 	const bouncyZoom = usePdf((state) => state.zoom);
+	const isResizing = usePdf((state) => state.isResizing);
 	const docId = usePdf((state) => state.pdfDocumentProxy.fingerprints[0] ?? "");
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const markPageRendered = usePdf((state) => state.markPageRendered);
@@ -116,6 +118,17 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const baseViewport = pdfPageProxy.getViewport({ scale: 1 });
 		const pageWidth = baseViewport.width;
 		const pageHeight = baseViewport.height;
+
+		// Mid-resize, reuse the painted frame via CSS — but only if one exists,
+		// else we'd un-hide a cleared, never-painted canvas (blank for the drag).
+		if (isResizing && hasContentRef.current) {
+			baseCanvas.style.visibility = "";
+			baseCanvas.style.width = `${pageWidth}px`;
+			baseCanvas.style.height = `${pageHeight}px`;
+			return;
+		}
+
+		hasContentRef.current = false;
 
 		const targetBaseScale = dpr * zoom;
 		const baseScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
@@ -140,6 +153,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		if (cached) {
 			context.drawImage(cached, 0, 0);
 			markPageRendered(pageNumber);
+			hasContentRef.current = true;
 			return;
 		}
 
@@ -151,20 +165,53 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		let cancelled = false;
 		const viewport = pdfPageProxy.getViewport({ scale: baseScale });
 
+		// Render into a detached buffer, never the in-DOM canvas: pdf.js calls
+		// ctx.font / measureText during rendering, and those force a full
+		// document style-recalc when run on an attached canvas — pathological
+		// under large stylesheets (Tailwind v4's @property custom props), to the
+		// tune of ~6ms per call. Off-DOM the same ops are free; we blit the
+		// finished frame onto the visible canvas in one drawImage. If a second
+		// 2D context can't be allocated (canvas memory pressure), fall back to
+		// rendering directly into the visible canvas so the page still renders.
+		const buffer = document.createElement("canvas");
+		buffer.width = baseCanvas.width;
+		buffer.height = baseCanvas.height;
+		const bufferCtx = buffer.getContext("2d");
+		const useBuffer = bufferCtx !== null;
+		const renderCanvas = useBuffer ? buffer : baseCanvas;
+		const renderCtx = bufferCtx ?? context;
+
 		const renderingTask = pdfPageProxy.render({
-			canvas: baseCanvas,
-			canvasContext: context,
+			canvas: renderCanvas,
+			canvasContext: renderCtx,
 			viewport,
 			background,
 		});
 
+		const releaseBuffer = () => {
+			buffer.width = 0;
+			buffer.height = 0;
+		};
+
 		renderingTask.promise
 			.then(() => {
-				if (cancelled) return;
+				if (cancelled) {
+					releaseBuffer();
+					return;
+				}
+				if (useBuffer) {
+					// Clear before blitting: drawImage composites source-over, so on
+					// a page with transparent regions (or a transparent background)
+					// any pixels already on the canvas would show through. The render
+					// task resolves async, so don't rely on the clear at effect start.
+					context.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+					context.drawImage(buffer, 0, 0);
+				}
 				baseCanvas.style.visibility = "";
 				markPageRendered(pageNumber);
+				hasContentRef.current = true;
 				if (typeof createImageBitmap !== "undefined") {
-					createImageBitmap(baseCanvas)
+					createImageBitmap(renderCanvas)
 						.then((bitmap) => {
 							if (cancelled) {
 								bitmap.close();
@@ -178,10 +225,14 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 								bitmap,
 							);
 						})
-						.catch(() => {});
+						.catch(() => {})
+						.finally(releaseBuffer);
+				} else {
+					releaseBuffer();
 				}
 			})
 			.catch((error) => {
+				releaseBuffer();
 				if (cancelled) return;
 				if (error?.name === "RenderingCancelledException") return;
 				baseCanvas.style.visibility = "";
@@ -197,6 +248,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		background,
 		dpr,
 		zoom,
+		isResizing,
 		pageNumber,
 		markPageRendered,
 		docId,

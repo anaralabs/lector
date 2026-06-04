@@ -2,7 +2,7 @@ import type { RenderTask } from "pdfjs-dist";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
-import { usePdf } from "../../internal";
+import { PDFStore, usePdf } from "../../internal";
 import { clampScaleForPage } from "../../lib/canvas-utils";
 import { subscribeToViewportInvalidation } from "../../lib/viewport-invalidation";
 import { useDpr } from "../useDpr";
@@ -22,6 +22,7 @@ export const useDetailCanvasLayer = ({
 	const pageNumber = usePDFPageNumber();
 
 	const dpr = useDpr();
+	const store = PDFStore.useContext();
 
 	const bouncyZoom = usePdf((state) => state.zoom);
 	const isPinching = usePdf((state) => state.isPinching);
@@ -70,6 +71,16 @@ export const useDetailCanvasLayer = ({
 		};
 
 		const renderDetailCanvas = () => {
+			// Don't read layout (getBoundingClientRect below) while the user is
+			// scrolling: the read forces a synchronous reflow of the whole page
+			// tree (catastrophic with text layers present), and the detail
+			// sharpening is invisible mid-scroll anyway. Poll until scroll settles.
+			const virtualizer = store.getState().virtualizer;
+			if (virtualizer?.isScrolling) {
+				scheduleRender(160);
+				return;
+			}
+
 			const pageContainer = baseCanvasRef.current?.parentElement ?? null;
 			if (!pageContainer) {
 				hideDetailCanvas();
@@ -78,6 +89,26 @@ export const useDetailCanvasLayer = ({
 
 			const { width: pageWidth, height: pageHeight } = pageDimsRef.current!;
 
+			// Decide whether a high-res detail pass is needed from cached page
+			// dims + zoom only — NO layout reads. Bail before any
+			// getBoundingClientRect so the common fit-width case (zoom <= 1, where
+			// the base canvas already covers it) never forces a synchronous
+			// reflow of the (text-span-laden) page tree on scroll.
+			const targetDetailScale = dpr * zoom * 1.3;
+			const baseTargetScale = dpr * zoom;
+			const baseScale = clampScaleForPage(
+				baseTargetScale,
+				pageWidth,
+				pageHeight,
+			);
+			const needsDetail = zoom > 1 && targetDetailScale - baseScale > 1e-3;
+
+			if (isPinching || !needsDetail) {
+				hideDetailCanvas();
+				return;
+			}
+
+			// zoom > 1: read layout to find the visible region of the page.
 			const scrollX = scrollContainer.scrollLeft / zoom;
 			const scrollY = scrollContainer.scrollTop / zoom;
 
@@ -104,21 +135,7 @@ export const useDetailCanvasLayer = ({
 			const visibleWidth = Math.max(0, visibleRight - visibleLeft);
 			const visibleHeight = Math.max(0, visibleBottom - visibleTop);
 
-			const targetDetailScale = dpr * zoom * 1.3;
-			const baseTargetScale = dpr * zoom;
-			const baseScale = clampScaleForPage(
-				baseTargetScale,
-				pageWidth,
-				pageHeight,
-			);
-			const needsDetail = zoom > 1 && targetDetailScale - baseScale > 1e-3;
-
-			if (
-				isPinching ||
-				!needsDetail ||
-				visibleWidth <= 0 ||
-				visibleHeight <= 0
-			) {
+			if (visibleWidth <= 0 || visibleHeight <= 0) {
 				hideDetailCanvas();
 				return;
 			}
@@ -244,6 +261,7 @@ export const useDetailCanvasLayer = ({
 		dpr,
 		viewportRef,
 		baseCanvasRef,
+		store,
 	]);
 
 	// Release canvas memory for Safari on unmount only.
