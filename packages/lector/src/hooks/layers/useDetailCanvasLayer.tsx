@@ -95,7 +95,7 @@ export const useDetailCanvasLayer = ({
 			// the base canvas already covers it) never forces a synchronous
 			// reflow of the (text-span-laden) page tree on scroll.
 			const targetDetailScale = dpr * zoom * 1.3;
-			const baseTargetScale = dpr * Math.min(zoom, 1);
+			const baseTargetScale = dpr * zoom;
 			const baseScale = clampScaleForPage(
 				baseTargetScale,
 				pageWidth,

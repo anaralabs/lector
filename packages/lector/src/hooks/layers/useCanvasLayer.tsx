@@ -130,7 +130,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 		hasContentRef.current = false;
 
-		const targetBaseScale = dpr * Math.min(zoom, 1);
+		const targetBaseScale = dpr * zoom;
 		const baseScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
 
 		baseCanvas.width = Math.floor(pageWidth * baseScale);
