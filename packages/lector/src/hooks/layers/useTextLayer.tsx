@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import { usePdf } from "../../internal";
+import { subscribeToViewportInvalidation } from "../../lib/viewport-invalidation";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
 // Add custom property declarations
@@ -193,6 +194,13 @@ const bindMouseEvents = createTextSelectionManager();
 // build. Text selection / search work as soon as scrolling settles.
 const TEXT_BUILD_IDLE_MS = 300;
 
+// The text layer is fully transparent — it exists only for selection/search; the
+// visible text is painted on the canvas below. So while scrolling we hide it to
+// skip re-rasterizing every (transparent) span as the zoom-scaled page moves —
+// the dominant remaining scroll cost on text-dense PDFs — and restore it this
+// long after the last scroll event (i.e. once scrolling settles).
+const TEXT_SCROLL_SETTLE_MS = 160;
+
 export const useTextLayer = () => {
 	const textContainerRef = useRef<TextLayerDivElement>(null);
 	const textLayerRef = useRef<{
@@ -202,6 +210,7 @@ export const useTextLayer = () => {
 
 	const pageNumber = usePDFPageNumber();
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
+	const viewportRef = usePdf((state) => state.viewportRef);
 
 	useEffect(() => {
 		const textContainer = textContainerRef.current;
@@ -267,6 +276,75 @@ export const useTextLayer = () => {
 			}
 		};
 	}, [pdfPageProxy.streamTextContent, pdfPageProxy.getViewport]);
+
+	// Hide the (transparent) text layer while scrolling so its spans aren't
+	// repainted as the page moves, and restore it once scrolling settles.
+	useEffect(() => {
+		const textContainer = textContainerRef.current;
+		const viewport = viewportRef?.current;
+		if (!textContainer || !viewport) return;
+
+		let settleTimer: ReturnType<typeof setTimeout> | null = null;
+		// `selecting` is true only while a drag-select is actively extending the
+		// selection: a pointer is held AND `selectionchange` has fired since it
+		// went down. We keep the layer visible only then, so it isn't torn out
+		// from under a drag-select that auto-scrolls. Everything else hides —
+		// wheel, trackpad, AND touch scrolling (a touch scroll holds the pointer
+		// down but doesn't change the selection, even if a stale one lingers).
+		let pointerDown = false;
+		let selecting = false;
+
+		const show = () => {
+			textContainer.style.visibility = "";
+		};
+
+		const onScroll = () => {
+			if (selecting) return;
+			textContainer.style.visibility = "hidden";
+			if (settleTimer) clearTimeout(settleTimer);
+			settleTimer = setTimeout(show, TEXT_SCROLL_SETTLE_MS);
+		};
+
+		const onPointerDown = () => {
+			pointerDown = true;
+			selecting = false;
+			// Restore immediately so a click can start a selection on the visible
+			// text even within the post-scroll settle window.
+			if (settleTimer) {
+				clearTimeout(settleTimer);
+				settleTimer = null;
+			}
+			show();
+		};
+		const onSelectionChange = () => {
+			if (pointerDown) selecting = true;
+		};
+		// pointerup can be missed if the pointer is released off-window, so also
+		// clear on pointercancel and window blur — otherwise the flag could stick
+		// and disable hiding for good.
+		const clearPointer = () => {
+			pointerDown = false;
+			selecting = false;
+		};
+
+		const unsubscribe = subscribeToViewportInvalidation(viewport, onScroll);
+		document.addEventListener("pointerdown", onPointerDown, true);
+		document.addEventListener("pointerup", clearPointer, true);
+		document.addEventListener("pointercancel", clearPointer, true);
+		document.addEventListener("selectionchange", onSelectionChange);
+		window.addEventListener("blur", clearPointer);
+
+		return () => {
+			unsubscribe();
+			document.removeEventListener("pointerdown", onPointerDown, true);
+			document.removeEventListener("pointerup", clearPointer, true);
+			document.removeEventListener("pointercancel", clearPointer, true);
+			document.removeEventListener("selectionchange", onSelectionChange);
+			window.removeEventListener("blur", clearPointer);
+			if (settleTimer) clearTimeout(settleTimer);
+			show();
+		};
+	}, [viewportRef]);
 
 	return {
 		textContainerRef,
