@@ -35,9 +35,21 @@ const defaultAnnotationLayerParams = {
 } satisfies Required<AnnotationLayerParams>;
 
 export const useAnnotationLayer = (params: AnnotationLayerParams) => {
+	// `params` is a fresh object on every render (the AnnotationLayer component
+	// passes an object literal, and `jumpOptions` defaults to a literal too), so
+	// depending on `params` made this memo — and the render effect below that
+	// rebuilds the annotation DOM + re-parses annotations — re-run on EVERY
+	// re-render. Depend on the primitive leaves so it only changes on real input
+	// changes (and so real option changes still re-render, unlike a ref), while
+	// keeping the original `{ ...defaults, ...params }` merge semantics.
 	const mergedParams = useMemo(() => {
 		return { ...defaultAnnotationLayerParams, ...params };
-	}, [params]);
+	}, [
+		params.renderForms,
+		params.externalLinksEnabled,
+		params.jumpOptions?.behavior,
+		params.jumpOptions?.align,
+	]);
 	const annotationLayerRef = useRef<HTMLDivElement>(null);
 	const annotationLayerObjectRef = useRef<unknown>(null);
 	const linkService = usePDFLinkService();
