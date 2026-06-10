@@ -33,7 +33,10 @@ function clamp01(value: number): number {
 
 function parseColor(input: string): Rgba | null {
 	const str = input.trim().toLowerCase();
-	const named = NAMED_COLORS[str];
+	// hasOwn: a plain-object lookup would resolve "constructor"/"__proto__".
+	const named = Object.hasOwn(NAMED_COLORS, str)
+		? NAMED_COLORS[str]
+		: undefined;
 	if (named) return named;
 
 	if (str.startsWith("#")) {
@@ -234,7 +237,12 @@ export function createDarkModeColorMap(
 	const foreground = colors?.foreground ?? DEFAULT_DARK_MODE_COLORS.foreground;
 	const instanceKey = `${background}|${foreground}`;
 	const existing = mapInstances.get(instanceKey);
-	if (existing) return existing;
+	if (existing) {
+		// LRU touch: keep palettes in active use away from the eviction end.
+		mapInstances.delete(instanceKey);
+		mapInstances.set(instanceKey, existing);
+		return existing;
+	}
 
 	const bgRgba =
 		parseColor(background) ?? parseColor(DEFAULT_DARK_MODE_COLORS.background)!;
@@ -286,7 +294,13 @@ export function createDarkModeColorMap(
 		return out;
 	};
 
-	if (mapInstances.size >= 16) mapInstances.clear();
+	// Evict the oldest palette instead of clearing: live components depend on
+	// stable function identity per palette (effect deps), and a wholesale
+	// clear would hand a still-mounted consumer a new instance.
+	if (mapInstances.size >= 16) {
+		const oldest = mapInstances.keys().next().value;
+		if (oldest !== undefined) mapInstances.delete(oldest);
+	}
 	mapInstances.set(instanceKey, map);
 	return map;
 }

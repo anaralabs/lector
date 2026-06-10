@@ -114,7 +114,7 @@ Compared to the CSS filter approach this also means text selection and highlight
 
 ## Limitations
 
-- Content inside luminosity soft-masks can recolor imperfectly — fades may look slightly different
+- Luminosity soft-mask fades survive (the mask is luma-corrected during composition), but midtones can land a few percent off the original opacity
 - Mesh-gradient shadings (rare) keep their original colors
 - Scanned PDFs, where the whole page is one image, intentionally stay light since images are preserved
 - Annotations rendered into the DOM by `AnnotationLayer` (link borders, form widgets) keep their original colors — style them with your own CSS if needed
