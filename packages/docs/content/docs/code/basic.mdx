@@ -14,18 +14,22 @@ import Basic from "@/components/basic.tsx";
 "use client";
 
 import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
+import { useTheme } from "next-themes";
 import React from "react";
 import "@/lib/setup";
 
 const fileUrl = "/pdf/pathways.pdf";
 
 const Basic = () => {
+  const { resolvedTheme } = useTheme();
+
   return (
     <Root
       source={fileUrl}
       className='w-full h-[500px] border overflow-hidden rounded-lg'
-      loader={<div className='p-4'>Loading...</div>}>
-      <Pages className='dark:invert-[94%] dark:hue-rotate-180 dark:brightness-[80%] dark:contrast-[228%]'>
+      loader={<div className='p-4'>Loading...</div>}
+      colorScheme={resolvedTheme === "dark" ? "dark" : "light"}>
+      <Pages>
         <Page>
           <CanvasLayer />
           <TextLayer />
@@ -41,7 +45,7 @@ export default Basic;
 The example above shows:
 
 - Basic PDF viewer setup with a fixed height container
-- Dark mode support with color adjustments
+- Native dark mode rendering driven by the app theme via the `colorScheme` prop
 - Loading state handling
 - Canvas rendering of PDF pages
 - Text layer for text selection and copying

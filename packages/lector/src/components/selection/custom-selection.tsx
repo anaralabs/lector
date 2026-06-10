@@ -12,6 +12,7 @@ export const CustomSelection = ({
 	bgColor = "#ebf4ff94",
 }: CustomSelectionProps) => {
 	const customSelectionRects = usePdf((state) => state.customSelectionRects);
+	const colorScheme = usePdf((state) => state.colorScheme);
 
 	const pageNumber = usePDFPageNumber();
 
@@ -50,7 +51,9 @@ export const CustomSelection = ({
 						width: rect.width,
 						pointerEvents: "none",
 						background: bgColor,
-						mixBlendMode: "multiply",
+						// "multiply" tints a light page; "screen" is the dark-page
+						// equivalent (lightens instead of darkening to near-black).
+						mixBlendMode: colorScheme === "dark" ? "screen" : "multiply",
 					}}
 				/>
 			))}

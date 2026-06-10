@@ -5,6 +5,13 @@ import { createRef } from "react";
 import { createStore, useStore } from "zustand";
 
 import { clamp } from "./lib/clamp";
+import {
+	type ColorScheme,
+	createDarkModeColorMap,
+	type DarkModeColors,
+	DEFAULT_DARK_MODE_COLORS,
+} from "./lib/dark-mode";
+import type { RenderColorMapRef } from "./lib/recolor-canvas-factory";
 import { getFitWidthZoom } from "./lib/zoom";
 import { createZustandContext } from "./lib/zustand";
 
@@ -85,6 +92,15 @@ interface PDFState {
 	renderedPages: Record<number, true>;
 	markPageRendered: (pageNumber: number) => void;
 	unmarkPageRendered: (pageNumber: number) => void;
+
+	colorScheme: ColorScheme;
+	darkModeColors: Required<DarkModeColors>;
+	setColorScheme: (colorScheme: ColorScheme, colors?: DarkModeColors) => void;
+	/**
+	 * Shared with the document's pdf.js CanvasFactory so internal scratch
+	 * canvases (transparency groups, soft masks, patterns) follow the scheme.
+	 */
+	renderColorMapRef: RenderColorMapRef;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -97,10 +113,26 @@ export interface InitialPDFState {
 	zoom: number;
 	isZoomFitWidth?: boolean;
 	zoomOptions?: ZoomOptions;
+	colorScheme?: ColorScheme;
+	darkModeColors?: DarkModeColors;
+	renderColorMapRef?: RenderColorMapRef;
 }
 
 export const PDFStore = createZustandContext(
 	(initialState: InitialPDFState) => {
+		const initialColorScheme = initialState.colorScheme ?? "light";
+		const initialDarkModeColors = {
+			...DEFAULT_DARK_MODE_COLORS,
+			...initialState.darkModeColors,
+		};
+		const renderColorMapRef = initialState.renderColorMapRef ?? {
+			current: null,
+		};
+		renderColorMapRef.current =
+			initialColorScheme === "dark"
+				? createDarkModeColorMap(initialDarkModeColors)
+				: null;
+
 		return createStore<PDFState>((set, get) => ({
 			pdfDocumentProxy: initialState.pdfDocumentProxy,
 			zoom: initialState.zoom,
@@ -213,6 +245,29 @@ export const PDFStore = createZustandContext(
 						(rect) => rect.uuid !== uuid,
 					),
 				})),
+
+			colorScheme: initialColorScheme,
+			darkModeColors: initialDarkModeColors,
+			renderColorMapRef,
+			setColorScheme: (colorScheme, colors) => {
+				const prev = get();
+				const darkModeColors = {
+					background: colors?.background ?? prev.darkModeColors.background,
+					foreground: colors?.foreground ?? prev.darkModeColors.foreground,
+				};
+				if (
+					prev.colorScheme === colorScheme &&
+					prev.darkModeColors.background === darkModeColors.background &&
+					prev.darkModeColors.foreground === darkModeColors.foreground
+				) {
+					return;
+				}
+				prev.renderColorMapRef.current =
+					colorScheme === "dark"
+						? createDarkModeColorMap(darkModeColors)
+						: null;
+				set({ colorScheme, darkModeColors });
+			},
 
 			renderedPages: {},
 			markPageRendered: (pageNumber: number) => {

@@ -11,7 +11,12 @@ import type {
 import { useEffect, useRef, useState } from "react";
 
 import type { InitialPDFState, ZoomOptions } from "../../internal";
+import type { ColorScheme, DarkModeColors } from "../../lib/dark-mode";
 import { getDefaultPdfJsAssetUrls, loadPdfJs } from "../../lib/pdfjs";
+import {
+	createRecolorCanvasFactory,
+	type RenderColorMapRef,
+} from "../../lib/recolor-canvas-factory";
 
 export interface usePDFDocumentParams {
 	/**
@@ -55,6 +60,19 @@ export interface usePDFDocumentParams {
 	 * Must be a stable reference (module-level constant or useMemo) to avoid reloading the document.
 	 */
 	documentOptions?: Partial<DocumentInitParameters>;
+	/**
+	 * Initial color scheme for page rendering. "dark" recolors the document at
+	 * render time (native dark mode): perceived lightness is flipped onto the
+	 * darkModeColors ramp while hue is preserved, and images keep their
+	 * original pixels. Changing the prop after mount updates the scheme; the
+	 * runtime equivalent is `usePdf((s) => s.setColorScheme)`.
+	 */
+	colorScheme?: ColorScheme;
+	/**
+	 * Palette for the dark scheme: `background` replaces white paper,
+	 * `foreground` replaces black text. Defaults to #181a1b / #e8e6e3.
+	 */
+	darkModeColors?: DarkModeColors;
 }
 
 export type Source =
@@ -67,6 +85,7 @@ export type Source =
 function buildDocumentInitParams(
 	source: Source,
 	pdfJsVersion: string,
+	renderColorMapRef: RenderColorMapRef,
 	overrides?: Partial<DocumentInitParameters>,
 ): DocumentInitParameters {
 	let params: DocumentInitParameters;
@@ -108,6 +127,11 @@ function buildDocumentInitParams(
 		cMapPacked: true,
 		standardFontDataUrl: assetUrls.standardFontDataUrl,
 		iccUrl: assetUrls.iccUrl,
+		// Internal pdf.js scratch canvases (transparency groups, soft masks,
+		// patterns) go through this factory so native dark mode can recolor
+		// content that never touches the context passed to render(). A no-op
+		// while the light scheme is active.
+		CanvasFactory: createRecolorCanvasFactory(renderColorMapRef),
 	};
 
 	return { ...defaults, ...params, ...overrides };
@@ -122,11 +146,20 @@ export const usePDFDocumentContext = ({
 	zoom = 1,
 	zoomOptions,
 	documentOptions,
+	colorScheme,
+	darkModeColors,
 }: usePDFDocumentParams) => {
 	const [_, setProgress] = useState(0);
 
 	const [initialState, setInitialState] = useState<InitialPDFState | null>();
 	const [rotation] = useState<number>(initialRotation);
+
+	// Shared between the document's CanvasFactory (created at getDocument time)
+	// and the store (which owns the current scheme). Stable for the lifetime of
+	// this hook; the store assigns `.current` whenever the scheme changes.
+	const [renderColorMapRef] = useState<RenderColorMapRef>(() => ({
+		current: null,
+	}));
 
 	// Ref so the effect always reads the latest documentOptions without
 	// needing it in the dependency array (avoids reload on every render
@@ -138,6 +171,14 @@ export const usePDFDocumentContext = ({
 	// always invoking the latest callback.
 	const onErrorRef = useRef(onError);
 	onErrorRef.current = onError;
+
+	// Same pattern: reloads (source change) should pick up the latest scheme
+	// without the effect depending on it. Post-mount changes are synced into
+	// the store by Root.
+	const colorSchemeRef = useRef(colorScheme);
+	colorSchemeRef.current = colorScheme;
+	const darkModeColorsRef = useRef(darkModeColors);
+	darkModeColorsRef.current = darkModeColors;
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: <onDocumnetLoad,zoomOptions>
 	useEffect(() => {
@@ -171,6 +212,9 @@ export const usePDFDocumentContext = ({
 				pdfDocumentProxy: pdf,
 				zoom,
 				zoomOptions,
+				colorScheme: colorSchemeRef.current,
+				darkModeColors: darkModeColorsRef.current,
+				renderColorMapRef,
 			}));
 		};
 
@@ -190,6 +234,7 @@ export const usePDFDocumentContext = ({
 						buildDocumentInitParams(
 							source,
 							version,
+							renderColorMapRef,
 							documentOptionsRef.current,
 						),
 					);

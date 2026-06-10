@@ -3,6 +3,8 @@ import { useEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../internal";
+import { createDarkModeColorMap } from "../lib/dark-mode";
+import { applyContextRecolor } from "../lib/recolor-context";
 import { useDpr } from "./useDpr";
 import { useVisibility } from "./useVisibility";
 
@@ -35,6 +37,12 @@ export const useThumbnail = (
 	const { visible } = useVisibility({ elementRef: containerRef });
 	const [debouncedVisible] = useDebounce(visible, 50);
 	const dpr = useDpr();
+	const colorScheme = usePdf((state) => state.colorScheme);
+	const darkModeColors = usePdf((state) => state.darkModeColors);
+
+	// Memoized per palette — stable identity, safe as an effect dependency.
+	const recolor =
+		colorScheme === "dark" ? createDarkModeColorMap(darkModeColors) : null;
 
 	const isVisible = isFirstPage || debouncedVisible;
 
@@ -66,6 +74,13 @@ export const useThumbnail = (
 				const context = canvas.getContext("2d");
 				if (!context) return;
 
+				// Native dark mode: recolor at draw time (pdf.js's default white
+				// background fill is mapped by the wrapped fillRect). The context
+				// is long-lived, so always restore once the render settles.
+				const restoreRecolor = recolor
+					? applyContextRecolor(context, recolor)
+					: null;
+
 				const renderTask = pageProxy.render({
 					canvas,
 					canvasContext: context,
@@ -73,7 +88,9 @@ export const useThumbnail = (
 				});
 
 				renderTaskRef.current = renderTask;
-				await renderTask.promise;
+				await renderTask.promise.finally(() => {
+					restoreRecolor?.();
+				});
 			} catch (error: unknown) {
 				if (
 					error instanceof Error &&
@@ -98,7 +115,7 @@ export const useThumbnail = (
 				canvas.height = 1;
 			}
 		};
-	}, [pageProxy, isVisible, dpr, maxHeight, maxWidth]);
+	}, [pageProxy, isVisible, dpr, maxHeight, maxWidth, recolor]);
 
 	return {
 		canvasRef,

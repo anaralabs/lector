@@ -17,6 +17,7 @@ export const ColoredHighlightComponent = ({
 	const deleteColoredHighlight = usePdf(
 		(state) => state.deleteColoredHighlight,
 	);
+	const colorScheme = usePdf((state) => state.colorScheme);
 	const [showButton, setShowButton] = useState(false);
 	const pageNumber = usePDFPageNumber();
 
@@ -48,9 +49,9 @@ export const ColoredHighlightComponent = ({
 						cursor: "pointer",
 						zIndex: 30,
 						backgroundColor: selection.color,
-						// mixBlendMode: "lighten", // changes the color of the text
-						mixBlendMode: "darken", // best results
-						// mixBlendMode: "multiply", // works but coloring has some inconsistencies
+						// "darken" keeps dark text legible on a light page; on a dark
+						// page the equivalent is "lighten" (keeps light text legible).
+						mixBlendMode: colorScheme === "dark" ? "lighten" : "darken",
 						borderRadius: "0.2rem",
 					}}
 				/>

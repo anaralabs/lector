@@ -14,6 +14,7 @@ import {
 	usePdfJump,
 	useSelectionDimensions,
 } from "@anaralabs/lector";
+import { useTheme } from "next-themes";
 import React, { useCallback, useEffect, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import "@/lib/setup";
@@ -258,10 +259,7 @@ const PDFContent = ({
 	);
 
 	return (
-		<Pages
-			className="dark:invert-[94%] dark:hue-rotate-180 dark:brightness-[80%] dark:contrast-[228%] dark:bg-gray-100"
-			onClick={handlePagesClick}
-		>
+		<Pages onClick={handlePagesClick}>
 			<Page>
 				<CanvasLayer />
 				<TextLayer />
@@ -298,6 +296,7 @@ export const AnaraViewer = ({ fullHeight }: AnaraViewerProps) => {
 	);
 	const [focusedAnnotationId, setFocusedAnnotationId] = useState<string>();
 	const { setAnnotations } = useAnnotations();
+	const { resolvedTheme } = useTheme();
 
 	// Load saved annotations and ensure backward compatibility
 	React.useEffect(() => {
@@ -336,6 +335,7 @@ export const AnaraViewer = ({ fullHeight }: AnaraViewerProps) => {
 				)}
 				isZoomFitWidth={true}
 				loader={<div className="w-full"></div>}
+				colorScheme={resolvedTheme === "dark" ? "dark" : "light"}
 			>
 				<div className="p-1 relative flex justify-between border-b">
 					<ZoomMenu />

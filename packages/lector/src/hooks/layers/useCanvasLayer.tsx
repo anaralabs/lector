@@ -4,6 +4,8 @@ import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../../internal";
 import { clampScaleForPage } from "../../lib/canvas-utils";
+import { createDarkModeColorMap } from "../../lib/dark-mode";
+import { applyContextRecolor } from "../../lib/recolor-context";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
@@ -36,8 +38,12 @@ export function clearBitmapCache(documentId?: string): void {
 	}
 }
 
-function cacheKey(scale: number, background?: string): number {
-	const bg = background ?? "white";
+function cacheKey(
+	scale: number,
+	background?: string,
+	recolorKey?: string,
+): number {
+	const bg = `${background ?? "white"}|${recolorKey ?? ""}`;
 	let hash = Math.round(scale * 1e4);
 	for (let i = 0; i < bg.length; i++) {
 		hash = (hash * 31 + bg.charCodeAt(i)) | 0;
@@ -49,8 +55,9 @@ function getCachedBitmap(
 	proxy: PDFPageProxy,
 	scale: number,
 	background?: string,
+	recolorKey?: string,
 ): ImageBitmap | null {
-	const key = cacheKey(scale, background);
+	const key = cacheKey(scale, background, recolorKey);
 	const bitmap = canvasBitmapCache.get(proxy)?.get(key);
 	if (!bitmap) return null;
 	const idx = cacheEntries.findIndex((e) => e.proxy === proxy && e.key === key);
@@ -66,9 +73,10 @@ function setCachedBitmap(
 	proxy: PDFPageProxy,
 	scale: number,
 	background: string | undefined,
+	recolorKey: string | undefined,
 	bitmap: ImageBitmap,
 ): void {
-	const key = cacheKey(scale, background);
+	const key = cacheKey(scale, background, recolorKey);
 	let map = canvasBitmapCache.get(proxy);
 	if (!map) {
 		map = new Map();
@@ -108,6 +116,15 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const markPageRendered = usePdf((state) => state.markPageRendered);
 	const unmarkPageRendered = usePdf((state) => state.unmarkPageRendered);
+	const colorScheme = usePdf((state) => state.colorScheme);
+	const darkModeColors = usePdf((state) => state.darkModeColors);
+
+	// Memoized per palette — stable identity, safe as an effect dependency.
+	const recolor =
+		colorScheme === "dark" ? createDarkModeColorMap(darkModeColors) : null;
+	const recolorKey = recolor
+		? `dark:${darkModeColors.background},${darkModeColors.foreground}`
+		: undefined;
 
 	const [zoom] = useDebounce(bouncyZoom, 100);
 
@@ -143,13 +160,23 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		baseCanvas.style.transform = "translate(0px, 0px)";
 		baseCanvas.style.zIndex = "0";
 		baseCanvas.style.pointerEvents = "none";
-		baseCanvas.style.backgroundColor = background ?? "white";
+		// In dark mode the painted pixels get the mapped background (pdf.js
+		// fills it through the recolored fillRect), so the CSS fallback color
+		// must match — otherwise unpainted frames flash light.
+		baseCanvas.style.backgroundColor = recolor
+			? recolor(background ?? "#ffffff")
+			: (background ?? "white");
 		baseCanvas.style.visibility = "";
 
 		const context = baseCanvas.getContext("2d");
 		if (!context) return;
 
-		const cached = getCachedBitmap(pdfPageProxy, baseScale, background);
+		const cached = getCachedBitmap(
+			pdfPageProxy,
+			baseScale,
+			background,
+			recolorKey,
+		);
 		if (cached) {
 			context.drawImage(cached, 0, 0);
 			markPageRendered(pageNumber);
@@ -181,6 +208,13 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const renderCanvas = useBuffer ? buffer : baseCanvas;
 		const renderCtx = bufferCtx ?? context;
 
+		// Native dark mode: recolor at draw time inside this render. The
+		// `background` param stays the ORIGINAL color — pdf.js fills it through
+		// the wrapped fillRect, which maps it exactly once.
+		const restoreRecolor = recolor
+			? applyContextRecolor(renderCtx, recolor)
+			: null;
+
 		const renderingTask = pdfPageProxy.render({
 			canvas: renderCanvas,
 			canvasContext: renderCtx,
@@ -194,6 +228,11 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		};
 
 		renderingTask.promise
+			.finally(() => {
+				// Matters for the no-buffer fallback, where renderCtx is the
+				// long-lived visible canvas context.
+				restoreRecolor?.();
+			})
 			.then(() => {
 				if (cancelled) {
 					releaseBuffer();
@@ -222,6 +261,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 								pdfPageProxy,
 								baseScale,
 								background,
+								recolorKey,
 								bitmap,
 							);
 						})
@@ -252,6 +292,8 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		pageNumber,
 		markPageRendered,
 		docId,
+		recolor,
+		recolorKey,
 	]);
 
 	useEffect(() => {

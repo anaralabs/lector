@@ -9,8 +9,31 @@ import {
 	PDFLinkServiceContext,
 	useCreatePDFLinkService,
 } from "../hooks/usePDFLinkService";
-import { PDFStore } from "../internal";
+import { PDFStore, usePdf } from "../internal";
+import type { ColorScheme, DarkModeColors } from "../lib/dark-mode";
 import { Primitive } from "./primitive";
+
+/**
+ * Mirrors post-mount changes of Root's colorScheme/darkModeColors props into
+ * the store (the Provider's initialValue is frozen at mount). No-ops when the
+ * consumer drives the scheme through `setColorScheme` instead of props.
+ */
+const ColorSchemeSync = ({
+	colorScheme,
+	darkModeColors,
+}: {
+	colorScheme?: ColorScheme;
+	darkModeColors?: DarkModeColors;
+}) => {
+	const setColorScheme = usePdf((state) => state.setColorScheme);
+	const background = darkModeColors?.background;
+	const foreground = darkModeColors?.foreground;
+	useEffect(() => {
+		if (!colorScheme) return;
+		setColorScheme(colorScheme, { background, foreground });
+	}, [colorScheme, background, foreground, setColorScheme]);
+	return null;
+};
 
 export const Root = forwardRef(
 	(
@@ -24,6 +47,8 @@ export const Root = forwardRef(
 			zoom,
 			zoomOptions,
 			documentOptions,
+			colorScheme,
+			darkModeColors,
 			...props
 		}: Omit<HTMLProps<HTMLDivElement>, "onError"> &
 			usePDFDocumentParams & {
@@ -39,6 +64,8 @@ export const Root = forwardRef(
 			zoom,
 			zoomOptions,
 			documentOptions,
+			colorScheme,
+			darkModeColors,
 		});
 
 		const linkService = useCreatePDFLinkService(
@@ -57,6 +84,10 @@ export const Root = forwardRef(
 			<Primitive.div ref={ref} {...props}>
 				{initialState ? (
 					<PDFStore.Provider initialValue={initialState}>
+						<ColorSchemeSync
+							colorScheme={colorScheme}
+							darkModeColors={darkModeColors}
+						/>
 						<PDFLinkServiceContext.Provider value={linkService}>
 							{children}
 						</PDFLinkServiceContext.Provider>

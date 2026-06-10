@@ -4,6 +4,8 @@ import { useDebounce } from "use-debounce";
 
 import { PDFStore, usePdf } from "../../internal";
 import { clampScaleForPage } from "../../lib/canvas-utils";
+import { createDarkModeColorMap } from "../../lib/dark-mode";
+import { applyContextRecolor } from "../../lib/recolor-context";
 import { subscribeToViewportInvalidation } from "../../lib/viewport-invalidation";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
@@ -28,6 +30,12 @@ export const useDetailCanvasLayer = ({
 	const isPinching = usePdf((state) => state.isPinching);
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const viewportRef = usePdf((state) => state.viewportRef);
+	const colorScheme = usePdf((state) => state.colorScheme);
+	const darkModeColors = usePdf((state) => state.darkModeColors);
+
+	// Memoized per palette — stable identity, safe as an effect dependency.
+	const recolor =
+		colorScheme === "dark" ? createDarkModeColorMap(darkModeColors) : null;
 
 	const [zoom] = useDebounce(bouncyZoom, 200);
 
@@ -61,7 +69,9 @@ export const useDetailCanvasLayer = ({
 		let renderingTask: RenderTask | null = null;
 		let renderTimeoutId: NodeJS.Timeout | null = null;
 
-		const bgColor = background ?? "white";
+		const bgColor = recolor
+			? recolor(background ?? "#ffffff")
+			: (background ?? "white");
 		const detailBaseStyle = `position:absolute;top:0;left:0;pointer-events:none;z-index:1;background-color:${bgColor}`;
 
 		const hideDetailCanvas = () => {
@@ -173,6 +183,10 @@ export const useDetailCanvasLayer = ({
 				scale: effectiveScale,
 			});
 
+			// Native dark mode: recolor at draw time; `background` stays the
+			// original color and is mapped by the wrapped fillRect exactly once.
+			if (recolor) applyContextRecolor(bufferCtx, recolor);
+
 			const currentRenderingTask = pdfPageProxy.render({
 				canvas: buffer,
 				canvasContext: bufferCtx,
@@ -262,6 +276,7 @@ export const useDetailCanvasLayer = ({
 		viewportRef,
 		baseCanvasRef,
 		store,
+		recolor,
 	]);
 
 	// Release canvas memory for Safari on unmount only.
