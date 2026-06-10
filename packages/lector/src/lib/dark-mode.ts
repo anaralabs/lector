@@ -83,7 +83,40 @@ function parseColor(input: string): Rgba | null {
 		return [clamp01(r), clamp01(g), clamp01(b), clamp01(a)];
 	}
 
+	// Last resort for the rest of the CSS color grammar (named colors,
+	// hsl()/oklch()/color-mix()/...): let the browser normalize it to a
+	// hex/rgba serialization, then parse that.
+	const normalized = normalizeCssColor(str);
+	if (normalized !== null && normalized !== str) return parseColor(normalized);
+
 	return null;
+}
+
+let normalizeCtx: CanvasRenderingContext2D | null | undefined;
+
+/**
+ * Normalizes any valid CSS color to its canvas fillStyle serialization
+ * ("#rrggbb" or "rgba(...)"). Returns null for invalid colors (assigning
+ * one leaves fillStyle unchanged, detected by priming with two different
+ * values) and outside the DOM (SSR).
+ */
+function normalizeCssColor(input: string): string | null {
+	if (normalizeCtx === undefined) {
+		normalizeCtx =
+			typeof document === "undefined"
+				? null
+				: document.createElement("canvas").getContext("2d", {
+						willReadFrequently: true,
+					});
+	}
+	const ctx = normalizeCtx;
+	if (!ctx) return null;
+	ctx.fillStyle = "#000000";
+	ctx.fillStyle = input;
+	const first = ctx.fillStyle;
+	ctx.fillStyle = "#ffffff";
+	ctx.fillStyle = input;
+	return first === ctx.fillStyle ? first : null;
 }
 
 function srgbToLinear(c: number): number {

@@ -69,8 +69,18 @@ describe("createDarkModeColorMap", () => {
 	it("leaves fully transparent and unparseable colors unchanged", () => {
 		expect(map("transparent")).toBe("transparent");
 		expect(map("rgba(0, 0, 0, 0)")).toBe("rgba(0, 0, 0, 0)");
-		expect(map("oklch(0.5 0.1 200)")).toBe("oklch(0.5 0.1 200)");
 		expect(map("url(#pattern)")).toBe("url(#pattern)");
+		expect(map("not-a-color")).toBe("not-a-color");
+	});
+
+	it("maps the full CSS color grammar via browser normalization", () => {
+		// Near-white named/functional colors must land near the dark pole so
+		// the CSS fallback background never flashes light (review finding).
+		for (const input of ["ivory", "hsl(0 0% 98%)", "hsl(0, 0%, 100%)"]) {
+			const out = hexToRgb(map(input));
+			expect(luma(out)).toBeLessThan(50);
+		}
+		expect(luma(hexToRgb(map("navy")))).toBeGreaterThan(luma([0, 0, 128]));
 	});
 
 	it("emits only in-gamut css colors for saturated inputs", () => {

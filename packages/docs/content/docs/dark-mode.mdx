@@ -117,6 +117,8 @@ Compared to the CSS filter approach this also means text selection and highlight
 - Content inside luminosity soft-masks can recolor imperfectly — fades may look slightly different
 - Mesh-gradient shadings (rare) keep their original colors
 - Scanned PDFs, where the whole page is one image, intentionally stay light since images are preserved
+- Annotations rendered into the DOM by `AnnotationLayer` (link borders, form widgets) keep their original colors — style them with your own CSS if needed
+- Overlays you draw with blend modes tuned for a light page (e.g. `mix-blend-multiply`) need a dark variant such as `dark:mix-blend-screen`
 - Passing your own `CanvasFactory` via `documentOptions` disables scratch-canvas recoloring
 
 ## Legacy: CSS Filter Approach

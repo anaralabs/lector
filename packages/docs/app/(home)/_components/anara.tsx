@@ -264,7 +264,7 @@ const PDFContent = ({
 				<CanvasLayer />
 				<TextLayer />
 				<AnnotationHighlightLayer
-					highlightClassName="dark:opacity-40 mix-blend-multiply transition-all duration-200 cursor-pointer"
+					highlightClassName="mix-blend-multiply dark:mix-blend-screen transition-all duration-200 cursor-pointer"
 					underlineClassName="transition-all duration-200 cursor-pointer"
 					commentIconClassName="text-blue-600 hover:text-blue-800"
 					focusedAnnotationId={focusedAnnotationId}
