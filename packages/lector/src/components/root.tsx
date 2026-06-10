@@ -37,9 +37,15 @@ const ColorSchemeSync = ({
 }) => {
 	const setColorScheme = usePdf((state) => state.setColorScheme);
 	const storeColorScheme = usePdf((state) => state.colorScheme);
+	// Subscribing to the store palette makes the controlled prop win against
+	// runtime setColorScheme palette overrides: a divergence re-runs the
+	// effect, which re-imposes the prop (setColorScheme no-ops once equal).
+	const storeBackground = usePdf((state) => state.darkModeColors.background);
+	const storeForeground = usePdf((state) => state.darkModeColors.foreground);
 	const hasPalette = darkModeColors !== undefined;
 	const background = darkModeColors?.background;
 	const foreground = darkModeColors?.foreground;
+	// biome-ignore lint/correctness/useExhaustiveDependencies: storeBackground/storeForeground are deliberate triggers — a runtime palette override must re-run the sync so the controlled prop wins.
 	useEffect(() => {
 		if (!colorScheme && !hasPalette) return;
 		// Without a colorScheme prop, a provided palette still syncs — against
@@ -56,6 +62,8 @@ const ColorSchemeSync = ({
 	}, [
 		colorScheme,
 		storeColorScheme,
+		storeBackground,
+		storeForeground,
 		hasPalette,
 		background,
 		foreground,

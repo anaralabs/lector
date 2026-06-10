@@ -231,12 +231,20 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			removeContextRecolor(renderCtx);
 		}
 
-		const renderingTask = pdfPageProxy.render({
-			canvas: renderCanvas,
-			canvasContext: renderCtx,
-			viewport,
-			background,
-		});
+		let renderingTask: ReturnType<typeof pdfPageProxy.render>;
+		try {
+			renderingTask = pdfPageProxy.render({
+				canvas: renderCanvas,
+				canvasContext: renderCtx,
+				viewport,
+				background,
+			});
+		} catch (error) {
+			// A synchronous render() throw would otherwise skip the
+			// promise-based restore and leave the long-lived context wrapped.
+			restoreRecolor?.();
+			throw error;
+		}
 
 		const releaseBuffer = () => {
 			buffer.width = 0;

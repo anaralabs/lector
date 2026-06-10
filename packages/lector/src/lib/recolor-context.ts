@@ -54,8 +54,12 @@ function correctLuminosityMask(
 	mappedWhiteLuma: number,
 	mappedBlackLuma: number,
 ): HTMLCanvasElement | null {
+	if (typeof document === "undefined") return null;
 	if (
-		!(source instanceof HTMLCanvasElement) &&
+		!(
+			typeof HTMLCanvasElement !== "undefined" &&
+			source instanceof HTMLCanvasElement
+		) &&
 		!(
 			typeof OffscreenCanvas !== "undefined" &&
 			source instanceof OffscreenCanvas
@@ -134,7 +138,8 @@ export function applyContextRecolor(
 				// content; never-recolored sources (image-based masks) would
 				// get their alpha inverted by the correction instead.
 				const sourcePainted =
-					(source instanceof HTMLCanvasElement ||
+					((typeof HTMLCanvasElement !== "undefined" &&
+						source instanceof HTMLCanvasElement) ||
 						(typeof OffscreenCanvas !== "undefined" &&
 							source instanceof OffscreenCanvas)) &&
 					(source.getContext("2d") as RecolorableContext | null)?.[
