@@ -10,13 +10,20 @@ import {
 	useCreatePDFLinkService,
 } from "../hooks/usePDFLinkService";
 import { PDFStore, usePdf } from "../internal";
-import type { ColorScheme, DarkModeColors } from "../lib/dark-mode";
+import {
+	type ColorScheme,
+	type DarkModeColors,
+	DEFAULT_DARK_MODE_COLORS,
+} from "../lib/dark-mode";
 import { Primitive } from "./primitive";
 
 /**
  * Mirrors post-mount changes of Root's colorScheme/darkModeColors props into
  * the store (the Provider's initialValue is frozen at mount). No-ops when the
  * consumer drives the scheme through `setColorScheme` instead of props.
+ * Omitted palette fields resolve to the defaults so the store always mirrors
+ * the props — removing `darkModeColors` restores the default palette instead
+ * of keeping the last custom one.
  */
 const ColorSchemeSync = ({
 	colorScheme,
@@ -30,7 +37,10 @@ const ColorSchemeSync = ({
 	const foreground = darkModeColors?.foreground;
 	useEffect(() => {
 		if (!colorScheme) return;
-		setColorScheme(colorScheme, { background, foreground });
+		setColorScheme(colorScheme, {
+			background: background ?? DEFAULT_DARK_MODE_COLORS.background,
+			foreground: foreground ?? DEFAULT_DARK_MODE_COLORS.foreground,
+		});
 	}, [colorScheme, background, foreground, setColorScheme]);
 	return null;
 };

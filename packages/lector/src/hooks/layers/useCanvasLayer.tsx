@@ -105,7 +105,9 @@ function setCachedBitmap(
 
 export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
-	const hasContentRef = useRef(false);
+	// Key (background|scheme) the currently painted frame was rendered with,
+	// or null when the canvas holds no content.
+	const paintedKeyRef = useRef<string | null>(null);
 	const pageNumber = usePDFPageNumber();
 
 	const dpr = useDpr();
@@ -136,16 +138,20 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const pageWidth = baseViewport.width;
 		const pageHeight = baseViewport.height;
 
-		// Mid-resize, reuse the painted frame via CSS — but only if one exists,
-		// else we'd un-hide a cleared, never-painted canvas (blank for the drag).
-		if (isResizing && hasContentRef.current) {
+		const contentKey = `${background ?? "white"}|${recolorKey ?? ""}`;
+
+		// Mid-resize, reuse the painted frame via CSS — but only if one exists
+		// AND it was painted with the current scheme/background, else we'd
+		// un-hide a cleared canvas (blank for the drag) or show stale colors
+		// after a theme toggle that lands during the resize.
+		if (isResizing && paintedKeyRef.current === contentKey) {
 			baseCanvas.style.visibility = "";
 			baseCanvas.style.width = `${pageWidth}px`;
 			baseCanvas.style.height = `${pageHeight}px`;
 			return;
 		}
 
-		hasContentRef.current = false;
+		paintedKeyRef.current = null;
 
 		const targetBaseScale = dpr * Math.min(zoom, 1);
 		const baseScale = clampScaleForPage(targetBaseScale, pageWidth, pageHeight);
@@ -180,7 +186,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		if (cached) {
 			context.drawImage(cached, 0, 0);
 			markPageRendered(pageNumber);
-			hasContentRef.current = true;
+			paintedKeyRef.current = contentKey;
 			return;
 		}
 
@@ -248,7 +254,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 				}
 				baseCanvas.style.visibility = "";
 				markPageRendered(pageNumber);
-				hasContentRef.current = true;
+				paintedKeyRef.current = contentKey;
 				if (typeof createImageBitmap !== "undefined") {
 					createImageBitmap(renderCanvas)
 						.then((bitmap) => {
