@@ -20,10 +20,11 @@ import { Primitive } from "./primitive";
 /**
  * Mirrors post-mount changes of Root's colorScheme/darkModeColors props into
  * the store (the Provider's initialValue is frozen at mount). No-ops when the
- * consumer drives the scheme through `setColorScheme` instead of props.
+ * consumer drives everything through `setColorScheme` instead of props.
  *
  * Palette contract: when the `darkModeColors` prop is provided the store
- * mirrors it exactly — fields it omits resolve to the defaults. When the
+ * mirrors it exactly — fields it omits resolve to the defaults — even when
+ * the scheme itself is driven at runtime (no colorScheme prop). When the
  * prop is absent the palette is uncontrolled: scheme prop flips leave
  * whatever palette runtime `setColorScheme` calls have established.
  */
@@ -35,13 +36,16 @@ const ColorSchemeSync = ({
 	darkModeColors?: DarkModeColors;
 }) => {
 	const setColorScheme = usePdf((state) => state.setColorScheme);
+	const storeColorScheme = usePdf((state) => state.colorScheme);
 	const hasPalette = darkModeColors !== undefined;
 	const background = darkModeColors?.background;
 	const foreground = darkModeColors?.foreground;
 	useEffect(() => {
-		if (!colorScheme) return;
+		if (!colorScheme && !hasPalette) return;
+		// Without a colorScheme prop, a provided palette still syncs — against
+		// the store's current scheme, so it composes with runtime toggles.
 		setColorScheme(
-			colorScheme,
+			colorScheme ?? storeColorScheme,
 			hasPalette
 				? {
 						background: background ?? DEFAULT_DARK_MODE_COLORS.background,
@@ -49,7 +53,14 @@ const ColorSchemeSync = ({
 					}
 				: undefined,
 		);
-	}, [colorScheme, hasPalette, background, foreground, setColorScheme]);
+	}, [
+		colorScheme,
+		storeColorScheme,
+		hasPalette,
+		background,
+		foreground,
+		setColorScheme,
+	]);
 	return null;
 };
 

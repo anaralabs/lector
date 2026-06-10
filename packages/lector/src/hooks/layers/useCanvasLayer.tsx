@@ -2,7 +2,7 @@ import type { PDFPageProxy } from "pdfjs-dist";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
-import { usePdf } from "../../internal";
+import { PDFStore, usePdf } from "../../internal";
 import { clampScaleForPage } from "../../lib/canvas-utils";
 import { createDarkModeColorMap } from "../../lib/dark-mode";
 import {
@@ -112,6 +112,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	// or null when the canvas holds no content.
 	const paintedKeyRef = useRef<string | null>(null);
 	const pageNumber = usePDFPageNumber();
+	const store = PDFStore.useContext();
 
 	const dpr = useDpr();
 
@@ -253,6 +254,21 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 					releaseBuffer();
 					return;
 				}
+				// A scheme toggle mutates the shared render color map immediately,
+				// before React's cleanup cancels this task — a render finishing in
+				// that one-frame window may have painted pdf.js scratch canvases
+				// (transparency groups, masks) with the NEW map while the rest
+				// used the old one. Drop the frame instead of blitting/caching a
+				// mixed-scheme bitmap; the effect re-run repaints right after.
+				const state = store.getState();
+				const currentRecolorKey =
+					state.colorScheme === "dark"
+						? `dark:${state.darkModeColors.background},${state.darkModeColors.foreground}`
+						: undefined;
+				if (currentRecolorKey !== recolorKey) {
+					releaseBuffer();
+					return;
+				}
 				if (useBuffer) {
 					// Clear before blitting: drawImage composites source-over, so on
 					// a page with transparent regions (or a transparent background)
@@ -309,6 +325,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		docId,
 		recolor,
 		recolorKey,
+		store,
 	]);
 
 	useEffect(() => {
