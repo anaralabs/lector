@@ -1,22 +1,158 @@
 ---
 title: Dark Mode
-description: Learn about Lector's dark mode implementation using CSS filters and future plans
+description: Learn how to render PDFs in native dark mode with Lector's render-time color remapping
 ---
 
-## Current Approach
+Lector renders dark mode natively at the PDF.js level. Colors are remapped inside the canvas pixels at render time — not approximated with CSS filters — so black text becomes light, white paper becomes dark, colors keep their hue, and images stay pixel-perfect.
 
-Lector implements dark mode support through custom CSS filters since PDF.js currently doesn't provide native dark mode support. This approach allows us to maintain compatibility while providing a good dark mode experience for users.
+## Quick Start
 
-## Implementation Details
+Pass the `colorScheme` prop to `Root`:
 
-We use CSS filters to invert colors and adjust them for better readability in dark mode. This solution, while not perfect, provides a reasonable dark mode experience without requiring modifications to PDF.js itself.
+```tsx
+import { Root, Pages, Page, CanvasLayer, TextLayer } from "@anaralabs/lector";
+
+function PDFViewer() {
+  return (
+    <Root source='/sample.pdf' colorScheme='dark'>
+      <Pages>
+        <Page>
+          <CanvasLayer />
+          <TextLayer />
+        </Page>
+      </Pages>
+    </Root>
+  );
+}
+```
+
+The prop is reactive — changing it re-renders every page in the new scheme. To follow your app's theme (for example with `next-themes`):
+
+```tsx
+import { useTheme } from "next-themes";
+
+function PDFViewer() {
+  const { resolvedTheme } = useTheme();
+
+  return (
+    <Root source='/sample.pdf' colorScheme={resolvedTheme === "dark" ? "dark" : "light"}>
+      {/* ... */}
+    </Root>
+  );
+}
+```
+
+## Runtime Toggle
+
+Any component under `Root` can read and switch the scheme through the `usePdf` store:
+
+```tsx
+import { usePdf } from "@anaralabs/lector";
+
+function DarkModeToggle() {
+  const colorScheme = usePdf((state) => state.colorScheme);
+  const setColorScheme = usePdf((state) => state.setColorScheme);
+
+  return (
+    <button onClick={() => setColorScheme(colorScheme === "dark" ? "light" : "dark")}>
+      {colorScheme === "dark" ? "Switch to light" : "Switch to dark"}
+    </button>
+  );
+}
+```
+
+Rendered pages are cached per scheme as bitmaps, so toggling back and forth is instant.
+
+## Custom Palette
+
+Override the dark palette with `darkModeColors`. The defaults are background `#141210` (a dark warm gray) and foreground `#eae6e0` (exported as `DEFAULT_DARK_MODE_COLORS`):
+
+```tsx
+<Root
+  source='/sample.pdf'
+  colorScheme='dark'
+  darkModeColors={{
+    background: "#1e1e2e", // replaces white paper
+    foreground: "#cdd6f4", // replaces black text and line art
+  }}
+>
+  {/* ... */}
+</Root>
+```
+
+You can also pass colors when toggling at runtime: `setColorScheme("dark", { background, foreground })`.
+
+Any CSS color works (`hsl()`, named colors, etc.), but **not** `var(--token)` — resolve CSS variables yourself first. If you do, don't read them from `document.documentElement` during render: when the theme toggles, React can re-render before your `dark` class lands on `<html>`, and you'll capture the light values and pass a light palette as the "dark" one. Resolve the dark tokens from a probe element that always carries the class instead:
+
+```tsx
+function resolveDarkTokens() {
+  const probe = document.createElement("div");
+  probe.className = "dark"; // always matches your .dark token block
+  probe.style.display = "none";
+  document.body.appendChild(probe);
+  const styles = getComputedStyle(probe);
+  const colors = {
+    background: `hsl(${styles.getPropertyValue("--background").trim()})`,
+    foreground: `hsl(${styles.getPropertyValue("--foreground").trim()})`,
+  };
+  probe.remove();
+  return colors;
+}
+```
+
+The palette only applies while `colorScheme` is `"dark"`, so it's safe to compute once and pass unconditionally.
+
+## Matching Your UI
+
+If you draw your own overlays — highlight rects, custom annotations — you can recolor them with the exact same mapping the pages use. `createDarkModeColorMap` returns a memoized `(color: string) => string` function:
+
+```tsx
+import { createDarkModeColorMap, usePdf } from "@anaralabs/lector";
+
+function useThemedColor(color: string) {
+  const colorScheme = usePdf((state) => state.colorScheme);
+  const darkModeColors = usePdf((state) => state.darkModeColors);
+
+  if (colorScheme !== "dark") return color;
+  return createDarkModeColorMap(darkModeColors)(color);
+}
+```
+
+A yellow highlight passed through the map lands on the same ramp as the page content, so it reads as a highlight against the dark paper instead of clashing with it.
+
+## How It Works
+
+Lector intercepts draw calls on the canvas at render time and remaps each fill and stroke color in OKLab color space. Perceived lightness is flipped onto the background↔foreground ramp — its position follows BT.709 luma, the same measure the "luminance inversion" night modes in PSPDFKit and MuPDF use — while hue and chroma are preserved:
+
+- Black text → palette foreground; white paper → palette background
+- Red stays warm (becomes pink, not cyan like CSS `invert`); blue links become light blue
+- Grays pick up the palette's tint
+
+A custom PDF.js `CanvasFactory` extends the recoloring to PDF.js-internal scratch canvases (transparency groups, soft masks, patterns). Images are left pixel-perfect — photos are not inverted, which is the big win over CSS filters. And because everything happens once at render time, there is zero per-frame cost during scroll and zoom, unlike CSS filters which the compositor re-evaluates continuously.
+
+Compared to the CSS filter approach this also means text selection and highlights composite correctly against real dark pixels, and thumbnails and the high-zoom detail layer follow the scheme automatically.
+
+## Limitations
+
+- Luminosity soft-mask fades survive (the mask is luma-corrected during composition), but midtones can land a few percent off the original opacity
+- Mesh-gradient shadings (rare) keep their original colors
+- Scanned PDFs, where the whole page is one image, intentionally stay light since images are preserved
+- Annotations rendered into the DOM by `AnnotationLayer` (link borders, form widgets) keep their original colors — style them with your own CSS if needed
+- Overlays you draw with blend modes tuned for a light page (e.g. `mix-blend-multiply`) need a dark variant such as `dark:mix-blend-screen`
+- Passing your own `CanvasFactory` via `documentOptions` disables scratch-canvas recoloring
+
+## Legacy: CSS Filter Approach
+
+> **Deprecated.** Use the `colorScheme` prop instead. This recipe is kept for consumers on older versions of Lector without native dark mode.
+
+Before native dark mode, the recommended approach was a chain of CSS filters on the `Pages` container:
 
 ```tsx
 import { Root, Pages, Page, CanvasLayer } from "@anaralabs/lector";
 
 function PDFViewer() {
   return (
-    <Root fileUrl='/sample.pdf'>
+    <Root source='/sample.pdf'>
       <Pages className='dark:invert-[94%] dark:hue-rotate-180 dark:brightness-[80%] dark:contrast-[228%]'>
         <Page>
           <CanvasLayer />
@@ -27,18 +163,4 @@ function PDFViewer() {
 }
 ```
 
-## Current Limitations
-
-The CSS filter approach has some limitations:
-
-1. Color accuracy might not be perfect for all PDF documents
-2. Some PDFs with complex color schemes might not render optimally
-3. Performance impact on larger documents
-
-## Future Plans
-
-We are actively monitoring the PDF.js development regarding native dark mode support. As referenced in [PDF.js Issue #2071](https://github.com/mozilla/pdf.js/issues/2071), there are currently no plans to implement this feature in PDF.js itself.
-
-### Forking PDF.js
-
-**Forking PDF.js**: We might fork PDF.js in the future to implement proper dark mode support directly in the rendering pipeline.
+This inverts photos, shifts hues (CSS `hue-rotate` is a linear approximation), and adds per-frame GPU filter cost — all of which the native `colorScheme` rendering avoids.

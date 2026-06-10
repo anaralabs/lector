@@ -4,6 +4,8 @@ import { useDebounce } from "use-debounce";
 
 import { PDFStore, usePdf } from "../../internal";
 import { clampScaleForPage } from "../../lib/canvas-utils";
+import { createDarkModeColorMap } from "../../lib/dark-mode";
+import { applyContextRecolor } from "../../lib/recolor-context";
 import { subscribeToViewportInvalidation } from "../../lib/viewport-invalidation";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
@@ -28,6 +30,19 @@ export const useDetailCanvasLayer = ({
 	const isPinching = usePdf((state) => state.isPinching);
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const viewportRef = usePdf((state) => state.viewportRef);
+	const colorScheme = usePdf((state) => state.colorScheme);
+	const darkModeColors = usePdf((state) => state.darkModeColors);
+
+	// Memoized per palette — stable identity, safe as an effect dependency.
+	const recolor =
+		colorScheme === "dark" ? createDarkModeColorMap(darkModeColors) : null;
+	const recolorKey = recolor
+		? `dark:${darkModeColors.background},${darkModeColors.foreground}`
+		: "light";
+
+	// Key (background|scheme) the visible detail canvas was last painted
+	// with, or null when it holds no content.
+	const paintedKeyRef = useRef<string | null>(null);
 
 	const [zoom] = useDebounce(bouncyZoom, 200);
 
@@ -61,7 +76,10 @@ export const useDetailCanvasLayer = ({
 		let renderingTask: RenderTask | null = null;
 		let renderTimeoutId: NodeJS.Timeout | null = null;
 
-		const bgColor = background ?? "white";
+		const bgColor = recolor
+			? recolor(background ?? "#ffffff")
+			: (background ?? "white");
+		const contentKey = `${background ?? "white"}|${recolorKey}`;
 		const detailBaseStyle = `position:absolute;top:0;left:0;pointer-events:none;z-index:1;background-color:${bgColor}`;
 
 		const hideDetailCanvas = () => {
@@ -173,6 +191,10 @@ export const useDetailCanvasLayer = ({
 				scale: effectiveScale,
 			});
 
+			// Native dark mode: recolor at draw time; `background` stays the
+			// original color and is mapped by the wrapped fillRect exactly once.
+			if (recolor) applyContextRecolor(bufferCtx, recolor);
+
 			const currentRenderingTask = pdfPageProxy.render({
 				canvas: buffer,
 				canvasContext: bufferCtx,
@@ -186,6 +208,17 @@ export const useDetailCanvasLayer = ({
 				.then(() => {
 					if (renderingTask !== currentRenderingTask) return;
 
+					// Same guard as the base canvas: a render finishing inside the
+					// scheme-toggle window (map already swapped, cleanup not yet
+					// run) must not blit wrong/mixed-scheme pixels. The effect
+					// re-run re-renders the detail region right after.
+					const state = store.getState();
+					const currentRecolorKey =
+						state.colorScheme === "dark"
+							? `dark:${state.darkModeColors.background},${state.darkModeColors.foreground}`
+							: "light";
+					if (currentRecolorKey !== recolorKey) return;
+
 					// Swap: update the visible detail canvas in one go
 					detailCanvas.width = actualWidth;
 					detailCanvas.height = actualHeight;
@@ -196,6 +229,7 @@ export const useDetailCanvasLayer = ({
 					if (ctx) {
 						ctx.drawImage(buffer, 0, 0);
 					}
+					paintedKeyRef.current = contentKey;
 				})
 				.catch((error) => {
 					if (error.name === "RenderingCancelledException") {
@@ -239,6 +273,17 @@ export const useDetailCanvasLayer = ({
 			// so no stale rectangle flicker on zoom-out
 			hideDetailCanvas();
 		} else {
+			// Stale detail is only better than a flash when it matches the
+			// current scheme/background. Across a theme toggle the old overlay
+			// would show wrong-scheme pixels over a correct base — hide it
+			// before paint and let the scheduled render bring sharpness back.
+			if (
+				paintedKeyRef.current !== null &&
+				paintedKeyRef.current !== contentKey
+			) {
+				hideDetailCanvas();
+				paintedKeyRef.current = null;
+			}
 			scheduleRender(0);
 		}
 
@@ -262,6 +307,8 @@ export const useDetailCanvasLayer = ({
 		viewportRef,
 		baseCanvasRef,
 		store,
+		recolor,
+		recolorKey,
 	]);
 
 	// Release canvas memory for Safari on unmount only.

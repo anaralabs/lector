@@ -45,3 +45,10 @@ export {
 export { usePDFPageNumber } from "./hooks/usePdfPageNumber";
 export { useSelectionDimensions } from "./hooks/useSelectionDimensions";
 export { type ColoredHighlight, type HighlightRect, usePdf } from "./internal";
+export {
+	type ColorScheme,
+	createDarkModeColorMap,
+	type DarkModeColors,
+	DEFAULT_DARK_MODE_COLORS,
+	type RenderColorMap,
+} from "./lib/dark-mode";

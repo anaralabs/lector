@@ -1,18 +1,22 @@
 "use client";
 
 import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
+import { useTheme } from "next-themes";
 import "@/lib/setup";
 
 const fileUrl = "/pdf/pathways.pdf";
 
 const Basic = () => {
+	const { resolvedTheme } = useTheme();
+
 	return (
 		<Root
 			source={fileUrl}
 			className="w-full h-[500px] border overflow-hidden rounded-lg"
 			loader={<div className="p-4">Loading...</div>}
+			colorScheme={resolvedTheme === "dark" ? "dark" : "light"}
 		>
-			<Pages className="dark:invert-[94%] dark:hue-rotate-180 dark:brightness-[80%] dark:contrast-[228%]">
+			<Pages>
 				<Page>
 					<CanvasLayer />
 					<TextLayer />
