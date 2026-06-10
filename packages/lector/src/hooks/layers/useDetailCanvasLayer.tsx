@@ -36,6 +36,13 @@ export const useDetailCanvasLayer = ({
 	// Memoized per palette — stable identity, safe as an effect dependency.
 	const recolor =
 		colorScheme === "dark" ? createDarkModeColorMap(darkModeColors) : null;
+	const recolorKey = recolor
+		? `dark:${darkModeColors.background},${darkModeColors.foreground}`
+		: "light";
+
+	// Key (background|scheme) the visible detail canvas was last painted
+	// with, or null when it holds no content.
+	const paintedKeyRef = useRef<string | null>(null);
 
 	const [zoom] = useDebounce(bouncyZoom, 200);
 
@@ -72,6 +79,7 @@ export const useDetailCanvasLayer = ({
 		const bgColor = recolor
 			? recolor(background ?? "#ffffff")
 			: (background ?? "white");
+		const contentKey = `${background ?? "white"}|${recolorKey}`;
 		const detailBaseStyle = `position:absolute;top:0;left:0;pointer-events:none;z-index:1;background-color:${bgColor}`;
 
 		const hideDetailCanvas = () => {
@@ -210,6 +218,7 @@ export const useDetailCanvasLayer = ({
 					if (ctx) {
 						ctx.drawImage(buffer, 0, 0);
 					}
+					paintedKeyRef.current = contentKey;
 				})
 				.catch((error) => {
 					if (error.name === "RenderingCancelledException") {
@@ -253,6 +262,17 @@ export const useDetailCanvasLayer = ({
 			// so no stale rectangle flicker on zoom-out
 			hideDetailCanvas();
 		} else {
+			// Stale detail is only better than a flash when it matches the
+			// current scheme/background. Across a theme toggle the old overlay
+			// would show wrong-scheme pixels over a correct base — hide it
+			// before paint and let the scheduled render bring sharpness back.
+			if (
+				paintedKeyRef.current !== null &&
+				paintedKeyRef.current !== contentKey
+			) {
+				hideDetailCanvas();
+				paintedKeyRef.current = null;
+			}
 			scheduleRender(0);
 		}
 
@@ -277,6 +297,7 @@ export const useDetailCanvasLayer = ({
 		baseCanvasRef,
 		store,
 		recolor,
+		recolorKey,
 	]);
 
 	// Release canvas memory for Safari on unmount only.
