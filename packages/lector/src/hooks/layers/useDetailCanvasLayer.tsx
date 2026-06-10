@@ -11,6 +11,8 @@ import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
 const DETAIL_RENDER_IDLE_MS = 80;
+// How long the live zoom must be stable before the detail pass may render.
+const ZOOM_SETTLE_MS = 250;
 
 export const useDetailCanvasLayer = ({
 	background,
@@ -45,6 +47,23 @@ export const useDetailCanvasLayer = ({
 	const paintedKeyRef = useRef<string | null>(null);
 
 	const [zoom] = useDebounce(bouncyZoom, 200);
+
+	// Track when the live zoom last changed so the render can wait out a
+	// multi-segment gesture (wheel pulses end the use-gesture pinch between
+	// segments, so `isPinching` alone lets a 100ms+ detail render fire
+	// mid-gesture).
+	// Seed so an idle mount renders immediately, but a layer mounting during
+	// an active pinch waits out the settle window. (A mount in the brief
+	// isPinching=false window between wheel pulses may render once and get
+	// cancelled by the next pulse — rare and bounded.)
+	const lastZoomChangeRef = useRef(
+		store.getState().isPinching ? performance.now() : 0,
+	);
+	const prevBouncyZoomRef = useRef(bouncyZoom);
+	if (prevBouncyZoomRef.current !== bouncyZoom) {
+		prevBouncyZoomRef.current = bouncyZoom;
+		lastZoomChangeRef.current = performance.now();
+	}
 
 	// Cache base viewport dimensions — they never change for a given page proxy.
 	const pageDimsRef = useRef<{
@@ -95,6 +114,18 @@ export const useDetailCanvasLayer = ({
 			// sharpening is invisible mid-scroll anyway. Poll until scroll settles.
 			const virtualizer = store.getState().virtualizer;
 			if (virtualizer?.isScrolling) {
+				scheduleRender(160);
+				return;
+			}
+
+			// Likewise, don't render between segments of a zoom gesture (wheel
+			// pulses, pinch pauses): the 100ms+ sharpening pass would land
+			// mid-gesture and be thrown away by the next zoom change anyway.
+			// Wait until the live zoom has been stable for a beat.
+			if (
+				store.getState().isPinching ||
+				performance.now() - lastZoomChangeRef.current < ZOOM_SETTLE_MS
+			) {
 				scheduleRender(160);
 				return;
 			}
