@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import { usePdf } from "../../internal";
+import { PDFStore, usePdf } from "../../internal";
 import { subscribeToViewportInvalidation } from "../../lib/viewport-invalidation";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
@@ -218,6 +218,7 @@ export const useTextLayer = () => {
 	const pageNumber = usePDFPageNumber();
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const viewportRef = usePdf((state) => state.viewportRef);
+	const store = PDFStore.useContext();
 
 	useEffect(() => {
 		const textContainer = textContainerRef.current;
@@ -386,11 +387,30 @@ export const useTextLayer = () => {
 			textContainer.style.visibility = "";
 		};
 
-		const onScroll = () => {
+		const restoreWhenSettled = () => {
+			settleTimer = null;
+			// A pinch can outlast the settle window with the zoom value clamped
+			// (no further zoom changes to re-arm the timer) — stay hidden until
+			// the gesture actually ends.
+			if (store.getState().isPinching) {
+				settleTimer = setTimeout(restoreWhenSettled, TEXT_SCROLL_SETTLE_MS);
+				return;
+			}
+			show();
+		};
+
+		const hideAndDebounce = () => {
+			// Never hide under an active drag-select (scroll-driven or
+			// zoom-driven) — the guard lives here so every hide trigger
+			// respects it.
 			if (selecting) return;
 			textContainer.style.visibility = "hidden";
 			if (settleTimer) clearTimeout(settleTimer);
-			settleTimer = setTimeout(show, TEXT_SCROLL_SETTLE_MS);
+			settleTimer = setTimeout(restoreWhenSettled, TEXT_SCROLL_SETTLE_MS);
+		};
+
+		const onScroll = () => {
+			hideAndDebounce();
 		};
 
 		const onPointerDown = () => {
@@ -431,6 +451,28 @@ export const useTextLayer = () => {
 			unsubscribe = subscribeToViewportInvalidation(scrollViewport, onScroll);
 		};
 		attachScrollSubscription();
+
+		// Zooming re-rasterizes every (transparent) span under the animating CSS
+		// transform, just like scrolling moves them — hide during zoom changes
+		// and active pinches too. Scroll re-anchoring during zoom only fires
+		// scroll events incidentally, so the scroll subscription alone misses
+		// most of the gesture.
+		const initialState = store.getState();
+		let prevZoom = initialState.zoom;
+		let prevPinching = initialState.isPinching;
+		// `subscribe` doesn't replay the current state — a layer mounting in the
+		// middle of an ongoing pinch must start hidden or it defeats the gating.
+		if (prevPinching) hideAndDebounce();
+		const unsubscribeStore = store.subscribe(
+			(state: ReturnType<typeof store.getState>) => {
+				const zoomChanged = state.zoom !== prevZoom;
+				const pinchStarted = state.isPinching && !prevPinching;
+				prevZoom = state.zoom;
+				prevPinching = state.isPinching;
+				if (zoomChanged || pinchStarted) hideAndDebounce();
+			},
+		);
+
 		document.addEventListener("pointerdown", onPointerDown, true);
 		document.addEventListener("pointerup", clearPointer, true);
 		document.addEventListener("pointercancel", clearPointer, true);
@@ -440,6 +482,7 @@ export const useTextLayer = () => {
 		return () => {
 			if (attachRaf !== null) cancelAnimationFrame(attachRaf);
 			unsubscribe?.();
+			unsubscribeStore();
 			document.removeEventListener("pointerdown", onPointerDown, true);
 			document.removeEventListener("pointerup", clearPointer, true);
 			document.removeEventListener("pointercancel", clearPointer, true);
@@ -448,7 +491,7 @@ export const useTextLayer = () => {
 			if (settleTimer) clearTimeout(settleTimer);
 			show();
 		};
-	}, [viewportRef]);
+	}, [viewportRef, store]);
 
 	return {
 		textContainerRef,
