@@ -82,6 +82,26 @@ Override the dark palette with `darkModeColors`. The defaults are background `#1
 
 You can also pass colors when toggling at runtime: `setColorScheme("dark", { background, foreground })`.
 
+Any CSS color works (`hsl()`, named colors, etc.), but **not** `var(--token)` — resolve CSS variables yourself first. If you do, don't read them from `document.documentElement` during render: when the theme toggles, React can re-render before your `dark` class lands on `<html>`, and you'll capture the light values and pass a light palette as the "dark" one. Resolve the dark tokens from a probe element that always carries the class instead:
+
+```tsx
+function resolveDarkTokens() {
+  const probe = document.createElement("div");
+  probe.className = "dark"; // always matches your .dark token block
+  probe.style.display = "none";
+  document.body.appendChild(probe);
+  const styles = getComputedStyle(probe);
+  const colors = {
+    background: `hsl(${styles.getPropertyValue("--background").trim()})`,
+    foreground: `hsl(${styles.getPropertyValue("--foreground").trim()})`,
+  };
+  probe.remove();
+  return colors;
+}
+```
+
+The palette only applies while `colorScheme` is `"dark"`, so it's safe to compute once and pass unconditionally.
+
 ## Matching Your UI
 
 If you draw your own overlays — highlight rects, custom annotations — you can recolor them with the exact same mapping the pages use. `createDarkModeColorMap` returns a memoized `(color: string) => string` function:
