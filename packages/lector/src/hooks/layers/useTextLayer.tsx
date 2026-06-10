@@ -201,6 +201,13 @@ const TEXT_BUILD_IDLE_MS = 300;
 // long after the last scroll event (i.e. once scrolling settles).
 const TEXT_SCROLL_SETTLE_MS = 160;
 
+// The viewport ref is assigned by a parent effect (after child effects), so on
+// first mount the scroll subscription retries on rAF. A mounted page implies
+// the viewport div is already committed (pages render inside it), so this
+// normally succeeds on the first retry — the generous cap only exists so a
+// non-lector integration without a viewport doesn't spin a rAF loop forever.
+const VIEWPORT_ATTACH_MAX_FRAMES = 300;
+
 export const useTextLayer = () => {
 	const textContainerRef = useRef<TextLayerDivElement>(null);
 	const textLayerRef = useRef<{
@@ -219,9 +226,27 @@ export const useTextLayer = () => {
 		}
 
 		let isCancelled = false;
+		let buildTimer: ReturnType<typeof setTimeout> | null = null;
+		let unsubscribe: (() => void) | null = null;
 
-		const buildTimer = setTimeout(() => {
-			if (isCancelled || textContainerRef.current !== textContainer) return;
+		// Building the text layer streams the page text from the pdf worker and
+		// measures every span (`ctx.measureText`) — a 100ms+ main-thread burst on
+		// dense pages that lands mid-scroll as the virtualizer mounts pages, and
+		// the user can't select text they're flying past anyway. So debounce the
+		// build against viewport scrolls: every scroll event restarts the timer
+		// (cancelling an in-flight build, which would otherwise keep running on
+		// the scroll path), and the build runs exactly TEXT_BUILD_IDLE_MS after
+		// the last scroll (mirrors the visibility gating below). Once a build has
+		// COMPLETED, further scrolls are no-ops.
+		let built = false;
+		let building = false;
+		// Bumped to abandon a cancelled build's promise chain so it can't mark
+		// `built` or touch the container after a newer build has started.
+		let buildGen = 0;
+
+		const build = () => {
+			building = true;
+			const gen = ++buildGen;
 
 			textContainer.innerHTML = "";
 			if (textLayerRef.current) {
@@ -231,7 +256,12 @@ export const useTextLayer = () => {
 
 			void import("pdfjs-dist/legacy/build/pdf.mjs")
 				.then(({ TextLayer }) => {
-					if (isCancelled || textContainerRef.current !== textContainer) return;
+					if (
+						isCancelled ||
+						gen !== buildGen ||
+						textContainerRef.current !== textContainer
+					)
+						return;
 
 					const textLayer = new TextLayer({
 						textContentSource: pdfPageProxy.streamTextContent(),
@@ -244,7 +274,11 @@ export const useTextLayer = () => {
 					return textLayer.render();
 				})
 				.then(() => {
-					if (isCancelled || textContainerRef.current !== textContainer) {
+					if (
+						isCancelled ||
+						gen !== buildGen ||
+						textContainerRef.current !== textContainer
+					) {
 						return;
 					}
 
@@ -253,17 +287,72 @@ export const useTextLayer = () => {
 					textContainer.appendChild(endOfContent);
 
 					bindMouseEvents(textContainer, endOfContent);
+
+					built = true;
+					building = false;
+					// The build is final — drop the scroll subscription so settled
+					// pages don't run a no-op callback on every scroll.
+					unsubscribe?.();
+					unsubscribe = null;
 				})
 				.catch((error) => {
+					if (gen === buildGen) building = false;
 					if (error instanceof Error && error.name !== "AbortException") {
 						console.error("TextLayer rendering error:", error);
 					}
 				});
-		}, TEXT_BUILD_IDLE_MS);
+		};
+
+		const schedule = () => {
+			if (built) return;
+			if (building) {
+				// A scroll started mid-build: stop the streaming render so its
+				// span-measuring work doesn't land on the scroll path, and rebuild
+				// from scratch once the viewport is idle again. Clear the container
+				// too so a partially-rendered text layer can't be selected/copied
+				// during the debounce window.
+				buildGen++;
+				building = false;
+				if (textLayerRef.current) {
+					textLayerRef.current.cancel();
+					textLayerRef.current = null;
+				}
+				textContainer.innerHTML = "";
+			}
+			if (buildTimer) clearTimeout(buildTimer);
+			buildTimer = setTimeout(() => {
+				buildTimer = null;
+				if (isCancelled || textContainerRef.current !== textContainer) return;
+				build();
+			}, TEXT_BUILD_IDLE_MS);
+		};
+
+		// `viewportRef.current` is assigned in a PARENT effect
+		// (useViewportContainer), and React runs child effects first — so on the
+		// initial mount it can still be null here. Retry on the next frame until
+		// the viewport exists (normally one frame) so initially-mounted pages get
+		// the debounce too; give up after ~1s so an integration without lector's
+		// viewport doesn't spin a rAF loop forever (the fixed timer still runs).
+		let attachRaf: number | null = null;
+		let attachAttempts = 0;
+		const attachScrollSubscription = () => {
+			attachRaf = null;
+			const scrollViewport = viewportRef?.current;
+			if (!scrollViewport) {
+				if (++attachAttempts > VIEWPORT_ATTACH_MAX_FRAMES) return;
+				attachRaf = requestAnimationFrame(attachScrollSubscription);
+				return;
+			}
+			unsubscribe = subscribeToViewportInvalidation(scrollViewport, schedule);
+		};
+		attachScrollSubscription();
+		schedule();
 
 		return () => {
 			isCancelled = true;
-			clearTimeout(buildTimer);
+			if (buildTimer) clearTimeout(buildTimer);
+			if (attachRaf !== null) cancelAnimationFrame(attachRaf);
+			unsubscribe?.();
 
 			if (textLayerRef.current) {
 				textLayerRef.current.cancel();
@@ -275,14 +364,13 @@ export const useTextLayer = () => {
 				delete textContainer._cleanupTextSelection;
 			}
 		};
-	}, [pdfPageProxy.streamTextContent, pdfPageProxy.getViewport]);
+	}, [pdfPageProxy.streamTextContent, pdfPageProxy.getViewport, viewportRef]);
 
 	// Hide the (transparent) text layer while scrolling so its spans aren't
 	// repainted as the page moves, and restore it once scrolling settles.
 	useEffect(() => {
 		const textContainer = textContainerRef.current;
-		const viewport = viewportRef?.current;
-		if (!textContainer || !viewport) return;
+		if (!textContainer) return;
 
 		let settleTimer: ReturnType<typeof setTimeout> | null = null;
 		// `selecting` is true only while a drag-select is actively extending the
@@ -327,7 +415,22 @@ export const useTextLayer = () => {
 			selecting = false;
 		};
 
-		const unsubscribe = subscribeToViewportInvalidation(viewport, onScroll);
+		// Same mount-order caveat as the build effect above: the viewport ref is
+		// assigned by a parent effect, so retry (bounded) until it exists.
+		let unsubscribe: (() => void) | null = null;
+		let attachRaf: number | null = null;
+		let attachAttempts = 0;
+		const attachScrollSubscription = () => {
+			attachRaf = null;
+			const scrollViewport = viewportRef?.current;
+			if (!scrollViewport) {
+				if (++attachAttempts > VIEWPORT_ATTACH_MAX_FRAMES) return;
+				attachRaf = requestAnimationFrame(attachScrollSubscription);
+				return;
+			}
+			unsubscribe = subscribeToViewportInvalidation(scrollViewport, onScroll);
+		};
+		attachScrollSubscription();
 		document.addEventListener("pointerdown", onPointerDown, true);
 		document.addEventListener("pointerup", clearPointer, true);
 		document.addEventListener("pointercancel", clearPointer, true);
@@ -335,7 +438,8 @@ export const useTextLayer = () => {
 		window.addEventListener("blur", clearPointer);
 
 		return () => {
-			unsubscribe();
+			if (attachRaf !== null) cancelAnimationFrame(attachRaf);
+			unsubscribe?.();
 			document.removeEventListener("pointerdown", onPointerDown, true);
 			document.removeEventListener("pointerup", clearPointer, true);
 			document.removeEventListener("pointercancel", clearPointer, true);
