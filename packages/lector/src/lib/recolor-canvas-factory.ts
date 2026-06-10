@@ -1,5 +1,5 @@
 import type { RenderColorMap } from "./dark-mode";
-import { applyContextRecolor } from "./recolor-context";
+import { applyContextRecolor, removeContextRecolor } from "./recolor-context";
 
 export interface RenderColorMapRef {
 	current: RenderColorMap | null;
@@ -62,6 +62,15 @@ export function createRecolorCanvasFactory(mapRef: RenderColorMapRef) {
 			}
 			canvasAndContext.canvas.width = width;
 			canvasAndContext.canvas.height = height;
+			// pdf.js scratch canvases live within a single render task today,
+			// but the factory contract allows reuse via reset — re-sync the
+			// wrapper with the current scheme so a reused context never keeps
+			// a stale map.
+			if (canvasAndContext.context) {
+				const map = mapRef.current;
+				if (map) applyContextRecolor(canvasAndContext.context, map);
+				else removeContextRecolor(canvasAndContext.context);
+			}
 		}
 
 		destroy(canvasAndContext: CanvasAndContext) {

@@ -169,6 +169,57 @@ describe("applyContextRecolor", () => {
 		}
 	});
 
+	it("does not luma-correct image-based masks (never-recolored pixels)", () => {
+		// An image-based luminosity mask reaches the mask canvas via drawImage
+		// and was never recolored — "un-mapping" it would invert its alpha.
+		const svgNS = "http://www.w3.org/2000/svg";
+		const svg = document.createElementNS(svgNS, "svg");
+		svg.setAttribute("width", "0");
+		svg.setAttribute("height", "0");
+		const filter = document.createElementNS(svgNS, "filter");
+		filter.setAttribute("id", "g_test_luminosity_map_1");
+		filter.setAttribute("color-interpolation-filters", "sRGB");
+		const matrix = document.createElementNS(svgNS, "feColorMatrix");
+		matrix.setAttribute("type", "matrix");
+		matrix.setAttribute(
+			"values",
+			"0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0.3 0.59 0.11 0 0",
+		);
+		filter.append(matrix);
+		svg.append(filter);
+		document.body.append(svg);
+
+		try {
+			const layer = makeCtx();
+			applyContextRecolor(layer, testMap);
+			layer.fillStyle = "#ff0000";
+			layer.fillRect(0, 0, 8, 8);
+
+			// White "image" mask drawn into a wrapped mask context via
+			// drawImage only — pixels stay white, nothing was recolored.
+			const image = makeCtx();
+			image.fillStyle = "#ffffff";
+			image.fillRect(0, 0, 8, 8);
+			const mask = makeCtx();
+			applyContextRecolor(mask, testMap);
+			mask.drawImage(image.canvas, 0, 0);
+			expect(pixel(mask)).toBe("#ffffff");
+
+			layer.save();
+			layer.filter = "url(#g_test_luminosity_map_1)";
+			layer.globalCompositeOperation = "destination-in";
+			layer.drawImage(mask.canvas, 0, 0);
+			layer.restore();
+
+			// Uncorrected white mask = luma 1 = fully visible. A wrongly
+			// applied correction would collapse alpha to ~0 instead.
+			const alpha = layer.getImageData(4, 4, 1, 1).data[3]!;
+			expect(alpha).toBeGreaterThan(230);
+		} finally {
+			svg.remove();
+		}
+	});
+
 	it("leaves ordinary drawImage compositing untouched", () => {
 		const source = makeCtx();
 		source.fillStyle = "#123456";

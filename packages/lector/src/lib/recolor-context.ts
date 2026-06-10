@@ -1,9 +1,12 @@
 import type { RenderColorMap } from "./dark-mode";
 
 const RECOLOR_CLEANUP = Symbol("lectorRecolorCleanup");
+const RECOLOR_PAINTED = Symbol("lectorRecolorPainted");
 
 type RecolorableContext = CanvasRenderingContext2D & {
 	[RECOLOR_CLEANUP]?: () => void;
+	/** True once any draw on this context actually swapped a color. */
+	[RECOLOR_PAINTED]?: boolean;
 };
 
 type AnyFn = (this: CanvasRenderingContext2D, ...args: never[]) => unknown;
@@ -38,10 +41,13 @@ function parseHexLuma(color: string): number | null {
  * appears. This produces a copy of the mask with the neutral luma ramp
  * un-mapped (mapped-white luma back to 255, mapped-black back to 0) for the
  * filter to consume. Exact for neutral/binary masks; midtones land within a
- * few percent (the OKLab ramp is not affine in luma). Pixels that reached
- * the mask via drawImage (image-based masks) were never recolored, but
- * correcting them too only re-grays content that is already grayscale by
- * definition of a luminosity mask.
+ * few percent (the OKLab ramp is not affine in luma).
+ *
+ * Only called for mask canvases that actually painted recolored content
+ * (RECOLOR_PAINTED): the un-map ramp is itself an inversion, so applying it
+ * to never-recolored pixels — image-based masks, drawn via the untouched
+ * drawImage — would invert THEIR alpha instead. Masks mixing recolored
+ * vector art with images remain imperfect for the image part.
  */
 function correctLuminosityMask(
 	source: CanvasImageSource,
@@ -123,11 +129,20 @@ export function applyContextRecolor(
 				typeof this.filter === "string" &&
 				this.filter.includes("luminosity")
 			) {
-				const corrected = correctLuminosityMask(
-					args[0] as unknown as CanvasImageSource,
-					mappedWhiteLuma,
-					mappedBlackLuma,
-				);
+				const source = args[0] as unknown as CanvasImageSource;
+				// Un-map only masks whose context actually painted recolored
+				// content; never-recolored sources (image-based masks) would
+				// get their alpha inverted by the correction instead.
+				const sourcePainted =
+					(source instanceof HTMLCanvasElement ||
+						(typeof OffscreenCanvas !== "undefined" &&
+							source instanceof OffscreenCanvas)) &&
+					(source.getContext("2d") as RecolorableContext | null)?.[
+						RECOLOR_PAINTED
+					] === true;
+				const corrected = sourcePainted
+					? correctLuminosityMask(source, mappedWhiteLuma, mappedBlackLuma)
+					: null;
 				if (corrected) {
 					const next = [corrected, ...args.slice(1)] as never[];
 					return original.apply(this, next);
@@ -145,6 +160,7 @@ export function applyContextRecolor(
 			if (typeof style === "string") {
 				const mapped = map(style);
 				if (mapped !== style) {
+					(this as RecolorableContext)[RECOLOR_PAINTED] = true;
 					this[styleProp] = mapped;
 					try {
 						return original.apply(this, args);
@@ -160,8 +176,11 @@ export function applyContextRecolor(
 		function (this: CanvasRenderingContext2D, ...args: never[]): unknown {
 			const gradient = original.apply(this, args) as CanvasGradient;
 			const addColorStop = gradient.addColorStop.bind(gradient);
+			const context = this as RecolorableContext;
 			gradient.addColorStop = (offset: number, color: string) => {
-				addColorStop(offset, map(color));
+				const mapped = map(color);
+				if (mapped !== color) context[RECOLOR_PAINTED] = true;
+				addColorStop(offset, mapped);
 			};
 			return gradient;
 		};
@@ -186,7 +205,19 @@ export function applyContextRecolor(
 		])
 			delete record[name];
 		delete target[RECOLOR_CLEANUP];
+		delete target[RECOLOR_PAINTED];
 	};
 	target[RECOLOR_CLEANUP] = cleanup;
 	return cleanup;
+}
+
+/**
+ * Removes any recolor wrapper installed on the context. For long-lived
+ * contexts (the visible canvas in the no-buffer fallback, thumbnails) that
+ * are about to render in the light scheme: a still-pending dark render's
+ * deferred restore could otherwise leave its wrapper active across the
+ * scheme switch.
+ */
+export function removeContextRecolor(ctx: CanvasRenderingContext2D): void {
+	(ctx as RecolorableContext)[RECOLOR_CLEANUP]?.();
 }

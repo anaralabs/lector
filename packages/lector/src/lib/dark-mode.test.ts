@@ -89,7 +89,10 @@ describe("createDarkModeColorMap", () => {
 		}
 	});
 
-	it("memoizes per palette and per color", () => {
+	it("returns the same map instance per palette with stable results", () => {
+		// Function identity is the observable memoization contract (hooks use
+		// it as an effect dependency); the per-color string cache is an
+		// internal perf detail that string equality cannot distinguish.
 		expect(createDarkModeColorMap()).toBe(map);
 		expect(map("#123456")).toBe(map("#123456"));
 		const custom = createDarkModeColorMap({ background: "#000000" });

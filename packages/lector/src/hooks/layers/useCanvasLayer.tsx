@@ -5,7 +5,10 @@ import { useDebounce } from "use-debounce";
 import { usePdf } from "../../internal";
 import { clampScaleForPage } from "../../lib/canvas-utils";
 import { createDarkModeColorMap } from "../../lib/dark-mode";
-import { applyContextRecolor } from "../../lib/recolor-context";
+import {
+	applyContextRecolor,
+	removeContextRecolor,
+} from "../../lib/recolor-context";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
@@ -216,10 +219,16 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 		// Native dark mode: recolor at draw time inside this render. The
 		// `background` param stays the ORIGINAL color — pdf.js fills it through
-		// the wrapped fillRect, which maps it exactly once.
-		const restoreRecolor = recolor
-			? applyContextRecolor(renderCtx, recolor)
-			: null;
+		// the wrapped fillRect, which maps it exactly once. For light renders,
+		// strip any wrapper a still-pending dark render may have left on the
+		// context (matters in the no-buffer fallback, where renderCtx is the
+		// long-lived visible canvas context).
+		let restoreRecolor: (() => void) | null = null;
+		if (recolor) {
+			restoreRecolor = applyContextRecolor(renderCtx, recolor);
+		} else {
+			removeContextRecolor(renderCtx);
+		}
 
 		const renderingTask = pdfPageProxy.render({
 			canvas: renderCanvas,

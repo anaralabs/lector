@@ -1,6 +1,7 @@
 /** biome-ignore-all lint/suspicious/noArrayIndexKey: <index react> */
 import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
 import { usePdf } from "../../internal";
+import { createDarkModeColorMap } from "../../lib/dark-mode";
 
 interface CustomSelectionProps {
 	textColor?: string;
@@ -13,6 +14,7 @@ export const CustomSelection = ({
 }: CustomSelectionProps) => {
 	const customSelectionRects = usePdf((state) => state.customSelectionRects);
 	const colorScheme = usePdf((state) => state.colorScheme);
+	const darkModeColors = usePdf((state) => state.darkModeColors);
 
 	const pageNumber = usePDFPageNumber();
 
@@ -21,6 +23,13 @@ export const CustomSelection = ({
 	);
 
 	if (!rects.length) return null;
+
+	// Run the light-tuned defaults through the same map as the page so the
+	// selection chrome composites sensibly against natively dark pixels.
+	const isDark = colorScheme === "dark";
+	const map = isDark ? createDarkModeColorMap(darkModeColors) : null;
+	const displayTextColor = map ? map(textColor) : textColor;
+	const displayBgColor = map ? map(bgColor) : bgColor;
 
 	return (
 		<>
@@ -35,7 +44,7 @@ export const CustomSelection = ({
 						width: rect.width,
 						pointerEvents: "none",
 						zIndex: 30,
-						background: textColor,
+						background: displayTextColor,
 						mixBlendMode: "color",
 					}}
 				/>
@@ -50,10 +59,10 @@ export const CustomSelection = ({
 						height: rect.height,
 						width: rect.width,
 						pointerEvents: "none",
-						background: bgColor,
+						background: displayBgColor,
 						// "multiply" tints a light page; "screen" is the dark-page
 						// equivalent (lightens instead of darkening to near-black).
-						mixBlendMode: colorScheme === "dark" ? "screen" : "multiply",
+						mixBlendMode: isDark ? "screen" : "multiply",
 					}}
 				/>
 			))}
