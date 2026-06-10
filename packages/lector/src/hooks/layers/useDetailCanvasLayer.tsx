@@ -208,6 +208,17 @@ export const useDetailCanvasLayer = ({
 				.then(() => {
 					if (renderingTask !== currentRenderingTask) return;
 
+					// Same guard as the base canvas: a render finishing inside the
+					// scheme-toggle window (map already swapped, cleanup not yet
+					// run) must not blit wrong/mixed-scheme pixels. The effect
+					// re-run re-renders the detail region right after.
+					const state = store.getState();
+					const currentRecolorKey =
+						state.colorScheme === "dark"
+							? `dark:${state.darkModeColors.background},${state.darkModeColors.foreground}`
+							: "light";
+					if (currentRecolorKey !== recolorKey) return;
+
 					// Swap: update the visible detail canvas in one go
 					detailCanvas.width = actualWidth;
 					detailCanvas.height = actualHeight;
