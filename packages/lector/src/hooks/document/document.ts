@@ -70,7 +70,7 @@ export interface usePDFDocumentParams {
 	colorScheme?: ColorScheme;
 	/**
 	 * Palette for the dark scheme: `background` replaces white paper,
-	 * `foreground` replaces black text. Defaults to #181a1b / #e8e6e3.
+	 * `foreground` replaces black text. Defaults to #141210 / #eae6e0.
 	 */
 	darkModeColors?: DarkModeColors;
 }

@@ -13,9 +13,11 @@ export interface DarkModeColors {
  */
 export type RenderColorMap = (color: string) => string;
 
+// Darker warm gray (red ≥ green ≥ blue): easier on the eyes than a cool or
+// pure-black surface, and white paper maps onto it exactly.
 export const DEFAULT_DARK_MODE_COLORS: Required<DarkModeColors> = {
-	background: "#181a1b",
-	foreground: "#e8e6e3",
+	background: "#141210",
+	foreground: "#eae6e0",
 };
 
 type Rgba = [number, number, number, number];
