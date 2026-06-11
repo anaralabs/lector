@@ -1,30 +1,56 @@
 import { useEffect, useState } from "react";
 
+// dpr-3 phones (recent iPhones, most Android flagships) look visibly soft at
+// a cap of 2; the page-area clamp in canvas-utils already bounds the memory
+// cost of rendering at 3.
+const DPR_CAP = 3;
+
+const readDpr = () =>
+	typeof window === "undefined"
+		? 1
+		: Math.min(window.devicePixelRatio || 1, DPR_CAP);
+
 export const useDpr = () => {
-	const [dpr, setDPR] = useState(
-		typeof window === "undefined" ? 1 : Math.min(window.devicePixelRatio, 2),
-	);
+	const [dpr, setDpr] = useState(readDpr);
 
 	useEffect(() => {
 		if (typeof window === "undefined") {
 			return;
 		}
 
-		const handleDPRChange = () => {
-			setDPR(Math.min(window.devicePixelRatio, 2));
+		let mediaQuery: MediaQueryList | null = null;
+		let cancelled = false;
+
+		const handleChange = () => {
+			if (cancelled) {
+				return;
+			}
+			setDpr(readDpr());
+			subscribe();
 		};
 
-		const windowMatch = window.matchMedia(
-			`screen and (min-resolution: ${dpr}dppx)`,
-		);
+		const subscribe = () => {
+			mediaQuery?.removeEventListener("change", handleChange);
+			// Exact-match query built from the live, UNCAPPED devicePixelRatio: it
+			// flips (and fires "change") on any deviation in either direction. A
+			// min-resolution query only fires when the ratio drops below it, so
+			// moving to a denser display or raising browser zoom would never be
+			// observed. The -webkit alternative covers older Safari, which lacks
+			// the standard resolution feature in matchMedia.
+			const ratio = window.devicePixelRatio || 1;
+			mediaQuery = window.matchMedia(
+				`(resolution: ${ratio}dppx), (-webkit-device-pixel-ratio: ${ratio})`,
+			);
+			mediaQuery.addEventListener("change", handleChange, { once: true });
+		};
 
-		windowMatch.addEventListener("change", handleDPRChange);
+		subscribe();
 
 		return () => {
-			windowMatch.removeEventListener("change", handleDPRChange);
+			cancelled = true;
+			mediaQuery?.removeEventListener("change", handleChange);
 		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [dpr]);
+	}, []);
 
 	return dpr;
 };
