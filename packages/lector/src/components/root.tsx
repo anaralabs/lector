@@ -110,12 +110,16 @@ export const Root = forwardRef(
 		);
 
 		const documentId = initialState?.pdfDocumentProxy?.fingerprints?.[0];
+		const hasDocument = !!initialState;
 		useEffect(() => {
-			if (!documentId) return;
+			if (!hasDocument) return;
 			return () => {
-				clearBitmapCache(documentId);
+				// Documents without a fingerprint cache under "" (the canvas
+				// layer's fallback docId) — clear that bucket too, or their
+				// bitmaps and the page proxies they pin outlive the document.
+				clearBitmapCache(documentId ?? "");
 			};
-		}, [documentId]);
+		}, [documentId, hasDocument]);
 
 		return (
 			<Primitive.div ref={ref} {...props}>
