@@ -199,22 +199,33 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		// Mid-gesture (fit-width resize drag, pinch), reuse the painted frame
 		// via CSS — the stack transform scales it coherently — and re-render
 		// once the gesture settles. Only valid when the frame matches the
-		// current scheme/background, else we'd show stale colors.
+		// current scheme/background, else we'd show stale colors. Geometry
+		// styles are left untouched: the inverse-scale scheme below keeps the
+		// canvas page-glued at any live zoom.
 		if ((isResizing || isPinching) && hasCurrentFrame) {
 			baseCanvas.style.visibility = "";
-			baseCanvas.style.width = `${pageWidth}px`;
-			baseCanvas.style.height = `${pageHeight}px`;
 			return;
 		}
 
 		// CSS-only writes — never touch the backing store here, a same-scheme
 		// previous frame may still be on display while the new one renders.
+		//
+		// Inverse-scale trick (same as the detail overlay): the canvas is laid
+		// out at zoom-scaled size and counter-scaled by 1/zoom, so its NET
+		// transform under the stack's scale3d(zoom) is identity. Safari samples
+		// canvases under a non-identity composited scale with unsnapped
+		// bilinear filtering — visibly soft text even at a 1:1 pixel ratio —
+		// while ~identity-transformed layers get pixel-snapped and stay crisp.
+		// Net page-coordinate extent is (pageWidth*zoom)/zoom = pageWidth for
+		// any zoom, so geometry stays exact even when a stale frame is shown
+		// under a different live zoom.
 		baseCanvas.style.position = "absolute";
 		baseCanvas.style.top = "0";
 		baseCanvas.style.left = "0";
-		baseCanvas.style.width = `${pageWidth}px`;
-		baseCanvas.style.height = `${pageHeight}px`;
-		baseCanvas.style.transform = "translate(0px, 0px)";
+		baseCanvas.style.width = `${pageWidth * zoom}px`;
+		baseCanvas.style.height = `${pageHeight * zoom}px`;
+		baseCanvas.style.transform = `scale3d(${1 / zoom},${1 / zoom},1)`;
+		baseCanvas.style.transformOrigin = "0 0";
 		baseCanvas.style.zIndex = "0";
 		baseCanvas.style.pointerEvents = "none";
 		// In dark mode the painted pixels get the mapped background (pdf.js
