@@ -165,7 +165,14 @@ export const useDetailCanvasLayer = ({
 			// scroll/resize regardless of zoom — when the base canvas already
 			// covers full output resolution there is nothing to sharpen, and an
 			// overlay rendered here could even be SOFTER than the quantized base.
-			if (!needsDetail) {
+			// Recomputed live rather than trusting the effect-time value: the
+			// pixel budget reads screen dimensions, which can change (monitor
+			// move) without any effect dependency changing.
+			if (
+				targetDetailScale -
+					computeBaseScale(dpr, zoom, pageWidth, pageHeight) <=
+				1e-3
+			) {
 				hideDetailCanvas();
 				return;
 			}
