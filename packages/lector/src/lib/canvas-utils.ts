@@ -1,14 +1,27 @@
 export const MAX_CANVAS_PIXELS = 16777216;
 export const MAX_CANVAS_DIMENSION = 32767;
 
-// Canvases render supersampled by this factor and are downscaled at
-// composite time. Empirically (Laplacian edge energy on identical retina
-// screenshots, WebKit and Chromium): pdf.js content rasterized at 1.3x and
-// bilinear-downscaled carries ~25% MORE edge energy than an exact 1:1
-// render — the downscale steepens the antialiasing ramps, which users
-// read as "crisp". Exact 1:1 is NOT the perceptual gold standard for
-// pdf.js output; this matches the long-standing detail-overlay behavior.
+// Canvases at zoom > 1 render supersampled by this factor and are
+// downscaled at composite time. Empirically (Laplacian edge energy on
+// identical retina screenshots in WebKit and Chromium, plus a side-by-side
+// pipeline matrix judged on real Safari): pdf.js content rasterized at
+// 1.3x and compositor-downscaled reads visibly crisper than an exact 1:1
+// render for zoomed-in (large) glyphs — the downscale steepens the
+// antialiasing ramps. At zoom <= 1, however, glyphs are small and the
+// same downscale ALIASES them — there, native 1:1 rendering (the old
+// pipeline's behavior, user-validated as crisp) wins. Hence the factor
+// applies only above zoom 1; this exactly mirrors the legacy pipeline
+// (native base at zoom <= 1, 1.3x-supersampled detail overlay above).
 export const CANVAS_SUPERSAMPLE = 1.3;
+
+// The full output scale a canvas should aim for at a given zoom, before
+// any budget clamping. Shared by the base layer (its render scale) and
+// the detail layer (its gate + render target) so the two always agree on
+// when the base falls short.
+export function computeTargetScale(dpr: number, zoom: number): number {
+	const safeZoom = Math.max(zoom, 0.1);
+	return dpr * safeZoom * (safeZoom > 1 ? CANVAS_SUPERSAMPLE : 1);
+}
 
 // pdf.js-style platform detection: actual mobile devices only. Generic
 // touch-screen Windows/ChromeOS laptops report maxTouchPoints > 1 too, so
@@ -63,14 +76,15 @@ export function clampScaleForPage(
 	return Math.max(safeScale, 0);
 }
 
-// The base canvas renders at dpr * zoom * CANVAS_SUPERSAMPLE (not
-// dpr * min(zoom, 1)) so pages stay sharp while scrolling at moderate
-// zooms; the detail overlay is only needed once the budget clamp binds.
+// The base canvas renders at the full target scale (not dpr * min(zoom, 1))
+// so pages stay sharp while scrolling at moderate zooms; the detail overlay
+// is only needed once the budget clamp binds.
 //
 // Derived from the EXACT zoom — deliberately not quantized to zoom steps:
-// quantization made the supersample factor vary per zoom (inconsistent
-// softness across zoom levels). The bitmap cache absorbs the per-zoom
-// variants via its byte budget and per-page variant cap.
+// quantization composited off-grid zooms at a varying non-integer
+// downscale (inconsistent softness across zoom levels). The bitmap cache
+// absorbs the per-zoom variants via its byte budget and per-page variant
+// cap.
 export function computeBaseScale(
 	dpr: number,
 	zoom: number,
@@ -78,7 +92,7 @@ export function computeBaseScale(
 	pageHeight: number,
 ): number {
 	return clampScaleForPage(
-		dpr * Math.max(zoom, 0.1) * CANVAS_SUPERSAMPLE,
+		computeTargetScale(dpr, zoom),
 		pageWidth,
 		pageHeight,
 		getCanvasPixelBudget(),

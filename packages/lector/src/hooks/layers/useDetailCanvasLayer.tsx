@@ -4,9 +4,9 @@ import { useDebounce } from "use-debounce";
 
 import { PDFStore, usePdf } from "../../internal";
 import {
-	CANVAS_SUPERSAMPLE,
 	clampScaleForPage,
 	computeBaseScale,
+	computeTargetScale,
 	getCanvasPixelBudget,
 	MAX_CANVAS_DIMENSION,
 } from "../../lib/canvas-utils";
@@ -162,11 +162,10 @@ export const useDetailCanvasLayer = ({
 
 		// Decide from cached page dims + zoom only — NO layout reads. The
 		// detail pass is needed exactly when the base canvas could not reach
-		// the full supersampled output scale (its budget clamp bound), which
-		// the shared computeBaseScale tells us directly. This also covers
-		// oversized pages (posters, plans) clamped below device resolution at
-		// zoom <= 1.
-		const targetDetailScale = dpr * zoom * CANVAS_SUPERSAMPLE;
+		// the full target output scale (its budget clamp bound), which the
+		// shared helpers tell us directly. This also covers oversized pages
+		// (posters, plans) clamped below device resolution at zoom <= 1.
+		const targetDetailScale = computeTargetScale(dpr, zoom);
 		const baseScale = computeBaseScale(dpr, zoom, pageWidth, pageHeight);
 		const needsDetail = targetDetailScale - baseScale > 1e-3;
 

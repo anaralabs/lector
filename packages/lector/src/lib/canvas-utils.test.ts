@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	CANVAS_SUPERSAMPLE,
 	clampScaleForPage,
 	computeBaseScale,
+	computeTargetScale,
 	getCanvasPixelBudget,
 	MAX_CANVAS_PIXELS,
 } from "./canvas-utils";
@@ -47,16 +47,22 @@ describe("getCanvasPixelBudget", () => {
 });
 
 describe("computeBaseScale", () => {
-	it("is exactly dpr * zoom * CANVAS_SUPERSAMPLE until the budget clamps", () => {
+	it("is exactly the target scale until the budget clamps: native at zoom <= 1, supersampled above", () => {
 		const budget = getCanvasPixelBudget();
 		for (const zoom of [0.4, 0.75, 0.8, 0.9, 1, 1.13, 1.3, 2, 3.7]) {
 			const scale = computeBaseScale(2, zoom, LETTER.width, LETTER.height);
-			const target = 2 * zoom * CANVAS_SUPERSAMPLE;
+			const target = computeTargetScale(2, zoom);
 			const unclamped = LETTER.width * LETTER.height * target ** 2 <= budget;
 			if (unclamped) {
 				expect(scale).toBeCloseTo(target, 9);
 			}
 		}
+	});
+
+	it("renders native 1:1 at zoom <= 1 and supersampled above", () => {
+		expect(computeTargetScale(2, 1)).toBeCloseTo(2, 9);
+		expect(computeTargetScale(2, 0.8)).toBeCloseTo(1.6, 9);
+		expect(computeTargetScale(2, 1.5)).toBeCloseTo(2 * 1.5 * 1.3, 9);
 	});
 
 	it("never allocates past the adaptive budget", () => {
@@ -79,6 +85,6 @@ describe("computeBaseScale", () => {
 
 	it("keeps a small floor for degenerate zooms", () => {
 		const scale = computeBaseScale(2, 0, LETTER.width, LETTER.height);
-		expect(scale).toBeCloseTo(2 * 0.1 * CANVAS_SUPERSAMPLE, 6);
+		expect(scale).toBeCloseTo(2 * 0.1, 6);
 	});
 });
