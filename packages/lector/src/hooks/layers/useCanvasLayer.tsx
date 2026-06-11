@@ -219,15 +219,19 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		// GPU-sampled compositor layer in WebKit, which visibly softens
 		// native 1:1 content (verified via a pipeline matrix on real Safari);
 		// a 2D translate(0,0) keeps it in the page raster, pixel-snapped.
+		// Floored like computeTargetScale: a degenerate zoom (0/NaN from a bad
+		// initial prop) must not become scale3d(Infinity)/NaN CSS here while
+		// the backing scale was safely clamped.
+		const geometryZoom = Math.max(Number.isFinite(zoom) ? zoom : 0, 0.01);
 		const applyGeometry = () => {
-			if (zoom === 1) {
+			if (geometryZoom === 1) {
 				baseCanvas.style.width = `${pageWidth}px`;
 				baseCanvas.style.height = `${pageHeight}px`;
 				baseCanvas.style.transform = "translate(0px, 0px)";
 			} else {
-				baseCanvas.style.width = `${pageWidth * zoom}px`;
-				baseCanvas.style.height = `${pageHeight * zoom}px`;
-				baseCanvas.style.transform = `scale3d(${1 / zoom},${1 / zoom},1)`;
+				baseCanvas.style.width = `${pageWidth * geometryZoom}px`;
+				baseCanvas.style.height = `${pageHeight * geometryZoom}px`;
+				baseCanvas.style.transform = `scale3d(${1 / geometryZoom},${1 / geometryZoom},1)`;
 				baseCanvas.style.transformOrigin = "0 0";
 			}
 		};
