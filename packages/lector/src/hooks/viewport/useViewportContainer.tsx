@@ -70,10 +70,11 @@ export const useViewportContainer = ({
 	// (e.g. zoom slider). Without this, the sync effect sees a mismatch
 	// between the store (stale rAF value) and transformations.current
 	// (already advanced by a newer pinch frame) and snaps back.
-	// Initialized to 1 (matching transformations above), not the store zoom:
-	// an initial `zoom` prop != 1 is an external value the sync effect must
-	// apply, not one of our own pushes.
-	const lastPushedZoomRef = useRef(1);
+	// null = "no pending self-push": a real zoom value here could mask an
+	// external change to that same number (e.g. init 1 swallowing an external
+	// reset to 1x after mounting with an initial zoom prop). The sentinel is
+	// consumed on match and cleared when an external change is applied.
+	const lastPushedZoomRef = useRef<number | null>(null);
 
 	const updateTransform = useCallback(
 		(zoomUpdate?: boolean) => {
@@ -135,8 +136,16 @@ export const useViewportContainer = ({
 		}
 
 		if (zoom === lastPushedZoomRef.current) {
+			// Consume the sentinel: each self-push produces exactly one store
+			// update, so leaving the value armed could only ever mask a FUTURE
+			// external change to the same number.
+			lastPushedZoomRef.current = null;
 			return;
 		}
+
+		// An external change is being applied — any stale self-push value must
+		// not mask a later external return to that zoom.
+		lastPushedZoomRef.current = null;
 
 		const prevZoom = transformations.current.zoom;
 		if (!prevZoom || !Number.isFinite(prevZoom)) {
