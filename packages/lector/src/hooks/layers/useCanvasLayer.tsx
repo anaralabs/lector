@@ -227,7 +227,18 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		const backingHeight = Math.floor(pageHeight * baseScale);
 
 		const context = baseCanvas.getContext("2d");
-		if (!context) return;
+		if (!context) {
+			// Context allocation failed (canvas memory pressure). If the canvas
+			// shows another page's or scheme's pixels, blank it — wrong content
+			// is worse than a hidden canvas. A matching frame can stay.
+			if (!hasCurrentFrame) {
+				paintedRef.current = null;
+				baseCanvas.width = backingWidth;
+				baseCanvas.height = backingHeight;
+				baseCanvas.style.visibility = "hidden";
+			}
+			return;
+		}
 
 		const applyBackingSize = () => {
 			// Assigning width/height clears the canvas, even to the same value.

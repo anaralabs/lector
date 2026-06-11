@@ -7,6 +7,7 @@ import {
 	clampScaleForPage,
 	computeBaseScale,
 	getCanvasPixelBudget,
+	MAX_CANVAS_DIMENSION,
 } from "../../lib/canvas-utils";
 import { createDarkModeColorMap } from "../../lib/dark-mode";
 import { applyContextRecolor } from "../../lib/recolor-context";
@@ -240,11 +241,27 @@ export const useDetailCanvasLayer = ({
 			// The budget clamp keeps every allocation under the Safari area
 			// limit even on huge viewports — degrade resolution, never blank.
 			const budget = getCanvasPixelBudget();
-			const effectiveScale = clampScaleForPage(
+			let effectiveScale = clampScaleForPage(
 				targetDetailScale,
 				visibleWidth,
 				visibleHeight,
 				budget,
+			);
+
+			// Overscan padding (page units per side). The rect can grow up to
+			// this much past the visible region, so the per-dimension canvas
+			// limit must be enforced against the padded bounds — and it must
+			// happen BEFORE the covered-rect check so painted.scale compares
+			// against the final scale (otherwise extreme aspect ratios would
+			// re-render forever).
+			const padX = OVERSCAN_X * viewportWidth;
+			const padY = OVERSCAN_Y * viewportHeight;
+			const maxRectWidth = Math.min(pageWidth, visibleWidth + 2 * padX);
+			const maxRectHeight = Math.min(pageHeight, visibleHeight + 2 * padY);
+			effectiveScale = Math.min(
+				effectiveScale,
+				MAX_CANVAS_DIMENSION / Math.max(maxRectWidth, 1),
+				MAX_CANVAS_DIMENSION / Math.max(maxRectHeight, 1),
 			);
 
 			// Still sharp at the right scale and the visible region is inside
@@ -271,8 +288,6 @@ export const useDetailCanvasLayer = ({
 			// overscan, shrinking the padding factor f so that
 			// (w + 2·padX·f)(h + 2·padY·f) <= maxArea.
 			const maxArea = budget / (effectiveScale * effectiveScale);
-			const padX = OVERSCAN_X * viewportWidth;
-			const padY = OVERSCAN_Y * viewportHeight;
 			const a = 4 * padX * padY;
 			const b = 2 * (visibleWidth * padY + visibleHeight * padX);
 			const c = visibleWidth * visibleHeight - maxArea;
@@ -297,8 +312,13 @@ export const useDetailCanvasLayer = ({
 			const rectHeight = rectBottom - rectTop;
 
 			// A new render is starting — the in-flight one (if any) targets an
-			// outdated rect, so replace it.
+			// outdated rect, so replace it. And don't let a release timer from
+			// an earlier hide shrink the canvas out from under this pass.
 			renderingTask?.cancel();
+			if (releaseTimerRef.current !== null) {
+				clearTimeout(releaseTimerRef.current);
+				releaseTimerRef.current = null;
+			}
 
 			const actualWidth = Math.max(1, Math.floor(rectWidth * effectiveScale));
 			const actualHeight = Math.max(1, Math.floor(rectHeight * effectiveScale));
@@ -313,6 +333,10 @@ export const useDetailCanvasLayer = ({
 			if (!bufferCtx) {
 				buffer.width = 0;
 				buffer.height = 0;
+				// Canvas memory pressure: degrade to the base layer and release
+				// our backing (which is exactly what the system needs right now)
+				// instead of keeping a stale, partially-covering overlay.
+				hideDetailCanvas();
 				return;
 			}
 
@@ -381,9 +405,14 @@ export const useDetailCanvasLayer = ({
 					container.style.cssText = `transform:scale3d(${1 / zoom},${1 / zoom},1);transform-origin:0 0`;
 
 					const ctx = detailCanvas.getContext("2d");
-					if (ctx) {
-						ctx.drawImage(buffer, 0, 0);
+					if (!ctx) {
+						// "Painted" must be a postcondition of a successful blit:
+						// recording it here would satisfy future covered-rect
+						// checks and pin the blurry base on screen forever.
+						hideDetailCanvas();
+						return;
 					}
+					ctx.drawImage(buffer, 0, 0);
 					paintedRef.current = {
 						proxy: pdfPageProxy,
 						key: contentKey,
