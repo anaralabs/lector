@@ -29,8 +29,18 @@ export const useDpr = () => {
 			subscribe();
 		};
 
+		// Safari <14 MediaQueryList only has addListener/removeListener.
+		const unlisten = (mql: MediaQueryList | null) => {
+			if (!mql) return;
+			if (typeof mql.removeEventListener === "function") {
+				mql.removeEventListener("change", handleChange);
+			} else {
+				mql.removeListener(handleChange);
+			}
+		};
+
 		const subscribe = () => {
-			mediaQuery?.removeEventListener("change", handleChange);
+			unlisten(mediaQuery);
 			// Exact-match query built from the live, UNCAPPED devicePixelRatio: it
 			// flips (and fires "change") on any deviation in either direction. A
 			// min-resolution query only fires when the ratio drops below it, so
@@ -41,14 +51,18 @@ export const useDpr = () => {
 			mediaQuery = window.matchMedia(
 				`(resolution: ${ratio}dppx), (-webkit-device-pixel-ratio: ${ratio})`,
 			);
-			mediaQuery.addEventListener("change", handleChange, { once: true });
+			if (typeof mediaQuery.addEventListener === "function") {
+				mediaQuery.addEventListener("change", handleChange, { once: true });
+			} else {
+				mediaQuery.addListener(handleChange);
+			}
 		};
 
 		subscribe();
 
 		return () => {
 			cancelled = true;
-			mediaQuery?.removeEventListener("change", handleChange);
+			unlisten(mediaQuery);
 		};
 	}, []);
 

@@ -4,7 +4,10 @@ import {
 	usePDFDocumentContext,
 	type usePDFDocumentParams,
 } from "../hooks/document/document";
-import { clearBitmapCache } from "../hooks/layers/useCanvasLayer";
+import {
+	clearBitmapCache,
+	getDocumentCacheId,
+} from "../hooks/layers/useCanvasLayer";
 import {
 	PDFLinkServiceContext,
 	useCreatePDFLinkService,
@@ -112,12 +115,13 @@ export const Root = forwardRef(
 		// Key the cleanup on the proxy identity, not the fingerprint: two
 		// fingerprint-less documents in a row would otherwise look identical
 		// to the effect (both undefined) and the first one's cache bucket
-		// ("" — the canvas layer's fallback docId) would never be cleared,
-		// pinning its bitmaps and page proxies.
+		// would never be cleared, pinning its bitmaps and page proxies.
+		// getDocumentCacheId also gives each fingerprint-less document its own
+		// bucket, so clearing one viewer never evicts another's entries.
 		const pdfDocumentProxy = initialState?.pdfDocumentProxy ?? null;
 		useEffect(() => {
 			if (!pdfDocumentProxy) return;
-			const documentId = pdfDocumentProxy.fingerprints?.[0] ?? "";
+			const documentId = getDocumentCacheId(pdfDocumentProxy);
 			return () => {
 				clearBitmapCache(documentId);
 			};

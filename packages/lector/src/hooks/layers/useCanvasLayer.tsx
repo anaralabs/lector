@@ -42,6 +42,26 @@ const cacheEntries: CacheEntry[] = [];
 const canvasBitmapCache = new WeakMap<PDFPageProxy, Map<number, ImageBitmap>>();
 let cacheBytes = 0;
 
+// Fingerprint-less documents get a unique synthetic cache id, so two of
+// them mounted at once never share a bucket (clearing one viewer's cache
+// must not evict the other's bitmaps).
+const documentIdFallbacks = new WeakMap<object, string>();
+let documentIdCounter = 0;
+
+export function getDocumentCacheId(pdfDocumentProxy: {
+	fingerprints?: (string | null)[];
+}): string {
+	const fingerprint = pdfDocumentProxy.fingerprints?.[0];
+	if (fingerprint) return fingerprint;
+	let id = documentIdFallbacks.get(pdfDocumentProxy);
+	if (!id) {
+		documentIdCounter += 1;
+		id = `anonymous-document-${documentIdCounter}`;
+		documentIdFallbacks.set(pdfDocumentProxy, id);
+	}
+	return id;
+}
+
 function evictEntryAt(index: number): void {
 	const [entry] = cacheEntries.splice(index, 1);
 	if (!entry) return;
@@ -158,7 +178,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const bouncyZoom = usePdf((state) => state.zoom);
 	const isResizing = usePdf((state) => state.isResizing);
 	const isPinching = usePdf((state) => state.isPinching);
-	const docId = usePdf((state) => state.pdfDocumentProxy.fingerprints[0] ?? "");
+	const docId = usePdf((state) => getDocumentCacheId(state.pdfDocumentProxy));
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const markPageRendered = usePdf((state) => state.markPageRendered);
 	const unmarkPageRendered = usePdf((state) => state.unmarkPageRendered);
@@ -190,9 +210,15 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 		// When neither the backing scale nor the scheme changed (gesture-flag
 		// flips, scheme-unchanged re-runs, budget-clamped zooms that resolve
-		// to the same scale) there is nothing to do — and touching
-		// canvas.width would clear the bitmap.
+		// to the same scale) the bitmap can be kept — touching canvas.width
+		// would clear it. The CSS geometry still tracks the current zoom
+		// (style writes don't clear the canvas): budget-clamped zooms share a
+		// scale, and a stale inverse factor would leave the net transform at
+		// zoomNew/zoomOld instead of identity.
 		if (hasCurrentFrame && paintedRef.current?.scale === baseScale) {
+			baseCanvas.style.width = `${pageWidth * zoom}px`;
+			baseCanvas.style.height = `${pageHeight * zoom}px`;
+			baseCanvas.style.transform = `scale3d(${1 / zoom},${1 / zoom},1)`;
 			return;
 		}
 
