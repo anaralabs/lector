@@ -19,7 +19,9 @@ export const CANVAS_SUPERSAMPLE = 1.3;
 // the detail layer (its gate + render target) so the two always agree on
 // when the base falls short.
 export function computeTargetScale(dpr: number, zoom: number): number {
-	const safeZoom = Math.max(zoom, 0.1);
+	// Tiny floor only against degenerate inputs (0/NaN would produce a
+	// zero-size canvas and break pdf.js) — real low zooms render exactly.
+	const safeZoom = Math.max(Number.isFinite(zoom) ? zoom : 0, 0.01);
 	return dpr * safeZoom * (safeZoom > 1 ? CANVAS_SUPERSAMPLE : 1);
 }
 

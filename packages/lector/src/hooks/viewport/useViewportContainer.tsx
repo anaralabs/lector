@@ -144,7 +144,14 @@ export const useViewportContainer = ({
 		}
 
 		// An external change is being applied — any stale self-push value must
-		// not mask a later external return to that zoom.
+		// not mask a later external return to that zoom, and a pending rAF
+		// push must not fire afterwards: it would re-arm the sentinel and
+		// reset isZoomFitWidth even though its zoom write (it reads the live
+		// transform, which we are about to overwrite) is a no-op.
+		if (zoomRafRef.current !== null) {
+			cancelAnimationFrame(zoomRafRef.current);
+			zoomRafRef.current = null;
+		}
 		lastPushedZoomRef.current = null;
 
 		const prevZoom = transformations.current.zoom;

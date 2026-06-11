@@ -85,6 +85,9 @@ describe("computeBaseScale", () => {
 
 	it("keeps a small floor for degenerate zooms", () => {
 		const scale = computeBaseScale(2, 0, LETTER.width, LETTER.height);
-		expect(scale).toBeCloseTo(2 * 0.1, 6);
+		expect(scale).toBeCloseTo(2 * 0.01, 6);
+		expect(computeTargetScale(2, Number.NaN)).toBeCloseTo(2 * 0.01, 6);
+		// real low zooms are exact, not floored
+		expect(computeTargetScale(2, 0.05)).toBeCloseTo(0.1, 9);
 	});
 });
