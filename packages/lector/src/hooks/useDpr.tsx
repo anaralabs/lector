@@ -58,6 +58,11 @@ export const useDpr = () => {
 			}
 		};
 
+		// Re-sync before subscribing: a DPR change between the initial render
+		// and this (passive) effect would otherwise leave the state stale while
+		// the query — built from the already-changed live value — matches and
+		// never fires. setState with an unchanged value is a no-op re-render.
+		setDpr(readDpr());
 		subscribe();
 
 		return () => {
