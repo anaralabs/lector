@@ -208,6 +208,30 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			paintedRef.current?.proxy === pdfPageProxy &&
 			paintedRef.current?.key === contentKey;
 
+		// Inverse-scale trick (same as the detail overlay): at zoom != 1 the
+		// canvas is laid out at zoom-scaled size and counter-scaled by 1/zoom,
+		// so its NET transform under the stack's scale3d(zoom) is identity —
+		// net page-coordinate extent is (pageWidth*zoom)/zoom = pageWidth for
+		// any zoom, so geometry stays exact even when a stale frame is shown
+		// under a different live zoom.
+		// At EXACTLY zoom 1 we instead emit the legacy 2D identity transform:
+		// a scale3d — even identity — forces the canvas onto its own
+		// GPU-sampled compositor layer in WebKit, which visibly softens
+		// native 1:1 content (verified via a pipeline matrix on real Safari);
+		// a 2D translate(0,0) keeps it in the page raster, pixel-snapped.
+		const applyGeometry = () => {
+			if (zoom === 1) {
+				baseCanvas.style.width = `${pageWidth}px`;
+				baseCanvas.style.height = `${pageHeight}px`;
+				baseCanvas.style.transform = "translate(0px, 0px)";
+			} else {
+				baseCanvas.style.width = `${pageWidth * zoom}px`;
+				baseCanvas.style.height = `${pageHeight * zoom}px`;
+				baseCanvas.style.transform = `scale3d(${1 / zoom},${1 / zoom},1)`;
+				baseCanvas.style.transformOrigin = "0 0";
+			}
+		};
+
 		// When neither the backing scale nor the scheme changed (gesture-flag
 		// flips, scheme-unchanged re-runs, budget-clamped zooms that resolve
 		// to the same scale) the bitmap can be kept — touching canvas.width
@@ -216,9 +240,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		// scale, and a stale inverse factor would leave the net transform at
 		// zoomNew/zoomOld instead of identity.
 		if (hasCurrentFrame && paintedRef.current?.scale === baseScale) {
-			baseCanvas.style.width = `${pageWidth * zoom}px`;
-			baseCanvas.style.height = `${pageHeight * zoom}px`;
-			baseCanvas.style.transform = `scale3d(${1 / zoom},${1 / zoom},1)`;
+			applyGeometry();
 			return;
 		}
 
@@ -235,23 +257,10 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 		// CSS-only writes — never touch the backing store here, a same-scheme
 		// previous frame may still be on display while the new one renders.
-		//
-		// Inverse-scale trick (same as the detail overlay): the canvas is laid
-		// out at zoom-scaled size and counter-scaled by 1/zoom, so its NET
-		// transform under the stack's scale3d(zoom) is identity. Safari samples
-		// canvases under a non-identity composited scale with unsnapped
-		// bilinear filtering — visibly soft text even at a 1:1 pixel ratio —
-		// while ~identity-transformed layers get pixel-snapped and stay crisp.
-		// Net page-coordinate extent is (pageWidth*zoom)/zoom = pageWidth for
-		// any zoom, so geometry stays exact even when a stale frame is shown
-		// under a different live zoom.
 		baseCanvas.style.position = "absolute";
 		baseCanvas.style.top = "0";
 		baseCanvas.style.left = "0";
-		baseCanvas.style.width = `${pageWidth * zoom}px`;
-		baseCanvas.style.height = `${pageHeight * zoom}px`;
-		baseCanvas.style.transform = `scale3d(${1 / zoom},${1 / zoom},1)`;
-		baseCanvas.style.transformOrigin = "0 0";
+		applyGeometry();
 		baseCanvas.style.zIndex = "0";
 		baseCanvas.style.pointerEvents = "none";
 		// In dark mode the painted pixels get the mapped background (pdf.js
