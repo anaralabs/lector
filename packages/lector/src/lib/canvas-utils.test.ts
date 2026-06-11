@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	CANVAS_SUPERSAMPLE,
 	clampScaleForPage,
 	computeBaseScale,
 	getCanvasPixelBudget,
@@ -46,14 +47,14 @@ describe("getCanvasPixelBudget", () => {
 });
 
 describe("computeBaseScale", () => {
-	it("is EXACTLY dpr * zoom until the budget clamps — any surplus would be a non-integer downscale at composite time (soft text on Safari)", () => {
+	it("is exactly dpr * zoom * CANVAS_SUPERSAMPLE until the budget clamps", () => {
 		const budget = getCanvasPixelBudget();
 		for (const zoom of [0.4, 0.75, 0.8, 0.9, 1, 1.13, 1.3, 2, 3.7]) {
 			const scale = computeBaseScale(2, zoom, LETTER.width, LETTER.height);
-			const unclamped =
-				LETTER.width * LETTER.height * (2 * zoom) ** 2 <= budget;
+			const target = 2 * zoom * CANVAS_SUPERSAMPLE;
+			const unclamped = LETTER.width * LETTER.height * target ** 2 <= budget;
 			if (unclamped) {
-				expect(scale).toBeCloseTo(2 * zoom, 9);
+				expect(scale).toBeCloseTo(target, 9);
 			}
 		}
 	});
@@ -78,6 +79,6 @@ describe("computeBaseScale", () => {
 
 	it("keeps a small floor for degenerate zooms", () => {
 		const scale = computeBaseScale(2, 0, LETTER.width, LETTER.height);
-		expect(scale).toBeCloseTo(2 * 0.1, 6);
+		expect(scale).toBeCloseTo(2 * 0.1 * CANVAS_SUPERSAMPLE, 6);
 	});
 });
