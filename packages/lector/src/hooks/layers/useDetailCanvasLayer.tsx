@@ -171,8 +171,8 @@ export const useDetailCanvasLayer = ({
 		const renderDetailCanvas = () => {
 			// The viewport-invalidation subscription schedules renders on every
 			// scroll/resize regardless of zoom — when the base canvas already
-			// covers full output resolution there is nothing to sharpen, and an
-			// overlay rendered here could even be SOFTER than the quantized base.
+			// covers full output resolution there is nothing to sharpen and an
+			// overlay would just duplicate it.
 			// Recomputed live rather than trusting the effect-time value: the
 			// pixel budget reads screen dimensions, which can change (monitor
 			// move) without any effect dependency changing.

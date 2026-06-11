@@ -1,11 +1,6 @@
 export const MAX_CANVAS_PIXELS = 16777216;
 export const MAX_CANVAS_DIMENSION = 32767;
 
-// Base-canvas zoom is quantized upward to this step so small zoom changes
-// reuse the same backing scale (and bitmap-cache entry) instead of minting
-// a new full-page render per debounced zoom value.
-export const BASE_ZOOM_STEP = 0.5;
-
 // pdf.js-style platform detection: actual mobile devices only. Generic
 // touch-screen Windows/ChromeOS laptops report maxTouchPoints > 1 too, so
 // the touch heuristic is scoped to iPads pretending to be MacIntel.
@@ -59,22 +54,27 @@ export function clampScaleForPage(
 	return Math.max(safeScale, 0);
 }
 
-// The base canvas renders at dpr * zoom (not dpr * min(zoom, 1)) so pages
-// stay sharp while scrolling at moderate zooms; the detail overlay is only
-// needed once this clamp binds. Quantized upward so the rendered scale is
-// never below the displayed scale until the budget cuts it off.
+// The base canvas renders at EXACTLY dpr * zoom (not dpr * min(zoom, 1))
+// so pages stay sharp while scrolling at moderate zooms; the detail overlay
+// is only needed once the budget clamp binds.
+//
+// Exact — deliberately NOT quantized to zoom steps: the canvas composites
+// at dpr * zoom device px per page unit, and any backing scale above that
+// is a non-integer downscale at composite time. Safari's compositor
+// resamples canvases with plain bilinear filtering, so even a 1.1-1.3x
+// downscale reads as visibly soft/aliased text ("crisp at 100%, slightly
+// blurry at fit-width"). Exact 1:1 backing-to-device mapping is the
+// sharpness gold standard, and pdf.js renders at unquantized dpr * zoom
+// for the same reason. The bitmap cache absorbs the per-zoom variants via
+// its byte budget and per-page variant cap.
 export function computeBaseScale(
 	dpr: number,
 	zoom: number,
 	pageWidth: number,
 	pageHeight: number,
 ): number {
-	const quantizedZoom = Math.max(
-		Math.ceil(Math.max(zoom, 0) / BASE_ZOOM_STEP) * BASE_ZOOM_STEP,
-		BASE_ZOOM_STEP,
-	);
 	return clampScaleForPage(
-		dpr * quantizedZoom,
+		dpr * Math.max(zoom, 0.1),
 		pageWidth,
 		pageHeight,
 		getCanvasPixelBudget(),

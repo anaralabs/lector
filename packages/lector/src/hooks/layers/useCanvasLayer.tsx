@@ -188,9 +188,10 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			paintedRef.current?.proxy === pdfPageProxy &&
 			paintedRef.current?.key === contentKey;
 
-		// Zoom quantization maps many debounced zoom values onto one backing
-		// scale — when neither the scale nor the scheme changed there is
-		// nothing to do, and touching canvas.width would clear the bitmap.
+		// When neither the backing scale nor the scheme changed (gesture-flag
+		// flips, scheme-unchanged re-runs, budget-clamped zooms that resolve
+		// to the same scale) there is nothing to do — and touching
+		// canvas.width would clear the bitmap.
 		if (hasCurrentFrame && paintedRef.current?.scale === baseScale) {
 			return;
 		}
