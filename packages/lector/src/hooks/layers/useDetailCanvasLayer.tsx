@@ -149,7 +149,15 @@ export const useDetailCanvasLayer = ({
 			}
 		};
 
-		const { width: pageWidth, height: pageHeight } = pageDimsRef.current!;
+		// Populated during render (above) for the current proxy, so this is
+		// provably non-null — but guard instead of asserting, so a future
+		// reorder degrades to a hidden overlay rather than a throw.
+		const pageDims = pageDimsRef.current;
+		if (!pageDims) {
+			hideDetailCanvas();
+			return;
+		}
+		const { width: pageWidth, height: pageHeight } = pageDims;
 
 		// Decide from cached page dims + zoom only — NO layout reads. The
 		// detail pass is needed exactly when the base canvas could not reach
