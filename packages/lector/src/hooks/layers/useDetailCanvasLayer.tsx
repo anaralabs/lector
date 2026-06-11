@@ -60,9 +60,13 @@ export const useDetailCanvasLayer = ({
 		? `dark:${darkModeColors.background},${darkModeColors.foreground}`
 		: "light";
 
-	// What the visible overlay currently shows: content key, render scale and
-	// the covered page-space rect — or null when the overlay is hidden.
+	// What the visible overlay currently shows: page proxy, content key,
+	// render scale and the covered page-space rect — or null when the overlay
+	// is hidden. The proxy guards against a recycled component (e.g. a
+	// standalone <Page> whose pageNumber prop changes) keeping another page's
+	// pixels on screen.
 	const paintedRef = useRef<{
+		proxy: unknown;
 		key: string;
 		scale: number;
 		left: number;
@@ -128,6 +132,10 @@ export const useDetailCanvasLayer = ({
 
 		const hideDetailCanvas = () => {
 			renderingTask?.cancel();
+			// Null the task too: cancel() is a no-op on an internally-completed
+			// task, and its pending swap must not re-show the overlay after a
+			// hide — the swap's identity guard catches it once this is null.
+			renderingTask = null;
 			detailCanvas.style.cssText = `${detailBaseStyle};display:block;opacity:0`;
 			container.style.cssText = "";
 			paintedRef.current = null;
@@ -152,6 +160,15 @@ export const useDetailCanvasLayer = ({
 		const needsDetail = targetDetailScale - baseScale > 1e-3;
 
 		const renderDetailCanvas = () => {
+			// The viewport-invalidation subscription schedules renders on every
+			// scroll/resize regardless of zoom — when the base canvas already
+			// covers full output resolution there is nothing to sharpen, and an
+			// overlay rendered here could even be SOFTER than the quantized base.
+			if (!needsDetail) {
+				hideDetailCanvas();
+				return;
+			}
+
 			// Don't read layout (getBoundingClientRect below) while the user is
 			// scrolling: the read forces a synchronous reflow of the whole page
 			// tree (catastrophic with text layers present), and the detail
@@ -232,16 +249,20 @@ export const useDetailCanvasLayer = ({
 
 			// Still sharp at the right scale and the visible region is inside
 			// the painted (overscanned) rect — scrolling within the overscan
-			// margin costs zero work.
+			// margin costs zero work. Tolerance is one device pixel (a fixed
+			// page-unit epsilon would scale up to a visible soft seam at high
+			// zoom).
+			const eps = 1 / effectiveScale;
 			const painted = paintedRef.current;
 			if (
 				painted &&
+				painted.proxy === pdfPageProxy &&
 				painted.key === contentKey &&
 				painted.scale === effectiveScale &&
-				visibleLeft >= painted.left - 0.5 &&
-				visibleTop >= painted.top - 0.5 &&
-				visibleRight <= painted.left + painted.width + 0.5 &&
-				visibleBottom <= painted.top + painted.height + 0.5
+				visibleLeft >= painted.left - eps &&
+				visibleTop >= painted.top - eps &&
+				visibleRight <= painted.left + painted.width + eps &&
+				visibleBottom <= painted.top + painted.height + eps
 			) {
 				return;
 			}
@@ -364,17 +385,26 @@ export const useDetailCanvasLayer = ({
 						ctx.drawImage(buffer, 0, 0);
 					}
 					paintedRef.current = {
+						proxy: pdfPageProxy,
 						key: contentKey,
 						scale: effectiveScale,
 						left: rectLeft,
 						top: rectTop,
-						width: rectWidth,
-						height: rectHeight,
+						// The truly painted extent comes from the floored backing,
+						// not the requested rect.
+						width: actualWidth / effectiveScale,
+						height: actualHeight / effectiveScale,
 					};
 					if (releaseTimerRef.current !== null) {
 						clearTimeout(releaseTimerRef.current);
 						releaseTimerRef.current = null;
 					}
+					// Re-validate coverage: if the user scrolled elsewhere while
+					// this render was in flight (the covered-rect check may have
+					// skipped scheduling against the PREVIOUS painted rect), this
+					// schedules a corrective render; when the landed rect still
+					// covers the viewport it's a free no-op.
+					scheduleRender();
 				})
 				.catch((error) => {
 					if (error.name === "RenderingCancelledException") {
@@ -419,12 +449,14 @@ export const useDetailCanvasLayer = ({
 			hideDetailCanvas();
 		} else {
 			// Stale detail is only better than a flash when it matches the
-			// current scheme/background. Across a theme toggle the old overlay
-			// would show wrong-scheme pixels over a correct base — hide it
-			// before paint and let the scheduled render bring sharpness back.
+			// current scheme/background AND page. Across a theme toggle (or a
+			// page-proxy swap on a recycled component) the old overlay would
+			// show wrong pixels over a correct base — hide it before paint and
+			// let the scheduled render bring sharpness back.
 			if (
 				paintedRef.current !== null &&
-				paintedRef.current.key !== contentKey
+				(paintedRef.current.key !== contentKey ||
+					paintedRef.current.proxy !== pdfPageProxy)
 			) {
 				hideDetailCanvas();
 			}
@@ -467,6 +499,10 @@ export const useDetailCanvasLayer = ({
 				canvas.width = 1;
 				canvas.height = 1;
 			}
+			// Keep the "paintedRef non-null implies the canvas holds that
+			// frame" invariant — under StrictMode this cleanup runs on a
+			// simulated unmount and the component lives on with the same refs.
+			paintedRef.current = null;
 		};
 	}, []);
 

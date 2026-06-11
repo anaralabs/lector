@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { PDFStore, usePdf } from "../../internal";
-import { computeBaseScale } from "../../lib/canvas-utils";
+import { computeBaseScale, IS_MOBILE_DEVICE } from "../../lib/canvas-utils";
 import { createDarkModeColorMap } from "../../lib/dark-mode";
 import {
 	applyContextRecolor,
@@ -14,20 +14,19 @@ import { usePDFPageNumber } from "../usePdfPageNumber";
 
 const CACHE_MAX_ENTRIES = 60;
 
-// Coarse mobile detection (pdf.js pattern — iPads report MacIntel but expose
-// maxTouchPoints > 1). Mobile budgets are conservative because canvases count
-// toward the page's jetsam memory limit on iOS.
-const IS_MOBILE =
-	typeof navigator !== "undefined" &&
-	(navigator.maxTouchPoints > 1 || /Android/i.test(navigator.userAgent));
-
 // The cache is budgeted in BYTES, not entries: entries vary from ~2MB
 // (fit-width letter page) to ~64MB (budget-clamped high-zoom page), so an
-// entry count alone can pin hundreds of MB of ImageBitmaps.
-const CACHE_MAX_BYTES = (IS_MOBILE ? 64 : 192) * 1024 * 1024;
+// entry count alone can pin hundreds of MB of ImageBitmaps. Mobile budgets
+// are conservative because canvases count toward the page's jetsam memory
+// limit on iOS.
+const CACHE_MAX_BYTES = (IS_MOBILE_DEVICE ? 64 : 192) * 1024 * 1024;
 // A single bitmap near the budget would evict most of the cache for one
-// entry — frames that big are cheaper to re-render than to cache.
-const CACHE_MAX_ENTRY_BYTES = CACHE_MAX_BYTES / 4;
+// entry — frames that big are cheaper to re-render than to cache. The
+// mobile divisor must leave room for a letter/A4 page at dpr 3 (~17.5MB),
+// the everyday frame on the phones the cache exists for.
+const CACHE_MAX_ENTRY_BYTES = IS_MOBILE_DEVICE
+	? CACHE_MAX_BYTES / 3
+	: CACHE_MAX_BYTES / 4;
 // Old scales/schemes of the same page are near-duplicates; keep only the
 // most recent few so a zoom session doesn't fill the cache with one page.
 const MAX_VARIANTS_PER_PROXY = 2;
@@ -424,6 +423,11 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 				canvas.width = 0;
 				canvas.height = 0;
 			}
+			// Keep the "paintedRef non-null implies the canvas holds that
+			// frame" invariant — under StrictMode this cleanup runs on a
+			// simulated unmount and the component lives on with the same refs;
+			// without this the no-op early return would keep a blank canvas.
+			paintedRef.current = null;
 		};
 	}, [pageNumber, unmarkPageRendered]);
 

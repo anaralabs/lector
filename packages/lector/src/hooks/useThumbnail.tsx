@@ -36,7 +36,9 @@ export const useThumbnail = (
 	const containerRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const renderTaskRef = useRef<RenderTask | null>(null);
-	const hasRenderedRef = useRef(false);
+	// Which page proxy this thumb has rendered — a recycled component showing
+	// a new page starts lazy again.
+	const renderedProxyRef = useRef<unknown>(null);
 
 	const pageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const { visible } = useVisibility({ elementRef: containerRef });
@@ -57,8 +59,8 @@ export const useThumbnail = (
 		// one retained canvas per page). Once a thumb has been on screen it
 		// keeps re-rendering through visibility changes, so leaving the
 		// window still downgrades it to the cheap 0.5x preview below.
-		if (!isVisible && !hasRenderedRef.current) return;
-		hasRenderedRef.current = true;
+		if (!isVisible && renderedProxyRef.current !== pageProxy) return;
+		renderedProxyRef.current = pageProxy;
 
 		const renderThumbnail = async () => {
 			const canvas = canvasRef.current;
