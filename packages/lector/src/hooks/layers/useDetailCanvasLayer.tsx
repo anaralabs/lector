@@ -296,6 +296,12 @@ export const useDetailCanvasLayer = ({
 				visibleRight <= painted.left + painted.width + eps &&
 				visibleBottom <= painted.top + painted.height + eps
 			) {
+				// The view is already covered, so any in-flight render targets a
+				// region the user scrolled away from — let it land and it would
+				// MOVE the (single) overlay canvas off the current view. Cancel
+				// it; nulling also blocks a resolved-but-unswapped task's swap.
+				renderingTask?.cancel();
+				renderingTask = null;
 				return;
 			}
 
