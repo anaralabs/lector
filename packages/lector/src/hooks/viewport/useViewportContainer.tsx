@@ -45,6 +45,11 @@ export const useViewportContainer = ({
 		viewportRef.current = containerRef.current;
 	}, [containerRef, viewportRef]);
 
+	// Initialized to 1 — the DOM's actual state at mount (no transform yet) —
+	// NOT the store zoom. Initializing to the store zoom made the sync effect
+	// below treat an initial `zoom` prop != 1 as already applied, so the
+	// scale3d was never written: pages rendered for the requested zoom but
+	// displayed at zoom 1 (mis-sized and resampled-blurry canvases).
 	const transformations = useRef<{
 		translateX: number;
 		translateY: number;
@@ -52,7 +57,7 @@ export const useViewportContainer = ({
 	}>({
 		translateX: 0,
 		translateY: 0,
-		zoom,
+		zoom: 1,
 	});
 
 	// rAF handle for debouncing Zustand store updates during pinch.
@@ -65,7 +70,10 @@ export const useViewportContainer = ({
 	// (e.g. zoom slider). Without this, the sync effect sees a mismatch
 	// between the store (stale rAF value) and transformations.current
 	// (already advanced by a newer pinch frame) and snaps back.
-	const lastPushedZoomRef = useRef(zoom);
+	// Initialized to 1 (matching transformations above), not the store zoom:
+	// an initial `zoom` prop != 1 is an external value the sync effect must
+	// apply, not one of our own pushes.
+	const lastPushedZoomRef = useRef(1);
 
 	const updateTransform = useCallback(
 		(zoomUpdate?: boolean) => {
