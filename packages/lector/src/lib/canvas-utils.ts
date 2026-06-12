@@ -1,18 +1,70 @@
 export const MAX_CANVAS_PIXELS = 16777216;
 export const MAX_CANVAS_DIMENSION = 32767;
 
+// Canvases at zoom > 1 render supersampled by this factor and are
+// downscaled at composite time. Empirically (Laplacian edge energy on
+// identical retina screenshots in WebKit and Chromium, plus a side-by-side
+// pipeline matrix judged on real Safari): pdf.js content rasterized at
+// 1.3x and compositor-downscaled reads visibly crisper than an exact 1:1
+// render for zoomed-in (large) glyphs — the downscale steepens the
+// antialiasing ramps. At zoom <= 1, however, glyphs are small and the
+// same downscale ALIASES them — there, native 1:1 rendering (the old
+// pipeline's behavior, user-validated as crisp) wins. Hence the factor
+// applies only above zoom 1; this exactly mirrors the legacy pipeline
+// (native base at zoom <= 1, 1.3x-supersampled detail overlay above).
+export const CANVAS_SUPERSAMPLE = 1.3;
+
+// The full output scale a canvas should aim for at a given zoom, before
+// any budget clamping. Shared by the base layer (its render scale) and
+// the detail layer (its gate + render target) so the two always agree on
+// when the base falls short.
+export function computeTargetScale(dpr: number, zoom: number): number {
+	// Tiny floor only against degenerate inputs (0/NaN would produce a
+	// zero-size canvas and break pdf.js) — real low zooms render exactly.
+	const safeZoom = Math.max(Number.isFinite(zoom) ? zoom : 0, 0.01);
+	return dpr * safeZoom * (safeZoom > 1 ? CANVAS_SUPERSAMPLE : 1);
+}
+
+// pdf.js-style platform detection: actual mobile devices only. Generic
+// touch-screen Windows/ChromeOS laptops report maxTouchPoints > 1 too, so
+// the touch heuristic is scoped to iPads pretending to be MacIntel.
+export const IS_MOBILE_DEVICE =
+	typeof navigator !== "undefined" &&
+	(/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+		(navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+
+// pdf.js-style adaptive pixel budget (capCanvasAreaFactor): a canvas never
+// usefully holds more than a few times the screen's device-pixel area, so on
+// small screens (phones, tablets) the budget shrinks well below
+// MAX_CANVAS_PIXELS instead of letting every device allocate up to the iOS
+// area limit. Mobile gets a tighter factor: the budget bounds EACH canvas
+// and several pages are mounted at once, all counting toward the page's
+// jetsam memory limit.
+const CANVAS_AREA_FACTOR = IS_MOBILE_DEVICE ? 1.5 : 3;
+
+export function getCanvasPixelBudget(): number {
+	if (typeof window === "undefined" || typeof screen === "undefined") {
+		return MAX_CANVAS_PIXELS;
+	}
+	const dpr = window.devicePixelRatio || 1;
+	const screenArea = (screen.width || 0) * (screen.height || 0) * dpr * dpr;
+	if (!Number.isFinite(screenArea) || screenArea <= 0) {
+		return MAX_CANVAS_PIXELS;
+	}
+	return Math.min(MAX_CANVAS_PIXELS, screenArea * CANVAS_AREA_FACTOR);
+}
+
 export function clampScaleForPage(
 	targetScale: number,
 	pageWidth: number,
 	pageHeight: number,
+	maxPixels: number = MAX_CANVAS_PIXELS,
 ): number {
 	if (!targetScale) {
 		return 0;
 	}
 
-	const areaLimit = Math.sqrt(
-		MAX_CANVAS_PIXELS / Math.max(pageWidth * pageHeight, 1),
-	);
+	const areaLimit = Math.sqrt(maxPixels / Math.max(pageWidth * pageHeight, 1));
 	const widthLimit = MAX_CANVAS_DIMENSION / Math.max(pageWidth, 1);
 	const heightLimit = MAX_CANVAS_DIMENSION / Math.max(pageHeight, 1);
 
@@ -24,4 +76,27 @@ export function clampScaleForPage(
 	);
 
 	return Math.max(safeScale, 0);
+}
+
+// The base canvas renders at the full target scale (not dpr * min(zoom, 1))
+// so pages stay sharp while scrolling at moderate zooms; the detail overlay
+// is only needed once the budget clamp binds.
+//
+// Derived from the EXACT zoom — deliberately not quantized to zoom steps:
+// quantization composited off-grid zooms at a varying non-integer
+// downscale (inconsistent softness across zoom levels). The bitmap cache
+// absorbs the per-zoom variants via its byte budget and per-page variant
+// cap.
+export function computeBaseScale(
+	dpr: number,
+	zoom: number,
+	pageWidth: number,
+	pageHeight: number,
+): number {
+	return clampScaleForPage(
+		computeTargetScale(dpr, zoom),
+		pageWidth,
+		pageHeight,
+		getCanvasPixelBudget(),
+	);
 }

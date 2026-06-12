@@ -45,6 +45,11 @@ export const useViewportContainer = ({
 		viewportRef.current = containerRef.current;
 	}, [containerRef, viewportRef]);
 
+	// Initialized to 1 — the DOM's actual state at mount (no transform yet) —
+	// NOT the store zoom. Initializing to the store zoom made the sync effect
+	// below treat an initial `zoom` prop != 1 as already applied, so the
+	// scale3d was never written: pages rendered for the requested zoom but
+	// displayed at zoom 1 (mis-sized and resampled-blurry canvases).
 	const transformations = useRef<{
 		translateX: number;
 		translateY: number;
@@ -52,7 +57,7 @@ export const useViewportContainer = ({
 	}>({
 		translateX: 0,
 		translateY: 0,
-		zoom,
+		zoom: 1,
 	});
 
 	// rAF handle for debouncing Zustand store updates during pinch.
@@ -65,7 +70,11 @@ export const useViewportContainer = ({
 	// (e.g. zoom slider). Without this, the sync effect sees a mismatch
 	// between the store (stale rAF value) and transformations.current
 	// (already advanced by a newer pinch frame) and snaps back.
-	const lastPushedZoomRef = useRef(zoom);
+	// null = "no pending self-push": a real zoom value here could mask an
+	// external change to that same number (e.g. init 1 swallowing an external
+	// reset to 1x after mounting with an initial zoom prop). The sentinel is
+	// consumed on match and cleared when an external change is applied.
+	const lastPushedZoomRef = useRef<number | null>(null);
 
 	const updateTransform = useCallback(
 		(zoomUpdate?: boolean) => {
@@ -127,8 +136,23 @@ export const useViewportContainer = ({
 		}
 
 		if (zoom === lastPushedZoomRef.current) {
+			// Consume the sentinel: each self-push produces exactly one store
+			// update, so leaving the value armed could only ever mask a FUTURE
+			// external change to the same number.
+			lastPushedZoomRef.current = null;
 			return;
 		}
+
+		// An external change is being applied — any stale self-push value must
+		// not mask a later external return to that zoom, and a pending rAF
+		// push must not fire afterwards: it would re-arm the sentinel and
+		// reset isZoomFitWidth even though its zoom write (it reads the live
+		// transform, which we are about to overwrite) is a no-op.
+		if (zoomRafRef.current !== null) {
+			cancelAnimationFrame(zoomRafRef.current);
+			zoomRafRef.current = null;
+		}
+		lastPushedZoomRef.current = null;
 
 		const prevZoom = transformations.current.zoom;
 		if (!prevZoom || !Number.isFinite(prevZoom)) {

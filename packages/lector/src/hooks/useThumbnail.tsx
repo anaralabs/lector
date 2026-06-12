@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { useDebounce } from "use-debounce";
 
 import { usePdf } from "../internal";
+import { clampScaleForPage } from "../lib/canvas-utils";
 import { createDarkModeColorMap } from "../lib/dark-mode";
 import {
 	applyContextRecolor,
@@ -35,6 +36,9 @@ export const useThumbnail = (
 	const containerRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const renderTaskRef = useRef<RenderTask | null>(null);
+	// Which page proxy this thumb has rendered — a recycled component showing
+	// a new page starts lazy again.
+	const renderedProxyRef = useRef<unknown>(null);
 
 	const pageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const { visible } = useVisibility({ elementRef: containerRef });
@@ -50,6 +54,14 @@ export const useThumbnail = (
 	const isVisible = isFirstPage || debouncedVisible;
 
 	useEffect(() => {
+		// Never-seen thumbnails skip rendering entirely — a long document
+		// would otherwise render every page eagerly at mount (CPU burst plus
+		// one retained canvas per page). Once a thumb has been on screen it
+		// keeps re-rendering through visibility changes, so leaving the
+		// window still downgrades it to the cheap 0.5x preview below.
+		if (!isVisible && renderedProxyRef.current !== pageProxy) return;
+		renderedProxyRef.current = pageProxy;
+
 		const renderThumbnail = async () => {
 			const canvas = canvasRef.current;
 
@@ -61,11 +73,16 @@ export const useThumbnail = (
 					renderTaskRef.current.cancel();
 				}
 
-				// Calculate viewport and scale
+				// Calculate viewport and scale. Clamp like the main layers so an
+				// oversized maxWidth/maxHeight config can't allocate a canvas past
+				// the Safari area limit (which would render blank).
 				const viewport = pageProxy.getViewport({ scale: 1 });
-				const scale =
+				const scale = clampScaleForPage(
 					Math.min(maxWidth / viewport.width, maxHeight / viewport.height) *
-					(isVisible ? dpr : 0.5);
+						(isVisible ? dpr : 0.5),
+					viewport.width,
+					viewport.height,
+				);
 
 				const scaledViewport = pageProxy.getViewport({ scale });
 

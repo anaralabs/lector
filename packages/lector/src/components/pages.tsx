@@ -125,6 +125,12 @@ export const Pages = ({
 		scrollToFn,
 		gap,
 		initialOffset: initialOffset,
+		// Never trust scrollend alone to reset isScrolling: a single missed
+		// event (a documented browser flake — TanStack flipped this default to
+		// false in later 3.x) would pin isScrolling=true forever, and every
+		// consumer gated on it (text layer, detail canvas) would stop painting.
+		// false keeps the isScrollingResetDelay debounce active as a fallback.
+		useScrollendEvent: false,
 	});
 
 	useEffect(() => {

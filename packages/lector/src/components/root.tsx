@@ -4,7 +4,10 @@ import {
 	usePDFDocumentContext,
 	type usePDFDocumentParams,
 } from "../hooks/document/document";
-import { clearBitmapCache } from "../hooks/layers/useCanvasLayer";
+import {
+	clearBitmapCache,
+	getDocumentCacheId,
+} from "../hooks/layers/useCanvasLayer";
 import {
 	PDFLinkServiceContext,
 	useCreatePDFLinkService,
@@ -109,7 +112,17 @@ export const Root = forwardRef(
 			initialState?.pdfDocumentProxy ?? null,
 		);
 
-		const documentId = initialState?.pdfDocumentProxy?.fingerprints?.[0];
+		// Key the cleanup on the cache id, not the proxy identity: reloading
+		// the SAME document yields a new proxy with the same fingerprint, and
+		// a proxy-keyed cleanup would clear the bucket the new document's
+		// layers just populated. Same-id swaps leave the old proxies' dead
+		// entries to the byte-budget LRU instead. getDocumentCacheId gives
+		// fingerprint-less documents their own synthetic bucket, so distinct
+		// documents (and viewers) never clear each other.
+		const pdfDocumentProxy = initialState?.pdfDocumentProxy ?? null;
+		const documentId = pdfDocumentProxy
+			? getDocumentCacheId(pdfDocumentProxy)
+			: null;
 		useEffect(() => {
 			if (!documentId) return;
 			return () => {
