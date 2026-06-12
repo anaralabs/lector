@@ -1,0 +1,70 @@
+---
+title: Production PDF.js Assets
+description: Configure PDF.js worker, CMaps, fonts, ICC profiles, and WASM assets for production deployments
+---
+
+PDF.js may need additional runtime assets beyond the worker file when rendering some PDFs.
+For example, scanned documents, JPEG2000 images, non-standard fonts, CMaps, or color profiles
+can require assets from `pdfjs-dist/wasm`, `pdfjs-dist/cmaps`, `pdfjs-dist/standard_fonts`,
+or `pdfjs-dist/iccs`.
+
+If those assets are not reachable in production, pages may load but render as blank or partially
+blank. Browser consoles can show warnings such as:
+
+```txt
+JpxError: OpenJPEG failed to initialize
+Unable to decode image
+Dependent image isn't ready yet
+```
+
+This is especially common in applications with a strict Content Security Policy (CSP), because
+PDF.js can otherwise try to load some assets from a CDN URL that your CSP does not allow.
+
+## Recommended Setup
+
+Copy the PDF.js runtime assets into your app's public/static directory and point PDF.js at
+same-origin URLs:
+
+```tsx
+import { Root } from "@anaralabs/lector";
+import { GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
+import "pdfjs-dist/web/pdf_viewer.css";
+
+GlobalWorkerOptions.workerSrc = "/pdfjs/pdf.worker.mjs";
+
+const documentOptions = {
+  wasmUrl: "/pdfjs/wasm/",
+  cMapUrl: "/pdfjs/cmaps/",
+  cMapPacked: true,
+  standardFontDataUrl: "/pdfjs/standard_fonts/",
+  iccUrl: "/pdfjs/iccs/",
+};
+
+export function PDFViewer() {
+  return <Root source="/sample.pdf" documentOptions={documentOptions}>{/* ... */}</Root>;
+}
+```
+
+For a Next.js app, one simple approach is to copy the files during install or build:
+
+```json
+{
+  "scripts": {
+    "postinstall": "mkdir -p public/pdfjs && cp node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs public/pdfjs/pdf.worker.mjs && cp -R node_modules/pdfjs-dist/wasm public/pdfjs/wasm && cp -R node_modules/pdfjs-dist/cmaps public/pdfjs/cmaps && cp -R node_modules/pdfjs-dist/standard_fonts public/pdfjs/standard_fonts && cp -R node_modules/pdfjs-dist/iccs public/pdfjs/iccs"
+  }
+}
+```
+
+## CSP Notes
+
+When self-hosting the assets above, your CSP can usually stay same-origin focused. If your browser
+blocks PDF.js WASM compilation, add the narrow directive needed by your application, for example:
+
+```txt
+script-src 'self' 'wasm-unsafe-eval'
+font-src 'self' data:
+```
+
+Avoid relying on third-party CDN asset URLs unless your CSP explicitly permits those script, worker,
+font, and fetch destinations.
+
