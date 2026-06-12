@@ -112,20 +112,23 @@ export const Root = forwardRef(
 			initialState?.pdfDocumentProxy ?? null,
 		);
 
-		// Key the cleanup on the proxy identity, not the fingerprint: two
-		// fingerprint-less documents in a row would otherwise look identical
-		// to the effect (both undefined) and the first one's cache bucket
-		// would never be cleared, pinning its bitmaps and page proxies.
-		// getDocumentCacheId also gives each fingerprint-less document its own
-		// bucket, so clearing one viewer never evicts another's entries.
+		// Key the cleanup on the cache id, not the proxy identity: reloading
+		// the SAME document yields a new proxy with the same fingerprint, and
+		// a proxy-keyed cleanup would clear the bucket the new document's
+		// layers just populated. Same-id swaps leave the old proxies' dead
+		// entries to the byte-budget LRU instead. getDocumentCacheId gives
+		// fingerprint-less documents their own synthetic bucket, so distinct
+		// documents (and viewers) never clear each other.
 		const pdfDocumentProxy = initialState?.pdfDocumentProxy ?? null;
+		const documentId = pdfDocumentProxy
+			? getDocumentCacheId(pdfDocumentProxy)
+			: null;
 		useEffect(() => {
-			if (!pdfDocumentProxy) return;
-			const documentId = getDocumentCacheId(pdfDocumentProxy);
+			if (!documentId) return;
 			return () => {
 				clearBitmapCache(documentId);
 			};
-		}, [pdfDocumentProxy]);
+		}, [documentId]);
 
 		return (
 			<Primitive.div ref={ref} {...props}>

@@ -449,7 +449,17 @@ export const useDetailCanvasLayer = ({
 						hideDetailCanvas();
 						return;
 					}
-					ctx.drawImage(buffer, 0, 0);
+					try {
+						ctx.drawImage(buffer, 0, 0);
+					} catch (error) {
+						// The width assignment above already cleared the canvas — a
+						// failed blit must not leave paintedRef describing the
+						// previous rect, or covered-rect checks would pin the
+						// blurry base on screen.
+						hideDetailCanvas();
+						console.error("PDF detail canvas blit error:", error);
+						return;
+					}
 					paintedRef.current = {
 						proxy: pdfPageProxy,
 						key: contentKey,
