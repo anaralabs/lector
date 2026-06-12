@@ -356,9 +356,17 @@ export const useDetailCanvasLayer = ({
 				buffer.width = 0;
 				buffer.height = 0;
 				// Canvas memory pressure: degrade to the base layer and release
-				// our backing (which is exactly what the system needs right now)
-				// instead of keeping a stale, partially-covering overlay.
+				// our backing instead of keeping a stale, partially-covering
+				// overlay. Release IMMEDIATELY rather than after the hide grace
+				// period — freeing memory is exactly what the system needs when
+				// an allocation just failed.
 				hideDetailCanvas();
+				if (releaseTimerRef.current !== null) {
+					clearTimeout(releaseTimerRef.current);
+					releaseTimerRef.current = null;
+				}
+				detailCanvas.width = 1;
+				detailCanvas.height = 1;
 				return;
 			}
 
