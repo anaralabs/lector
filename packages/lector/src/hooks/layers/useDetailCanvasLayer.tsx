@@ -404,7 +404,14 @@ export const useDetailCanvasLayer = ({
 				});
 			} catch (error) {
 				releaseBuffer();
-				throw error;
+				// renderDetailCanvas runs from timer callbacks — a rethrow here
+				// would surface as an uncaught timer error (no React boundary,
+				// no promise chain). Degrade to the base canvas instead: blur,
+				// never a crash. Sync throws happen on destroyed pages during
+				// document teardown or rejected canvas allocations.
+				hideDetailCanvas();
+				console.error("PDF detail render error:", error);
+				return;
 			}
 			renderingTask = currentRenderingTask;
 
