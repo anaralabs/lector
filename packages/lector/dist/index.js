@@ -1982,6 +1982,29 @@ var useDetailCanvasLayer = ({
   const recolorKey = recolor ? `dark:${darkModeColors.background},${darkModeColors.foreground}` : "light";
   const paintedRef = useRef(null);
   const releaseTimerRef = useRef(null);
+  const scrollLeftRef = useRef(0);
+  const viewportWidthRef = useRef(0);
+  const viewportHeightRef = useRef(0);
+  useEffect(() => {
+    const sc = viewportRef?.current;
+    if (!sc) return;
+    const readDims = () => {
+      viewportWidthRef.current = sc.clientWidth;
+      viewportHeightRef.current = sc.clientHeight;
+    };
+    const readScroll = () => {
+      scrollLeftRef.current = sc.scrollLeft;
+    };
+    readDims();
+    readScroll();
+    sc.addEventListener("scroll", readScroll, { passive: true });
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(readDims) : null;
+    ro?.observe(sc);
+    return () => {
+      sc.removeEventListener("scroll", readScroll);
+      ro?.disconnect();
+    };
+  }, [viewportRef]);
   const [zoom] = useDebounce(bouncyZoom, ZOOM_DEBOUNCE_MS);
   const lastZoomChangeRef = useRef(
     store.getState().isPinching ? performance.now() : 0
@@ -2060,19 +2083,21 @@ var useDetailCanvasLayer = ({
         hideDetailCanvas();
         return;
       }
-      const pageContainer = baseCanvasRef.current?.parentElement ?? null;
-      if (!pageContainer) {
+      if (!baseCanvasRef.current) {
         hideDetailCanvas();
         return;
       }
-      const scrollX = scrollContainer.scrollLeft / zoom;
-      const scrollY = scrollContainer.scrollTop / zoom;
-      const viewportWidth = scrollContainer.clientWidth / zoom;
-      const viewportHeight = scrollContainer.clientHeight / zoom;
-      const pageRect = pageContainer.getBoundingClientRect();
-      const containerRect = scrollContainer.getBoundingClientRect();
-      const pageLeft = (pageRect.left - containerRect.left) / zoom + scrollX;
-      const pageTop = (pageRect.top - containerRect.top) / zoom + scrollY;
+      if (!virtualizer) {
+        hideDetailCanvas();
+        return;
+      }
+      const scrollX = scrollLeftRef.current / zoom;
+      const scrollY = virtualizer.scrollOffset ?? 0;
+      const viewportWidth = viewportWidthRef.current / zoom;
+      const viewportHeight = viewportHeightRef.current / zoom;
+      const pageItem = virtualizer.getVirtualItems().find((it) => it.index === pageNumber - 1);
+      const pageTop = pageItem ? pageItem.start : 0;
+      const pageLeft = Math.max(0, (viewportWidth - pageWidth) / 2);
       const visibleLeft = Math.max(0, scrollX - pageLeft);
       const visibleTop = Math.max(0, scrollY - pageTop);
       const visibleRight = Math.min(

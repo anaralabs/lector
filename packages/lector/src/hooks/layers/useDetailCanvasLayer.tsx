@@ -78,6 +78,40 @@ export const useDetailCanvasLayer = ({
 	} | null>(null);
 	const releaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+	// Viewport scroll-left and dimensions, cached off the render path. Reading
+	// scrollLeft/clientWidth/getBoundingClientRect inside renderDetailCanvas
+	// forces a synchronous style recalc of the whole page tree — catastrophic
+	// under Tailwind v4 (registered @property vars amplify forced style-recalc
+	// ~3.6x), and it fired on every zoom-settle. These are refreshed on
+	// scroll/resize (below), where layout is already clean.
+	const scrollLeftRef = useRef(0);
+	const viewportWidthRef = useRef(0);
+	const viewportHeightRef = useRef(0);
+
+	useEffect(() => {
+		const sc = viewportRef?.current;
+		if (!sc) return;
+		const readDims = () => {
+			viewportWidthRef.current = sc.clientWidth;
+			viewportHeightRef.current = sc.clientHeight;
+		};
+		const readScroll = () => {
+			scrollLeftRef.current = sc.scrollLeft;
+		};
+		readDims();
+		readScroll();
+		sc.addEventListener("scroll", readScroll, { passive: true });
+		const ro =
+			typeof ResizeObserver !== "undefined"
+				? new ResizeObserver(readDims)
+				: null;
+		ro?.observe(sc);
+		return () => {
+			sc.removeEventListener("scroll", readScroll);
+			ro?.disconnect();
+		};
+	}, [viewportRef]);
+
 	const [zoom] = useDebounce(bouncyZoom, ZOOM_DEBOUNCE_MS);
 
 	// Track when the live zoom last changed so the render can wait out a
@@ -227,24 +261,40 @@ export const useDetailCanvasLayer = ({
 				return;
 			}
 
-			const pageContainer = baseCanvasRef.current?.parentElement ?? null;
-			if (!pageContainer) {
+			if (!baseCanvasRef.current) {
 				hideDetailCanvas();
 				return;
 			}
 
 			// Visible region of the page, in page units (scale-1 CSS px).
-			const scrollX = scrollContainer.scrollLeft / zoom;
-			const scrollY = scrollContainer.scrollTop / zoom;
+			// Derived entirely from the virtualizer + cached viewport metrics —
+			// NO layout reads, so this never forces a reflow. The previous
+			// getBoundingClientRect here was the dominant cost under Tailwind v4:
+			// each read flushed an @property-amplified style recalc of every
+			// mounted span, firing on every zoom-settle.
+			// (`virtualizer` is already resolved by the isScrolling guard above.)
+			if (!virtualizer) {
+				hideDetailCanvas();
+				return;
+			}
 
-			const viewportWidth = scrollContainer.clientWidth / zoom;
-			const viewportHeight = scrollContainer.clientHeight / zoom;
+			// scrollOffset is already zoom-normalised by the virtualizer; the
+			// cached scrollLeft/clientWidth/clientHeight are raw screen px.
+			const scrollX = scrollLeftRef.current / zoom;
+			const scrollY = virtualizer.scrollOffset ?? 0;
 
-			const pageRect = pageContainer.getBoundingClientRect();
-			const containerRect = scrollContainer.getBoundingClientRect();
+			const viewportWidth = viewportWidthRef.current / zoom;
+			const viewportHeight = viewportHeightRef.current / zoom;
 
-			const pageLeft = (pageRect.left - containerRect.left) / zoom + scrollX;
-			const pageTop = (pageRect.top - containerRect.top) / zoom + scrollY;
+			// Vertical page offset is the virtual item's start (content space).
+			const pageItem = virtualizer
+				.getVirtualItems()
+				.find((it) => it.index === pageNumber - 1);
+			const pageTop = pageItem ? pageItem.start : 0;
+			// Pages are centred horizontally. When the page is wider than the
+			// viewport (the zoom>1 detail case) the gap collapses to 0 and scrollX
+			// covers the offset; when narrower, this is the centring inset.
+			const pageLeft = Math.max(0, (viewportWidth - pageWidth) / 2);
 
 			const visibleLeft = Math.max(0, scrollX - pageLeft);
 			const visibleTop = Math.max(0, scrollY - pageTop);
