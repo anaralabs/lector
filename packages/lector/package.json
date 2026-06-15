@@ -30,8 +30,7 @@
     "postbuild": "size-limit --json > size.json",
     "test": "pnpm run '/^test:/'",
     "test:unit": "vitest run",
-    "test:size": "size-limit",
-    "prepack": "./scripts/prepack.sh"
+    "test:size": "size-limit"
   },
   "devDependencies": {
     "@microsoft/api-extractor": "^7.48.1",
