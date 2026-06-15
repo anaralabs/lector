@@ -216,6 +216,17 @@ export const useDetailCanvasLayer = ({
 				return;
 			}
 
+			// Off-screen mounted pages bail on visibleWidth<=0 below anyway — but
+			// only AFTER the getBoundingClientRect, which forces a synchronous
+			// style recalc of the whole page tree (≈3.6x costlier under Tailwind
+			// v4's registered @property vars, and re-triggered per page on every
+			// zoom-settle). Gate on the no-reflow currentPage first so only the
+			// visible page (± neighbours, for edge overlap) ever reads layout.
+			if (Math.abs(pageNumber - store.getState().currentPage) > 1) {
+				hideDetailCanvas();
+				return;
+			}
+
 			const pageContainer = baseCanvasRef.current?.parentElement ?? null;
 			if (!pageContainer) {
 				hideDetailCanvas();
