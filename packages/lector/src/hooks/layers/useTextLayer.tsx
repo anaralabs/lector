@@ -404,6 +404,12 @@ export const useTextLayer = () => {
 			// zoom-driven) — the guard lives here so every hide trigger
 			// respects it.
 			if (selecting) return;
+			// Off-screen mounted pages don't repaint visibly while scrolling, so
+			// hiding them is pure cost: toggling inherited `visibility` invalidates
+			// the page's whole span subtree (~3.6x costlier under Tailwind v4's
+			// registered @property vars, and it fires for every mounted page on
+			// every scroll). Only the visible page ±1 needs hiding.
+			if (Math.abs(pageNumber - store.getState().currentPage) > 1) return;
 			textContainer.style.visibility = "hidden";
 			if (settleTimer) clearTimeout(settleTimer);
 			settleTimer = setTimeout(restoreWhenSettled, TEXT_SCROLL_SETTLE_MS);

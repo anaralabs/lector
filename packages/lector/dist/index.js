@@ -3442,6 +3442,7 @@ var useTextLayer = () => {
     };
     const hideAndDebounce = () => {
       if (selecting) return;
+      if (Math.abs(pageNumber - store.getState().currentPage) > 1) return;
       textContainer.style.visibility = "hidden";
       if (settleTimer) clearTimeout(settleTimer);
       settleTimer = setTimeout(restoreWhenSettled, TEXT_SCROLL_SETTLE_MS);
