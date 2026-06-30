@@ -13,12 +13,12 @@
   "dependencies": {
     "@anaralabs/lector": "latest",
     "pdfjs-dist": "^5.5.207",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@types/react": "^18.2.43",
-    "@types/react-dom": "^18.2.17",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.32",
@@ -28,7 +28,7 @@
   },
   "pnpm": {
     "overrides": {
-      "@babel/core": "^7.29.6"
+      "@babel/core": "^7.29.7"
     }
   }
 }
