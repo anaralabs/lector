@@ -1,0 +1,48 @@
+# Dependency update policy.
+#
+# 7-day minimum release age: a freshly published release may be compromised
+# and not yet flagged, so we wait out the window before adopting it.
+#
+# Cadence: monthly and grouped, so updates land as a single batched PR per
+# ecosystem instead of a weekly trickle. Patch/minor updates that pass CI
+# are auto-merged by .github/workflows/dependabot-auto-merge.yml; majors
+# always require a human. Security alerts still surface in real time
+# (advisory-driven) — grouping only controls the PRs, not the alerts.
+#
+# Both lockfiles are covered: the root workspace and the standalone
+# examples/basic demo (which has its own lockfile).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - "/"
+      - "/examples/basic"
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+    groups:
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      npm-version:
+        applies-to: version-updates
+        patterns:
+          - "*"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      actions-version:
+        applies-to: version-updates
+        patterns:
+          - "*"
