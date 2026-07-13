@@ -49,10 +49,20 @@ export interface SourceCrop {
 	sh: number;
 }
 
+export interface ScanPaperClass {
+	/**
+	 * Whether the paper carries dark ink pixels. A pure-white raster is an
+	 * MRC background layer (its ink lives in a separate dark layer that must
+	 * stay readable) or a blank margin tile — pages only invert when ink is
+	 * present somewhere, but blank tiles still count toward tiled coverage.
+	 */
+	inked: boolean;
+}
+
 // ImageBitmaps are immutable — one whole-source verdict per bitmap. Canvas
 // sources get repainted (pdf.js reuses scratch canvases) and cropped draws
 // vary per call, so those are re-sampled per draw.
-const bitmapVerdicts = new WeakMap<ImageBitmap, boolean>();
+const bitmapVerdicts = new WeakMap<ImageBitmap, ScanPaperClass | null>();
 
 export function sourceSize(
 	source: CanvasImageSource,
@@ -81,11 +91,11 @@ export function sourceSize(
 	return null;
 }
 
-function isScanPaperSample(
+function sampleScanPaper(
 	source: CanvasImageSource,
 	crop: SourceCrop,
-): boolean {
-	if (typeof document === "undefined") return false;
+): ScanPaperClass | null {
+	if (typeof document === "undefined") return null;
 	const scale = Math.min(1, SAMPLE_TARGET_PX / Math.max(crop.sw, crop.sh));
 	const w = Math.max(1, Math.round(crop.sw * scale));
 	const h = Math.max(1, Math.round(crop.sh * scale));
@@ -93,7 +103,7 @@ function isScanPaperSample(
 	tmp.width = w;
 	tmp.height = h;
 	const ctx = tmp.getContext("2d", { willReadFrequently: true });
-	if (!ctx) return false;
+	if (!ctx) return null;
 	try {
 		ctx.drawImage(source, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, w, h);
 		const { data } = ctx.getImageData(0, 0, w, h);
@@ -111,24 +121,24 @@ function isScanPaperSample(
 			else if (max > 60 && (max - min) / max > 0.35) saturated++;
 			if (max < 100) ink++;
 		}
-		return (
+		const isPaper =
 			opaque / total >= SCAN_OPAQUE_MIN_FRACTION &&
 			white / total >= SCAN_WHITE_MIN_FRACTION &&
-			saturated / total <= SCAN_SATURATED_MAX_FRACTION &&
-			ink / total >= SCAN_INK_MIN_FRACTION
-		);
+			saturated / total <= SCAN_SATURATED_MAX_FRACTION;
+		if (!isPaper) return null;
+		return { inked: ink / total >= SCAN_INK_MIN_FRACTION };
 	} catch {
 		// Tainted or detached sources never qualify.
-		return false;
+		return null;
 	}
 }
 
-export function isScanPaperSource(
+export function classifyScanPaper(
 	source: CanvasImageSource,
 	crop?: SourceCrop,
-): boolean {
+): ScanPaperClass | null {
 	const size = sourceSize(source);
-	if (!size || size.width <= 0 || size.height <= 0) return false;
+	if (!size || size.width <= 0 || size.height <= 0) return null;
 	const fullSource =
 		!crop ||
 		(crop.sx === 0 &&
@@ -146,8 +156,16 @@ export function isScanPaperSource(
 		if (cached !== undefined) return cached;
 	}
 	const region = crop ?? { sx: 0, sy: 0, sw: size.width, sh: size.height };
-	if (region.sw <= 0 || region.sh <= 0) return false;
-	const verdict = isScanPaperSample(source, region);
+	if (region.sw <= 0 || region.sh <= 0) return null;
+	const verdict = sampleScanPaper(source, region);
 	if (bitmap) bitmapVerdicts.set(bitmap, verdict);
 	return verdict;
+}
+
+export function isScanPaperSource(
+	source: CanvasImageSource,
+	crop?: SourceCrop,
+): boolean {
+	const paper = classifyScanPaper(source, crop);
+	return paper !== null && paper.inked;
 }

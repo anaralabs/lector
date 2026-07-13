@@ -326,11 +326,56 @@ describe("scan inversion via applyContextRecolor", () => {
 		// strips overlap by 2px — real rasterizers do this to avoid seams
 		ctx.drawImage(makeScanSource(), 0, 0, 100, 52, 0, 0, 100, 52);
 		ctx.drawImage(makeScanSource(), 0, 50, 100, 50, 0, 50, 100, 50);
+		// paper on both strips lands on the pole
 		for (const y of [10, 90]) {
 			const [pr, pg, pb] = rgbAt(ctx, 10, y);
 			const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
 			expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
 		}
+		// the seam row lands on the source's ink bar: inverted once it reads
+		// light (~230); a double inversion would flip it back to dark
+		const [ir, ig, ib] = rgbAt(ctx, 10, 51);
+		expect(Math.min(ir, ig, ib)).toBeGreaterThan(200);
+	});
+
+	it("counts blank margin strips toward tiled coverage", () => {
+		const blank = document.createElement("canvas");
+		blank.width = 100;
+		blank.height = 30;
+		const bctx = blank.getContext("2d")!;
+		bctx.fillStyle = "#ffffff";
+		bctx.fillRect(0, 0, 100, 30);
+
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(blank, 0, 0); // blank top margin, 30%
+		// inked strips carrying the rest of the page
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 30, 100, 40);
+		ctx.drawImage(makeScanSource(), 0, 62, 100, 30, 0, 70, 100, 30);
+		// paper samples avoid the source ink bar (rows 48-52 land at y≈50)
+		for (const y of [10, 45, 90]) {
+			const [pr, pg, pb] = rgbAt(ctx, 10, y);
+			const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+			expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+		}
+	});
+
+	it("abandons retroactive inversion when vector content interleaves strips", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeScanSource(), 0, 22, 100, 30, 0, 0, 100, 30);
+		// a vector annotation lands on the first strip…
+		ctx.fillStyle = "#ff0000";
+		ctx.fillRect(10, 10, 20, 5);
+		// …then the remaining strips arrive
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 30, 100, 40);
+		ctx.drawImage(makeScanSource(), 0, 62, 100, 30, 0, 70, 100, 30);
+		// retro inversion would have flipped the annotation — page stays light
+		const [r, g, b] = rgbAt(ctx, 50, 5);
+		expect(Math.min(r, g, b)).toBeGreaterThan(240);
+		const [ar, ag, ab] = rgbAt(ctx, 15, 12); // annotation untouched
+		expect(ar).toBeGreaterThan(150);
+		expect(Math.max(ag, ab)).toBeLessThan(100);
 	});
 
 	it("flushes accumulated strips when a page-covering draw arrives", () => {

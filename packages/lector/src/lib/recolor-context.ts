@@ -1,6 +1,6 @@
 import type { RenderColorMap } from "./dark-mode";
 import {
-	isScanPaperSource,
+	classifyScanPaper,
 	SCAN_COVERAGE_MIN,
 	SCAN_TILE_DENSITY_MIN,
 	SCAN_TILE_MIN_FRACTION,
@@ -204,7 +204,12 @@ export function applyContextRecolor(
 	const scanCandidate = (
 		self: CanvasRenderingContext2D,
 		args: readonly unknown[],
-	): { rect: DestRect; areaFraction: number; clipped: boolean } | null => {
+	): {
+		rect: DestRect;
+		areaFraction: number;
+		clipped: boolean;
+		inked: boolean;
+	} | null => {
 		if (!scanEnabled || !pageArea) return null;
 		if (self.globalCompositeOperation !== "source-over") return null;
 		if (self.globalAlpha < 0.99) return null;
@@ -227,8 +232,9 @@ export function applyContextRecolor(
 						sh: args[4] as number,
 					}
 				: undefined;
-		if (!isScanPaperSource(args[0] as CanvasImageSource, crop)) return null;
-		return { rect, areaFraction, clipped: clipActive() };
+		const paper = classifyScanPaper(args[0] as CanvasImageSource, crop);
+		if (!paper) return null;
+		return { rect, areaFraction, clipped: clipActive(), inked: paper.inked };
 	};
 
 	const grayCss = (value: number) => `rgb(${value}, ${value}, ${value})`;
@@ -289,8 +295,13 @@ export function applyContextRecolor(
 	}
 	const OVERLAP_TOLERANCE = 0.2;
 	let pendingTileArea = 0;
+	let pendingHasInk = false;
 	const pendingTiles: PendingTile[] = [];
 	const coveredBounds: DeviceBounds[] = [];
+	// Bumped on every vector fill/stroke: a retroactive tile fill is only
+	// safe when nothing vector was painted since the first pending strip.
+	let paintSerial = 0;
+	let pendingBaselineSerial = 0;
 
 	const tileBounds = (matrix: DOMMatrix, rect: DestRect): DeviceBounds => {
 		const corners = [
@@ -325,14 +336,82 @@ export function applyContextRecolor(
 			);
 		});
 
-	const markCovered = (self: CanvasRenderingContext2D, tile: PendingTile) => {
-		invertScanRect(self, tile.rect, tile.matrix);
-		coveredBounds.push(tile.bounds);
+	const AXIS_EPS = 1e-6;
+	const isAxisAligned = (m: DOMMatrix) =>
+		Math.abs(m.b) < AXIS_EPS && Math.abs(m.c) < AXIS_EPS;
+	const IDENTITY_MATRIX =
+		typeof DOMMatrix !== "undefined" ? new DOMMatrix() : null;
+
+	// Subtract a hole from each rect, keeping the up-to-4 remainder pieces.
+	const subtractBounds = (
+		rects: DeviceBounds[],
+		hole: DeviceBounds,
+	): DeviceBounds[] => {
+		const out: DeviceBounds[] = [];
+		for (const r of rects) {
+			const ix0 = Math.max(r[0], hole[0]);
+			const iy0 = Math.max(r[1], hole[1]);
+			const ix1 = Math.min(r[2], hole[2]);
+			const iy1 = Math.min(r[3], hole[3]);
+			if (ix0 >= ix1 || iy0 >= iy1) {
+				out.push(r);
+				continue;
+			}
+			if (r[1] < iy0) out.push([r[0], r[1], r[2], iy0]);
+			if (iy1 < r[3]) out.push([r[0], iy1, r[2], r[3]]);
+			if (r[0] < ix0) out.push([r[0], iy0, ix0, iy1]);
+			if (ix1 < r[2]) out.push([ix1, iy0, r[2], iy1]);
+		}
+		return out;
+	};
+
+	// Invert only the parts of a tile that no earlier fill already inverted —
+	// a second difference fill would flip overlap pixels back. Device-space
+	// remainders need an axis-aligned tile; rotated tiles (rare) fall back to
+	// a full-rect fill and accept the seam.
+	const invertTileRemainder = (
+		self: CanvasRenderingContext2D,
+		tile: PendingTile,
+		holes: DeviceBounds[],
+	) => {
+		if (!isAxisAligned(tile.matrix) || !IDENTITY_MATRIX) {
+			invertScanRect(self, tile.rect, tile.matrix);
+			return;
+		}
+		let pieces: DeviceBounds[] = [tile.bounds];
+		for (const hole of holes) pieces = subtractBounds(pieces, hole);
+		for (const piece of pieces) {
+			if (piece[2] - piece[0] < 0.5 || piece[3] - piece[1] < 0.5) continue;
+			invertScanRect(
+				self,
+				[piece[0], piece[1], piece[2] - piece[0], piece[3] - piece[1]],
+				IDENTITY_MATRIX,
+			);
+		}
+	};
+
+	const flushPendingTiles = (self: CanvasRenderingContext2D) => {
+		// Vector content painted between strips (annotations, signatures)
+		// would be inverted by a retroactive fill — leave the page as-is.
+		if (paintSerial === pendingBaselineSerial) {
+			for (const pending of pendingTiles) {
+				invertTileRemainder(self, pending, coveredBounds);
+				coveredBounds.push(pending.bounds);
+			}
+		}
+		pendingTiles.length = 0;
+		pendingTileArea = 0;
+		pendingHasInk = false;
 	};
 
 	const handleScanCandidate = (
 		self: CanvasRenderingContext2D,
-		candidate: { rect: DestRect; areaFraction: number; clipped: boolean },
+		candidate: {
+			rect: DestRect;
+			areaFraction: number;
+			clipped: boolean;
+			inked: boolean;
+		},
 	) => {
 		const matrix = self.getTransform();
 		const bounds = tileBounds(matrix, candidate.rect);
@@ -341,7 +420,18 @@ export function applyContextRecolor(
 		// un-invert those pixels.
 		if (overlapsAny(bounds, coveredBounds)) return;
 		const tile: PendingTile = { rect: candidate.rect, matrix, bounds };
+		// Disjoint white paper arriving on a page already proven to be a scan
+		// is a continuation strip (blank margins included) — invert in place.
+		if (coveredBounds.length > 0 && !candidate.clipped) {
+			invertTileRemainder(self, tile, coveredBounds);
+			coveredBounds.push(tile.bounds);
+			return;
+		}
 		if (candidate.areaFraction >= SCAN_COVERAGE_MIN) {
+			// A page-covering pure-white raster is an MRC background layer or
+			// a blank page: its ink lives elsewhere (or nowhere) and must
+			// stay readable, so the page keeps its light rendering.
+			if (!candidate.inked) return;
 			// The fills inherit the draw's clip, so a clipped draw inverts
 			// exactly the pixels it painted; its true footprint is unknown,
 			// though, so it never counts as covered/pending geometry.
@@ -349,16 +439,11 @@ export function applyContextRecolor(
 				invertScanRect(self, candidate.rect, matrix);
 				return;
 			}
-			markCovered(self, tile);
-			// Strips that accumulated before a page-covering draw appeared:
-			// invert the ones the new draw doesn't already repaint.
-			for (const pending of pendingTiles) {
-				if (!overlapsAny(pending.bounds, coveredBounds)) {
-					markCovered(self, pending);
-				}
-			}
-			pendingTiles.length = 0;
-			pendingTileArea = 0;
+			invertScanRect(self, tile.rect, tile.matrix);
+			coveredBounds.push(tile.bounds);
+			// Strips that accumulated before the page-covering draw appeared:
+			// invert whatever parts of them it did not repaint.
+			flushPendingTiles(self);
 			return;
 		}
 		if (candidate.clipped) return;
@@ -369,9 +454,14 @@ export function applyContextRecolor(
 			)
 		)
 			return;
+		if (pendingTiles.length === 0) pendingBaselineSerial = paintSerial;
 		pendingTiles.push(tile);
 		pendingTileArea += candidate.areaFraction;
+		pendingHasInk ||= candidate.inked;
 		if (pendingTileArea < SCAN_COVERAGE_MIN) return;
+		// Blank tiles count toward coverage, but a page only inverts when its
+		// strips carry ink somewhere (pure-white stacks are MRC backgrounds).
+		if (!pendingHasInk) return;
 		const union: DeviceBounds = [
 			Math.min(...pendingTiles.map((t) => t.bounds[0])),
 			Math.min(...pendingTiles.map((t) => t.bounds[1])),
@@ -382,11 +472,7 @@ export function applyContextRecolor(
 		if (unionArea <= 0) return;
 		const density = (pendingTileArea * (pageArea ?? 0)) / unionArea;
 		if (density < SCAN_TILE_DENSITY_MIN) return;
-		for (const tile2 of pendingTiles.slice()) {
-			markCovered(self, tile2);
-		}
-		pendingTiles.length = 0;
-		pendingTileArea = 0;
+		flushPendingTiles(self);
 	};
 
 	const withImageHandling = (original: AnyFn) =>
@@ -431,6 +517,7 @@ export function applyContextRecolor(
 		styleProp: "fillStyle" | "strokeStyle",
 	) =>
 		function (this: CanvasRenderingContext2D, ...args: never[]): unknown {
+			paintSerial++;
 			const style = this[styleProp];
 			if (typeof style === "string") {
 				const mapped = map(style);
