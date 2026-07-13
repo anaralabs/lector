@@ -23,6 +23,12 @@ export const SCAN_TILE_DENSITY_MIN = 0.85;
 /** Fraction of near-white opaque pixels above which a source is scan paper. */
 export const SCAN_WHITE_MIN_FRACTION = 0.6;
 /**
+ * Minimum fraction of dark "ink" pixels. A pure-white raster is an MRC
+ * background layer (its ink lives in a separate dark layer that must stay
+ * un-inverted to remain readable) or a blank page — skip both.
+ */
+export const SCAN_INK_MIN_FRACTION = 0.005;
+/**
  * Minimum opaque fraction: scans are fully opaque; a cut-out PNG would let
  * the inversion fill bleed into its transparent holes.
  */
@@ -95,6 +101,7 @@ function isScanPaperSample(
 		let white = 0;
 		let opaque = 0;
 		let saturated = 0;
+		let ink = 0;
 		for (let i = 0; i < data.length; i += 4) {
 			if (data[i + 3]! < 250) continue;
 			opaque++;
@@ -102,11 +109,13 @@ function isScanPaperSample(
 			const min = Math.min(data[i]!, data[i + 1]!, data[i + 2]!);
 			if (min > 200 && max - min < 32) white++;
 			else if (max > 60 && (max - min) / max > 0.35) saturated++;
+			if (max < 100) ink++;
 		}
 		return (
 			opaque / total >= SCAN_OPAQUE_MIN_FRACTION &&
 			white / total >= SCAN_WHITE_MIN_FRACTION &&
-			saturated / total <= SCAN_SATURATED_MAX_FRACTION
+			saturated / total <= SCAN_SATURATED_MAX_FRACTION &&
+			ink / total >= SCAN_INK_MIN_FRACTION
 		);
 	} catch {
 		// Tainted or detached sources never qualify.

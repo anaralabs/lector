@@ -299,6 +299,74 @@ describe("scan inversion via applyContextRecolor", () => {
 		expect(isScanPaperSource(source)).toBe(false);
 	});
 
+	it("rejects pure-white rasters (MRC background layers, blank pages)", () => {
+		const source = document.createElement("canvas");
+		source.width = 100;
+		source.height = 100;
+		const sctx = source.getContext("2d")!;
+		sctx.fillStyle = "#ffffff";
+		sctx.fillRect(0, 0, 100, 100);
+		expect(isScanPaperSource(source)).toBe(false);
+		// with ink present it qualifies again
+		expect(isScanPaperSource(makeScanSource())).toBe(true);
+	});
+
+	it("leaves white overlays on already-inverted paper alone", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeScanSource(), 0, 0, 100, 100); // inverted
+		ctx.drawImage(makeScanSource(), 10, 60, 30, 30); // logo/QR overlay
+		const [r, g, b] = rgbAt(ctx, 15, 65); // inside the overlay
+		expect(Math.min(r, g, b)).toBeGreaterThan(240);
+	});
+
+	it("tolerates seam-avoidance overlap between strips", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		// strips overlap by 2px — real rasterizers do this to avoid seams
+		ctx.drawImage(makeScanSource(), 0, 0, 100, 52, 0, 0, 100, 52);
+		ctx.drawImage(makeScanSource(), 0, 50, 100, 50, 0, 50, 100, 50);
+		for (const y of [10, 90]) {
+			const [pr, pg, pb] = rgbAt(ctx, 10, y);
+			const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+			expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+		}
+	});
+
+	it("flushes accumulated strips when a page-covering draw arrives", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		// a strip that only covers the top 30% accumulates… (its source crop
+		// straddles the ink bar so it reads as inked scan paper)
+		ctx.drawImage(makeScanSource(), 0, 22, 100, 30, 0, 0, 100, 30);
+		// …then a draw covering the remaining 70% triggers the immediate path
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 70, 0, 30, 100, 70);
+		for (const y of [10, 90]) {
+			const [pr, pg, pb] = rgbAt(ctx, 10, y);
+			const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+			expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+		}
+	});
+
+	it("keeps clipped draws inside their clip when inverting", () => {
+		const ctx = makeCtx(100);
+		// pre-fill white before wrapping so the fill isn't recolored
+		ctx.fillStyle = "#ffffff";
+		ctx.fillRect(0, 0, 100, 100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.save();
+		ctx.beginPath();
+		ctx.rect(0, 0, 40, 40);
+		ctx.clip();
+		ctx.drawImage(makeScanSource(), 0, 0, 100, 100);
+		ctx.restore();
+		const [ir, ig, ib] = rgbAt(ctx, 10, 10); // inside clip: inverted
+		const insideLuma = 0.3 * ir + 0.59 * ig + 0.11 * ib;
+		expect(Math.abs(insideLuma - POLE_LUMA)).toBeLessThan(4);
+		const [or_, og, ob] = rgbAt(ctx, 80, 80); // outside clip: untouched
+		expect(Math.min(or_, og, ob)).toBeGreaterThan(240);
+	});
+
 	it("restores pristine drawImage on cleanup", () => {
 		const ctx = makeCtx(100);
 		const cleanup = applyContextRecolor(ctx, testMap, {

@@ -204,7 +204,7 @@ export function applyContextRecolor(
 	const scanCandidate = (
 		self: CanvasRenderingContext2D,
 		args: readonly unknown[],
-	): { rect: DestRect; areaFraction: number } | null => {
+	): { rect: DestRect; areaFraction: number; clipped: boolean } | null => {
 		if (!scanEnabled || !pageArea) return null;
 		if (self.globalCompositeOperation !== "source-over") return null;
 		if (self.globalAlpha < 0.99) return null;
@@ -228,10 +228,20 @@ export function applyContextRecolor(
 					}
 				: undefined;
 		if (!isScanPaperSource(args[0] as CanvasImageSource, crop)) return null;
-		return { rect, areaFraction };
+		return { rect, areaFraction, clipped: clipActive() };
 	};
 
 	const grayCss = (value: number) => `rgb(${value}, ${value}, ${value})`;
+
+	// Canvas 2D has no clip readback, so track whether ANY clip is active:
+	// inversion fills inherit a clipped draw's clip (correct by construction),
+	// but clipped geometry can't participate in tile/covered bookkeeping —
+	// its true painted footprint is unknown.
+	const clipFlags: boolean[] = [false];
+	const clipActive = () => clipFlags[clipFlags.length - 1] === true;
+	const pristineSave = target.save;
+	const pristineRestore = target.restore;
+	const pristineClip = target.clip;
 
 	const invertScanRect = (
 		self: CanvasRenderingContext2D,
@@ -268,16 +278,19 @@ export function applyContextRecolor(
 	// the wrapper is re-applied per render) and are inverted retroactively
 	// once they sum to page coverage AND tile densely (summed area ≈ their
 	// union box), which scattered white screenshots on a text page never do.
-	// Overlapping tiles are never accumulated: a second difference fill would
-	// un-invert the overlap (MRC layer stacks land here).
+	// Inverted regions are remembered: a later white draw landing on already
+	// inverted paper (a logo, a QR block, an MRC layer restating the page) is
+	// left alone — a second difference fill would un-invert it. Small strip
+	// overlaps (seam-avoidance in real rasterizers) stay within the tolerance.
 	interface PendingTile {
 		rect: DestRect;
 		matrix: DOMMatrix;
 		bounds: DeviceBounds;
 	}
-	let scanPageDetected = false;
+	const OVERLAP_TOLERANCE = 0.2;
 	let pendingTileArea = 0;
 	const pendingTiles: PendingTile[] = [];
+	const coveredBounds: DeviceBounds[] = [];
 
 	const tileBounds = (matrix: DOMMatrix, rect: DestRect): DeviceBounds => {
 		const corners = [
@@ -294,22 +307,69 @@ export function applyContextRecolor(
 		];
 	};
 
-	const boundsOverlap = (a: DeviceBounds, b: DeviceBounds) =>
-		a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+	const boundsArea = (b: DeviceBounds) =>
+		Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+
+	// Overlap beyond a fraction of the smaller box; 1px seam overlaps pass.
+	const overlapsAny = (bounds: DeviceBounds, others: DeviceBounds[]) =>
+		others.some((other) => {
+			const intersection: DeviceBounds = [
+				Math.max(bounds[0], other[0]),
+				Math.max(bounds[1], other[1]),
+				Math.min(bounds[2], other[2]),
+				Math.min(bounds[3], other[3]),
+			];
+			const smaller = Math.min(boundsArea(bounds), boundsArea(other));
+			return (
+				smaller > 0 && boundsArea(intersection) > OVERLAP_TOLERANCE * smaller
+			);
+		});
+
+	const markCovered = (self: CanvasRenderingContext2D, tile: PendingTile) => {
+		invertScanRect(self, tile.rect, tile.matrix);
+		coveredBounds.push(tile.bounds);
+	};
 
 	const handleScanCandidate = (
 		self: CanvasRenderingContext2D,
-		candidate: { rect: DestRect; areaFraction: number },
+		candidate: { rect: DestRect; areaFraction: number; clipped: boolean },
 	) => {
 		const matrix = self.getTransform();
-		if (scanPageDetected || candidate.areaFraction >= SCAN_COVERAGE_MIN) {
-			scanPageDetected = true;
-			invertScanRect(self, candidate.rect, matrix);
+		const bounds = tileBounds(matrix, candidate.rect);
+		// White content landing on already-inverted paper is an overlay
+		// (logo, QR block, restated MRC layer) — inverting it again would
+		// un-invert those pixels.
+		if (overlapsAny(bounds, coveredBounds)) return;
+		const tile: PendingTile = { rect: candidate.rect, matrix, bounds };
+		if (candidate.areaFraction >= SCAN_COVERAGE_MIN) {
+			// The fills inherit the draw's clip, so a clipped draw inverts
+			// exactly the pixels it painted; its true footprint is unknown,
+			// though, so it never counts as covered/pending geometry.
+			if (candidate.clipped) {
+				invertScanRect(self, candidate.rect, matrix);
+				return;
+			}
+			markCovered(self, tile);
+			// Strips that accumulated before a page-covering draw appeared:
+			// invert the ones the new draw doesn't already repaint.
+			for (const pending of pendingTiles) {
+				if (!overlapsAny(pending.bounds, coveredBounds)) {
+					markCovered(self, pending);
+				}
+			}
+			pendingTiles.length = 0;
+			pendingTileArea = 0;
 			return;
 		}
-		const bounds = tileBounds(matrix, candidate.rect);
-		if (pendingTiles.some((tile) => boundsOverlap(tile.bounds, bounds))) return;
-		pendingTiles.push({ rect: candidate.rect, matrix, bounds });
+		if (candidate.clipped) return;
+		if (
+			overlapsAny(
+				bounds,
+				pendingTiles.map((t) => t.bounds),
+			)
+		)
+			return;
+		pendingTiles.push(tile);
 		pendingTileArea += candidate.areaFraction;
 		if (pendingTileArea < SCAN_COVERAGE_MIN) return;
 		const union: DeviceBounds = [
@@ -318,15 +378,15 @@ export function applyContextRecolor(
 			Math.max(...pendingTiles.map((t) => t.bounds[2])),
 			Math.max(...pendingTiles.map((t) => t.bounds[3])),
 		];
-		const unionArea = (union[2] - union[0]) * (union[3] - union[1]);
+		const unionArea = boundsArea(union);
 		if (unionArea <= 0) return;
 		const density = (pendingTileArea * (pageArea ?? 0)) / unionArea;
 		if (density < SCAN_TILE_DENSITY_MIN) return;
-		scanPageDetected = true;
-		for (const tile of pendingTiles) {
-			invertScanRect(self, tile.rect, tile.matrix);
+		for (const tile2 of pendingTiles.slice()) {
+			markCovered(self, tile2);
 		}
 		pendingTiles.length = 0;
+		pendingTileArea = 0;
 	};
 
 	const withImageHandling = (original: AnyFn) =>
@@ -408,6 +468,18 @@ export function applyContextRecolor(
 	for (const name of GRADIENT_METHODS)
 		record[name] = withMappedStops(target[name] as AnyFn);
 	record.drawImage = withImageHandling(target.drawImage as AnyFn);
+	record.save = function (this: CanvasRenderingContext2D) {
+		clipFlags.push(clipFlags[clipFlags.length - 1]!);
+		return pristineSave.call(this);
+	};
+	record.restore = function (this: CanvasRenderingContext2D) {
+		if (clipFlags.length > 1) clipFlags.pop();
+		return pristineRestore.call(this);
+	};
+	record.clip = function (this: CanvasRenderingContext2D, ...args: never[]) {
+		clipFlags[clipFlags.length - 1] = true;
+		return (pristineClip as AnyFn).apply(this, args);
+	};
 
 	const cleanup = () => {
 		// A later applyContextRecolor call already replaced these wrappers.
@@ -417,6 +489,9 @@ export function applyContextRecolor(
 			...STROKE_METHODS,
 			...GRADIENT_METHODS,
 			"drawImage",
+			"save",
+			"restore",
+			"clip",
 		])
 			delete record[name];
 		delete target[RECOLOR_CLEANUP];
