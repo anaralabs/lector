@@ -146,12 +146,16 @@ export function applyContextRecolor(
 
 	const pageArea = options?.pageArea;
 	// Difference-filling with this gray sends scan paper (255) exactly to the
-	// mapped white pole; ink lands near the light foreground.
+	// mapped white pole's luma; ink lands near the light foreground. A second
+	// color-blend fill then tints the neutral result toward the palette
+	// background, so tinted palettes (e.g. warm or blue darks) match vector
+	// pages instead of landing on plain gray.
 	const scanInvertGray =
 		pageArea && pageArea > 0 && mappedWhiteLuma !== null
 			? 255 - Math.round(mappedWhiteLuma)
 			: null;
-	// Captured pre-wrap: the difference fill must not run through the
+	const scanTintCss = scanInvertGray !== null ? map("#ffffff") : null;
+	// Captured pre-wrap: the inversion fills must not run through the
 	// style-mapping fillRect wrapper installed below.
 	const pristineFillRect = target.fillRect;
 
@@ -174,7 +178,8 @@ export function applyContextRecolor(
 	};
 
 	// A qualifying draw papers the page under a plain composite. Checks run
-	// cheapest-first; pixel sampling (isScanPaperSource) comes last.
+	// cheapest-first; pixel sampling (isScanPaperSource) comes last, and for
+	// cropped draws it samples exactly the drawn source region.
 	const scanInvertRect = (
 		self: CanvasRenderingContext2D,
 		args: readonly unknown[],
@@ -191,7 +196,16 @@ export function applyContextRecolor(
 		const painted =
 			Math.abs(t.a * t.d - t.b * t.c) * Math.abs(rect[2] * rect[3]);
 		if (painted < SCAN_COVERAGE_MIN * pageArea) return null;
-		if (!isScanPaperSource(args[0] as CanvasImageSource)) return null;
+		const crop =
+			args.length >= 9
+				? {
+						sx: args[1] as number,
+						sy: args[2] as number,
+						sw: args[3] as number,
+						sh: args[4] as number,
+					}
+				: undefined;
+		if (!isScanPaperSource(args[0] as CanvasImageSource, crop)) return null;
 		return rect;
 	};
 
@@ -231,10 +245,16 @@ export function applyContextRecolor(
 			if (scanRect) {
 				const [dx, dy, dw, dh] = scanRect;
 				this.save();
-				this.globalCompositeOperation = "difference";
 				this.globalAlpha = 1;
+				this.globalCompositeOperation = "difference";
 				this.fillStyle = `rgb(${scanInvertGray}, ${scanInvertGray}, ${scanInvertGray})`;
 				pristineFillRect.call(this, dx, dy, dw, dh);
+				if (scanTintCss) {
+					// Keep the inverted luma, adopt the palette's hue/chroma.
+					this.globalCompositeOperation = "color";
+					this.fillStyle = scanTintCss;
+					pristineFillRect.call(this, dx, dy, dw, dh);
+				}
 				this.restore();
 			}
 			return result;

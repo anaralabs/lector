@@ -11,11 +11,30 @@
 export const SCAN_COVERAGE_MIN = 0.7;
 /** Fraction of near-white opaque pixels above which a source is scan paper. */
 export const SCAN_WHITE_MIN_FRACTION = 0.6;
+/**
+ * Minimum opaque fraction: scans are fully opaque; a cut-out PNG would let
+ * the inversion fill bleed into its transparent holes.
+ */
+export const SCAN_OPAQUE_MIN_FRACTION = 0.99;
+/**
+ * Maximum saturated fraction. Stamps and seals on real scans measure a few
+ * percent saturated; a rasterized slide with a colored chart measures far
+ * more — inverting it would render the chart as a negative.
+ */
+export const SCAN_SATURATED_MAX_FRACTION = 0.15;
 
 const SAMPLE_TARGET_PX = 48;
 
-// ImageBitmaps are immutable — one verdict per bitmap. Canvas sources get
-// repainted (pdf.js reuses scratch canvases), so they are re-sampled per draw.
+export interface SourceCrop {
+	sx: number;
+	sy: number;
+	sw: number;
+	sh: number;
+}
+
+// ImageBitmaps are immutable — one whole-source verdict per bitmap. Canvas
+// sources get repainted (pdf.js reuses scratch canvases) and cropped draws
+// vary per call, so those are re-sampled per draw.
 const bitmapVerdicts = new WeakMap<ImageBitmap, boolean>();
 
 export function sourceSize(
@@ -45,53 +64,70 @@ export function sourceSize(
 	return null;
 }
 
-function sampleWhiteFraction(
+function isScanPaperSample(
 	source: CanvasImageSource,
-	width: number,
-	height: number,
-): number | null {
-	if (typeof document === "undefined") return null;
-	const scale = Math.min(1, SAMPLE_TARGET_PX / Math.max(width, height));
-	const w = Math.max(1, Math.round(width * scale));
-	const h = Math.max(1, Math.round(height * scale));
+	crop: SourceCrop,
+): boolean {
+	if (typeof document === "undefined") return false;
+	const scale = Math.min(1, SAMPLE_TARGET_PX / Math.max(crop.sw, crop.sh));
+	const w = Math.max(1, Math.round(crop.sw * scale));
+	const h = Math.max(1, Math.round(crop.sh * scale));
 	const tmp = document.createElement("canvas");
 	tmp.width = w;
 	tmp.height = h;
 	const ctx = tmp.getContext("2d", { willReadFrequently: true });
-	if (!ctx) return null;
+	if (!ctx) return false;
 	try {
-		ctx.drawImage(source, 0, 0, w, h);
+		ctx.drawImage(source, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, w, h);
 		const { data } = ctx.getImageData(0, 0, w, h);
+		const total = data.length / 4;
 		let white = 0;
+		let opaque = 0;
+		let saturated = 0;
 		for (let i = 0; i < data.length; i += 4) {
+			if (data[i + 3]! <= 200) continue;
+			opaque++;
 			const max = Math.max(data[i]!, data[i + 1]!, data[i + 2]!);
 			const min = Math.min(data[i]!, data[i + 1]!, data[i + 2]!);
-			// Transparent pixels count against: image masks and cut-out art
-			// are not paper, and inverting them would fill their holes.
-			if (data[i + 3]! > 200 && min > 200 && max - min < 32) white++;
+			if (min > 200 && max - min < 32) white++;
+			else if (max > 60 && (max - min) / max > 0.35) saturated++;
 		}
-		return white / (data.length / 4);
+		return (
+			opaque / total >= SCAN_OPAQUE_MIN_FRACTION &&
+			white / total >= SCAN_WHITE_MIN_FRACTION &&
+			saturated / total <= SCAN_SATURATED_MAX_FRACTION
+		);
 	} catch {
 		// Tainted or detached sources never qualify.
-		return null;
+		return false;
 	}
 }
 
-export function isScanPaperSource(source: CanvasImageSource): boolean {
+export function isScanPaperSource(
+	source: CanvasImageSource,
+	crop?: SourceCrop,
+): boolean {
+	const size = sourceSize(source);
+	if (!size || size.width <= 0 || size.height <= 0) return false;
+	const fullSource =
+		!crop ||
+		(crop.sx === 0 &&
+			crop.sy === 0 &&
+			crop.sw === size.width &&
+			crop.sh === size.height);
 	const bitmap =
-		typeof ImageBitmap !== "undefined" && source instanceof ImageBitmap
+		fullSource &&
+		typeof ImageBitmap !== "undefined" &&
+		source instanceof ImageBitmap
 			? source
 			: null;
 	if (bitmap) {
 		const cached = bitmapVerdicts.get(bitmap);
 		if (cached !== undefined) return cached;
 	}
-	const size = sourceSize(source);
-	const fraction =
-		size && size.width > 0 && size.height > 0
-			? sampleWhiteFraction(source, size.width, size.height)
-			: null;
-	const verdict = fraction !== null && fraction >= SCAN_WHITE_MIN_FRACTION;
+	const region = crop ?? { sx: 0, sy: 0, sw: size.width, sh: size.height };
+	if (region.sw <= 0 || region.sh <= 0) return false;
+	const verdict = isScanPaperSample(source, region);
 	if (bitmap) bitmapVerdicts.set(bitmap, verdict);
 	return verdict;
 }

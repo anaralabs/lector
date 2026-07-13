@@ -60,6 +60,31 @@ function makeColorfulSource(size = 100): HTMLCanvasElement {
 	return canvas;
 }
 
+/** White page with a saturated chart block covering ~30%. */
+function makeChartSlideSource(size = 100): HTMLCanvasElement {
+	const canvas = document.createElement("canvas");
+	canvas.width = size;
+	canvas.height = size;
+	const ctx = canvas.getContext("2d")!;
+	ctx.fillStyle = "#ffffff";
+	ctx.fillRect(0, 0, size, size);
+	ctx.fillStyle = "#e04010";
+	ctx.fillRect(size * 0.1, size * 0.1, size * 0.6, size * 0.5);
+	return canvas;
+}
+
+/** Mostly-white source with a transparent cut-out covering ~20%. */
+function makeCutOutSource(size = 100): HTMLCanvasElement {
+	const canvas = document.createElement("canvas");
+	canvas.width = size;
+	canvas.height = size;
+	const ctx = canvas.getContext("2d")!;
+	ctx.fillStyle = "#ffffff";
+	ctx.fillRect(0, 0, size, size);
+	ctx.clearRect(size * 0.3, size * 0.3, size * 0.45, size * 0.45);
+	return canvas;
+}
+
 describe("isScanPaperSource", () => {
 	it("accepts white paper with ink", () => {
 		expect(isScanPaperSource(makeScanSource())).toBe(true);
@@ -74,6 +99,32 @@ describe("isScanPaperSource", () => {
 		canvas.width = 50;
 		canvas.height = 50;
 		expect(isScanPaperSource(canvas)).toBe(false);
+	});
+
+	it("rejects white pages with a saturated chart block", () => {
+		expect(isScanPaperSource(makeChartSlideSource())).toBe(false);
+	});
+
+	it("rejects sources with transparent cut-outs", () => {
+		expect(isScanPaperSource(makeCutOutSource())).toBe(false);
+	});
+
+	it("samples only the cropped region when a crop is given", () => {
+		// left half scan paper, right half saturated color
+		const canvas = document.createElement("canvas");
+		canvas.width = 200;
+		canvas.height = 100;
+		const ctx = canvas.getContext("2d")!;
+		ctx.drawImage(makeScanSource(100), 0, 0);
+		ctx.fillStyle = "#c03020";
+		ctx.fillRect(100, 0, 100, 100);
+		expect(isScanPaperSource(canvas)).toBe(false);
+		expect(
+			isScanPaperSource(canvas, { sx: 0, sy: 0, sw: 100, sh: 100 }),
+		).toBe(true);
+		expect(
+			isScanPaperSource(canvas, { sx: 100, sy: 0, sw: 100, sh: 100 }),
+		).toBe(false);
 	});
 });
 
@@ -149,6 +200,47 @@ describe("scan inversion via applyContextRecolor", () => {
 		expect(ctx.fillStyle).toBe("#123456");
 		expect(ctx.globalCompositeOperation).toBe("source-over");
 		expect(ctx.globalAlpha).toBe(1);
+	});
+
+	it("inverts a cropped scan drawn from a mixed scratch canvas", () => {
+		const mixed = document.createElement("canvas");
+		mixed.width = 200;
+		mixed.height = 100;
+		const mctx = mixed.getContext("2d")!;
+		mctx.drawImage(makeScanSource(100), 0, 0);
+		mctx.fillStyle = "#c03020";
+		mctx.fillRect(100, 0, 100, 100);
+
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(mixed, 0, 0, 100, 100, 0, 0, 100, 100);
+		const [pr, pg, pb] = rgbAt(ctx, 10, 10);
+		const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+	});
+
+	it("does not invert white pages carrying a saturated chart", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeChartSlideSource(), 0, 0, 100, 100);
+		const [r, g, b] = rgbAt(ctx, 95, 95);
+		expect(Math.min(r, g, b)).toBeGreaterThan(240);
+	});
+
+	it("tints inverted paper toward a colored palette background", () => {
+		const BLUE_DARK = "#001b33";
+		const blueMap = (color: string) =>
+			color === "#ffffff" || color === "white"
+				? BLUE_DARK
+				: color === "#000000" || color === "black"
+					? LIGHT
+					: color;
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, blueMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeScanSource(), 0, 0, 100, 100);
+		const [r, , b] = rgbAt(ctx, 10, 10);
+		// paper must carry the palette's blue hue, not neutral gray
+		expect(b).toBeGreaterThan(r + 8);
 	});
 
 	it("restores pristine drawImage on cleanup", () => {
