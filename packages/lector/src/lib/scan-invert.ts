@@ -166,6 +166,5 @@ export function isScanPaperSource(
 	source: CanvasImageSource,
 	crop?: SourceCrop,
 ): boolean {
-	const paper = classifyScanPaper(source, crop);
-	return paper !== null && paper.inked;
+	return classifyScanPaper(source, crop)?.inked === true;
 }
