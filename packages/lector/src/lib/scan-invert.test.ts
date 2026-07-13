@@ -448,7 +448,7 @@ describe("scan inversion via applyContextRecolor", () => {
 		expect(Math.abs(clippedLuma - POLE_LUMA)).toBeLessThan(6);
 	});
 
-	it("abandons strips repainted by an MRC white layer", () => {
+	it("completes a blank covering layer with later inked tiles", () => {
 		const white = document.createElement("canvas");
 		white.width = 100;
 		white.height = 100;
@@ -458,18 +458,47 @@ describe("scan inversion via applyContextRecolor", () => {
 
 		const ctx = makeCtx(100);
 		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
-		// a strip accumulates, then a pure-white page-covering layer repaints
-		ctx.drawImage(makeScanSource(), 0, 22, 100, 30, 0, 0, 100, 30);
-		ctx.drawImage(white, 0, 0);
-		// fresh inked strips cover the lower 70% and invert normally
-		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 30, 100, 40);
-		ctx.drawImage(makeScanSource(), 0, 62, 100, 30, 0, 70, 100, 30);
-		// the white layer's region must NOT be retro-filled from stale strips
-		const [r, g, b] = rgbAt(ctx, 10, 10);
+		// a large blank layer alone must not invert…
+		ctx.drawImage(white, 0, 0, 100, 70);
+		const [wr, wg, wb] = rgbAt(ctx, 10, 10);
+		expect(Math.min(wr, wg, wb)).toBeGreaterThan(240);
+		// …but an inked tile completes the scanned page
+		// (paper samples avoid the ink bar, which lands at y≈84-87)
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 70, 100, 30);
+		for (const y of [10, 75]) {
+			const [pr, pg, pb] = rgbAt(ctx, 10, y);
+			const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+			expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+		}
+	});
+
+	it("keeps true MRC pages light (white layer + dark ink layer)", () => {
+		const white = document.createElement("canvas");
+		white.width = 100;
+		white.height = 100;
+		const wctx = white.getContext("2d")!;
+		wctx.fillStyle = "#ffffff";
+		wctx.fillRect(0, 0, 100, 100);
+
+		// MRC ink layer: transparent background, dark glyph blobs
+		const inkLayer = document.createElement("canvas");
+		inkLayer.width = 100;
+		inkLayer.height = 100;
+		const ictx = inkLayer.getContext("2d")!;
+		ictx.fillStyle = "#000000";
+		ictx.fillRect(10, 20, 60, 4);
+		ictx.fillRect(10, 40, 70, 4);
+
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(white, 0, 0); // white background layer
+		ctx.drawImage(inkLayer, 0, 0); // dark ink layer (non-paper draw)
+		// even a later inked paper tile must not retro-invert the MRC page
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 60, 100, 40);
+		const [r, g, b] = rgbAt(ctx, 5, 5);
 		expect(Math.min(r, g, b)).toBeGreaterThan(240);
-		const [pr, pg, pb] = rgbAt(ctx, 10, 90);
-		const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
-		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+		const [ir, ig, ib] = rgbAt(ctx, 15, 22); // ink stays black
+		expect(Math.max(ir, ig, ib)).toBeLessThan(60);
 	});
 
 	it("classifies sparse scans (signature-only pages) as inked", () => {

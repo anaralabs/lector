@@ -465,15 +465,19 @@ export function applyContextRecolor(
 			return;
 		}
 		if (candidate.areaFraction >= SCAN_COVERAGE_MIN) {
-			// A page-covering pure-white raster is an MRC background layer or
-			// a blank page: its ink lives elsewhere (or nowhere) and must
-			// stay readable, so the page keeps its light rendering. It also
-			// repainted whatever strips had accumulated — abandon them so a
-			// later flush can't difference-fill on top of the fresh layer.
+			// A page-covering pure-white raster can't invert on its own: its
+			// ink may live in a separate MRC layer that must stay readable, or
+			// the page may simply be blank. It repainted whatever strips had
+			// accumulated, so it REPLACES them as one big blank pending tile —
+			// a later inked tile completes the page (large blank tile + inked
+			// tile scans), while a dark MRC ink layer is a non-paper draw that
+			// bumps the paint serial and discards it.
 			if (!candidate.inked) {
 				pendingTiles.length = 0;
-				pendingTileArea = 0;
 				pendingHasInk = false;
+				pendingBaselineSerial = paintSerial;
+				pendingTiles.push(tile);
+				pendingTileArea = candidate.areaFraction;
 				return;
 			}
 			invertScanRect(self, tile.rect, tile.matrix);
@@ -484,16 +488,29 @@ export function applyContextRecolor(
 			return;
 		}
 		if (candidate.clipped) return;
-		if (
+		// Overlapping tiles are fine — the fills subtract already-filled
+		// regions — but only the non-overlapping remainder counts toward
+		// coverage, so restated layers can't inflate the sum.
+		let contributedArea = candidate.areaFraction;
+		if (isAxisAligned(matrix) && pageArea) {
+			let pieces: DeviceBounds[] = [bounds];
+			for (const pending of pendingTiles) {
+				pieces = subtractBounds(pieces, pending.bounds);
+			}
+			contributedArea =
+				pieces.reduce((sum, piece) => sum + boundsArea(piece), 0) / pageArea;
+		} else if (
 			overlapsAny(
 				bounds,
 				pendingTiles.map((t) => t.bounds),
 			)
-		)
+		) {
+			// Rotated tiles can't be subtracted exactly — keep the reject.
 			return;
+		}
 		if (pendingTiles.length === 0) pendingBaselineSerial = paintSerial;
 		pendingTiles.push(tile);
-		pendingTileArea += candidate.areaFraction;
+		pendingTileArea += contributedArea;
 		pendingHasInk ||= candidate.inked;
 		if (pendingTileArea < SCAN_COVERAGE_MIN) return;
 		// Blank tiles count toward coverage, but a page only inverts when its
