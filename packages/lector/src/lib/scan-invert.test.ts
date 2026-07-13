@@ -119,9 +119,9 @@ describe("isScanPaperSource", () => {
 		ctx.fillStyle = "#c03020";
 		ctx.fillRect(100, 0, 100, 100);
 		expect(isScanPaperSource(canvas)).toBe(false);
-		expect(
-			isScanPaperSource(canvas, { sx: 0, sy: 0, sw: 100, sh: 100 }),
-		).toBe(true);
+		expect(isScanPaperSource(canvas, { sx: 0, sy: 0, sw: 100, sh: 100 })).toBe(
+			true,
+		);
 		expect(
 			isScanPaperSource(canvas, { sx: 100, sy: 0, sw: 100, sh: 100 }),
 		).toBe(false);
