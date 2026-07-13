@@ -433,8 +433,15 @@ export function applyContextRecolor(
 		if (candidate.areaFraction >= SCAN_COVERAGE_MIN) {
 			// A page-covering pure-white raster is an MRC background layer or
 			// a blank page: its ink lives elsewhere (or nowhere) and must
-			// stay readable, so the page keeps its light rendering.
-			if (!candidate.inked) return;
+			// stay readable, so the page keeps its light rendering. It also
+			// repainted whatever strips had accumulated — abandon them so a
+			// later flush can't difference-fill on top of the fresh layer.
+			if (!candidate.inked) {
+				pendingTiles.length = 0;
+				pendingTileArea = 0;
+				pendingHasInk = false;
+				return;
+			}
 			// The fills inherit the draw's clip, so a clipped draw inverts
 			// exactly the pixels it painted; its true footprint is unknown,
 			// though, so it never counts as covered/pending geometry.

@@ -448,6 +448,30 @@ describe("scan inversion via applyContextRecolor", () => {
 		expect(Math.abs(clippedLuma - POLE_LUMA)).toBeLessThan(6);
 	});
 
+	it("abandons strips repainted by an MRC white layer", () => {
+		const white = document.createElement("canvas");
+		white.width = 100;
+		white.height = 100;
+		const wctx = white.getContext("2d")!;
+		wctx.fillStyle = "#ffffff";
+		wctx.fillRect(0, 0, 100, 100);
+
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		// a strip accumulates, then a pure-white page-covering layer repaints
+		ctx.drawImage(makeScanSource(), 0, 22, 100, 30, 0, 0, 100, 30);
+		ctx.drawImage(white, 0, 0);
+		// fresh inked strips cover the lower 70% and invert normally
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 30, 100, 40);
+		ctx.drawImage(makeScanSource(), 0, 62, 100, 30, 0, 70, 100, 30);
+		// the white layer's region must NOT be retro-filled from stale strips
+		const [r, g, b] = rgbAt(ctx, 10, 10);
+		expect(Math.min(r, g, b)).toBeGreaterThan(240);
+		const [pr, pg, pb] = rgbAt(ctx, 10, 90);
+		const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+	});
+
 	it("restores pristine drawImage on cleanup", () => {
 		const ctx = makeCtx(100);
 		const cleanup = applyContextRecolor(ctx, testMap, {
