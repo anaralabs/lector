@@ -386,7 +386,10 @@ export const useDetailCanvasLayer = ({
 
 			// Native dark mode: recolor at draw time; `background` stays the
 			// original color and is mapped by the wrapped fillRect exactly once.
-			if (recolor) applyContextRecolor(bufferCtx, recolor);
+			if (recolor)
+				applyContextRecolor(bufferCtx, recolor, {
+					pageArea: detailViewport.width * detailViewport.height,
+				});
 
 			const releaseBuffer = () => {
 				buffer.width = 0;

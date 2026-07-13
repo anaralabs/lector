@@ -1,4 +1,9 @@
 import type { RenderColorMap } from "./dark-mode";
+import {
+	isScanPaperSource,
+	SCAN_COVERAGE_MIN,
+	sourceSize,
+} from "./scan-invert";
 
 const RECOLOR_CLEANUP = Symbol("lectorRecolorCleanup");
 const RECOLOR_PAINTED = Symbol("lectorRecolorPainted");
@@ -96,17 +101,31 @@ function correctLuminosityMask(
 	return tmp;
 }
 
+export interface RecolorContextOptions {
+	/**
+	 * Full-page area in the context's device space (viewport.width × height).
+	 * When provided, image draws that paper the page (≥ SCAN_COVERAGE_MIN of
+	 * this area) with near-white pixels — scanned pages — are inverted toward
+	 * the palette poles. Omit on pdf.js scratch canvases, whose device space
+	 * is not the page; a page-covering scan painted through one is still
+	 * caught when the scratch canvas is composed back onto a page context.
+	 */
+	pageArea?: number;
+}
+
 /**
  * Recolors a 2D context at draw time: every fill/stroke whose style is a
  * string is painted with `map(style)` and the original style is restored
  * right after, so pdf.js readbacks (`ctx.fillStyle`, `copyCtxState`,
  * save/restore) always observe original-document colors and nothing is ever
  * mapped twice. Gradients are recolored per stop at creation. `drawImage`
- * and `putImageData` are deliberately untouched — photos keep their pixels —
- * with one exception: a drawImage that composes a luminosity soft mask
+ * and `putImageData` keep image pixels untouched — photos stay photos — with
+ * two exceptions: a drawImage that composes a luminosity soft mask
  * (destination-in through a pdf.js `*_luminosity_map_*` filter) draws a
  * luma-corrected copy of the mask so the recoloring doesn't invert the
- * mask's alpha.
+ * mask's alpha, and a drawImage that papers the page with near-white pixels
+ * (a scanned page) is inverted toward the palette poles right after painting
+ * (policy in ./scan-invert.ts).
  *
  * Wrapping installs own properties on the context instance (the prototype is
  * never modified). Returns a cleanup that restores the pristine context.
@@ -114,6 +133,7 @@ function correctLuminosityMask(
 export function applyContextRecolor(
 	ctx: CanvasRenderingContext2D,
 	map: RenderColorMap,
+	options?: RecolorContextOptions,
 ): () => void {
 	const target = ctx as RecolorableContext;
 	// Re-wrapping replaces the previous map instead of stacking wrappers.
@@ -124,7 +144,58 @@ export function applyContextRecolor(
 	const mappedWhiteLuma = parseHexLuma(map("#ffffff"));
 	const mappedBlackLuma = parseHexLuma(map("#000000"));
 
-	const withMaskCorrection = (original: AnyFn) =>
+	const pageArea = options?.pageArea;
+	// Difference-filling with this gray sends scan paper (255) exactly to the
+	// mapped white pole; ink lands near the light foreground.
+	const scanInvertGray =
+		pageArea && pageArea > 0 && mappedWhiteLuma !== null
+			? 255 - Math.round(mappedWhiteLuma)
+			: null;
+	// Captured pre-wrap: the difference fill must not run through the
+	// style-mapping fillRect wrapper installed below.
+	const pristineFillRect = target.fillRect;
+
+	type DestRect = [number, number, number, number];
+	const destRect = (args: readonly unknown[]): DestRect | null => {
+		if (args.length >= 9) {
+			return [args[5], args[6], args[7], args[8]] as DestRect;
+		}
+		if (args.length >= 5) {
+			return [args[1], args[2], args[3], args[4]] as DestRect;
+		}
+		const size = sourceSize(args[0] as CanvasImageSource);
+		if (!size) return null;
+		return [
+			(args[1] as number) ?? 0,
+			(args[2] as number) ?? 0,
+			size.width,
+			size.height,
+		];
+	};
+
+	// A qualifying draw papers the page under a plain composite. Checks run
+	// cheapest-first; pixel sampling (isScanPaperSource) comes last.
+	const scanInvertRect = (
+		self: CanvasRenderingContext2D,
+		args: readonly unknown[],
+	): DestRect | null => {
+		if (scanInvertGray === null || !pageArea) return null;
+		if (self.globalCompositeOperation !== "source-over") return null;
+		if (self.globalAlpha < 0.99) return null;
+		const filter = self.filter;
+		if (typeof filter === "string" && filter !== "none" && filter !== "")
+			return null;
+		const rect = destRect(args);
+		if (!rect) return null;
+		const t = self.getTransform();
+		const painted =
+			Math.abs(t.a * t.d - t.b * t.c) * Math.abs(rect[2] * rect[3]);
+		if (painted < SCAN_COVERAGE_MIN * pageArea) return null;
+		if (!isScanPaperSource(args[0] as CanvasImageSource)) return null;
+		return rect;
+	};
+
+	const withImageHandling = (original: AnyFn) =>
 		function (this: CanvasRenderingContext2D, ...args: never[]): unknown {
 			if (
 				mappedWhiteLuma !== null &&
@@ -152,8 +223,21 @@ export function applyContextRecolor(
 					const next = [corrected, ...args.slice(1)] as never[];
 					return original.apply(this, next);
 				}
+				return original.apply(this, args);
 			}
-			return original.apply(this, args);
+
+			const scanRect = scanInvertRect(this, args);
+			const result = original.apply(this, args);
+			if (scanRect) {
+				const [dx, dy, dw, dh] = scanRect;
+				this.save();
+				this.globalCompositeOperation = "difference";
+				this.globalAlpha = 1;
+				this.fillStyle = `rgb(${scanInvertGray}, ${scanInvertGray}, ${scanInvertGray})`;
+				pristineFillRect.call(this, dx, dy, dw, dh);
+				this.restore();
+			}
+			return result;
 		};
 
 	const withMappedStyle = (
@@ -197,7 +281,7 @@ export function applyContextRecolor(
 		record[name] = withMappedStyle(target[name] as AnyFn, "strokeStyle");
 	for (const name of GRADIENT_METHODS)
 		record[name] = withMappedStops(target[name] as AnyFn);
-	record.drawImage = withMaskCorrection(target.drawImage as AnyFn);
+	record.drawImage = withImageHandling(target.drawImage as AnyFn);
 
 	const cleanup = () => {
 		// A later applyContextRecolor call already replaced these wrappers.
