@@ -537,6 +537,25 @@ describe("scan inversion via applyContextRecolor", () => {
 		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
 	});
 
+	it("re-inverts a clipped rescan over already-inverted paper", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeScanSource(), 0, 0, 100, 100); // inverted scan
+		// a clipped page-covering redraw repaints the top region white…
+		ctx.save();
+		ctx.beginPath();
+		ctx.rect(0, 0, 100, 40);
+		ctx.clip();
+		ctx.drawImage(makeScanSource(), 0, 0, 100, 100);
+		ctx.restore();
+		// …and must be re-inverted within the clip; the rest stays inverted
+		for (const y of [10, 90]) {
+			const [pr, pg, pb] = rgbAt(ctx, 10, y);
+			const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+			expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(6);
+		}
+	});
+
 	it("restores pristine drawImage on cleanup", () => {
 		const ctx = makeCtx(100);
 		const cleanup = applyContextRecolor(ctx, testMap, {

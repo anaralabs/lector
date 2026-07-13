@@ -434,6 +434,22 @@ export function applyContextRecolor(
 				}
 			}
 		}
+		// A clipped page-covering draw repaints scan paper under its clip —
+		// possibly over already-inverted regions. The fill inherits the same
+		// live clip, so inverting NOW is exact: inside the clip everything was
+		// just repainted, outside it the fill cannot reach. It must run before
+		// the overlay guard (its bounds overlap covered state by definition on
+		// a rescan) and its unknown footprint never enters covered/pending
+		// geometry; pending strips may lie under it, so abandon them.
+		if (candidate.areaFraction >= SCAN_COVERAGE_MIN && candidate.clipped) {
+			if (candidate.inked) {
+				invertScanRect(self, candidate.rect, matrix);
+			}
+			pendingTiles.length = 0;
+			pendingTileArea = 0;
+			pendingHasInk = false;
+			return;
+		}
 		// White content landing on already-inverted paper is an overlay
 		// (logo, QR block, restated MRC layer) — inverting it again would
 		// un-invert those pixels.
@@ -455,19 +471,6 @@ export function applyContextRecolor(
 			// repainted whatever strips had accumulated — abandon them so a
 			// later flush can't difference-fill on top of the fresh layer.
 			if (!candidate.inked) {
-				pendingTiles.length = 0;
-				pendingTileArea = 0;
-				pendingHasInk = false;
-				return;
-			}
-			// The fills inherit the draw's clip, so a clipped draw inverts
-			// exactly the pixels it painted; its true footprint is unknown,
-			// though, so it never counts as covered/pending geometry.
-			if (candidate.clipped) {
-				invertScanRect(self, candidate.rect, matrix);
-				// Pending strips may partly lie under this clip-inverted
-				// region; a retroactive fill would flip it back. Abandon them
-				// (safe direction: those regions keep their light rendering).
 				pendingTiles.length = 0;
 				pendingTileArea = 0;
 				pendingHasInk = false;
