@@ -472,6 +472,71 @@ describe("scan inversion via applyContextRecolor", () => {
 		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
 	});
 
+	it("classifies sparse scans (signature-only pages) as inked", () => {
+		const source = document.createElement("canvas");
+		source.width = 200;
+		source.height = 200;
+		const sctx = source.getContext("2d")!;
+		sctx.fillStyle = "#ffffff";
+		sctx.fillRect(0, 0, 200, 200);
+		sctx.fillStyle = "#000000";
+		sctx.fillRect(60, 150, 40, 8); // one short signature stroke
+		expect(isScanPaperSource(source)).toBe(true);
+	});
+
+	it("re-evaluates the page after a white layer repaints an inverted scan", () => {
+		const white = document.createElement("canvas");
+		white.width = 100;
+		white.height = 100;
+		const wctx = white.getContext("2d")!;
+		wctx.fillStyle = "#ffffff";
+		wctx.fillRect(0, 0, 100, 100);
+
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeScanSource(), 0, 0, 100, 100); // inverted scan
+		ctx.drawImage(white, 0, 0); // MRC white layer repaints the page
+		const [wr, wg, wb] = rgbAt(ctx, 10, 10); // page is white again
+		expect(Math.min(wr, wg, wb)).toBeGreaterThan(240);
+		// strips after the repaint must not be blocked by stale covered state
+		ctx.drawImage(makeScanSource(), 0, 22, 100, 40, 0, 0, 100, 40);
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 40, 100, 40);
+		const [pr, pg, pb] = rgbAt(ctx, 10, 10);
+		const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+	});
+
+	it("aborts retroactive inversion when putImageData interleaves strips", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeScanSource(), 0, 22, 100, 30, 0, 0, 100, 30);
+		const photo = new ImageData(20, 10);
+		photo.data.fill(180);
+		ctx.putImageData(photo, 40, 5);
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 30, 100, 40);
+		ctx.drawImage(makeScanSource(), 0, 62, 100, 30, 0, 70, 100, 30);
+		const [r, g, b] = rgbAt(ctx, 10, 5); // page stays light
+		expect(Math.min(r, g, b)).toBeGreaterThan(240);
+	});
+
+	it("ignores invisible paints between strips", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeScanSource(), 0, 22, 100, 30, 0, 0, 100, 30);
+		// invisible OCR-style text ops must not invalidate the strips
+		ctx.globalAlpha = 0;
+		ctx.fillStyle = "#000000";
+		ctx.fillRect(10, 10, 30, 5);
+		ctx.globalAlpha = 1;
+		ctx.fillStyle = "transparent";
+		ctx.fillRect(10, 18, 30, 5);
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 30, 100, 40);
+		ctx.drawImage(makeScanSource(), 0, 62, 100, 30, 0, 70, 100, 30);
+		const [pr, pg, pb] = rgbAt(ctx, 10, 5); // strips inverted normally
+		const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+	});
+
 	it("restores pristine drawImage on cleanup", () => {
 		const ctx = makeCtx(100);
 		const cleanup = applyContextRecolor(ctx, testMap, {

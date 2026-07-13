@@ -416,6 +416,24 @@ export function applyContextRecolor(
 	) => {
 		const matrix = self.getTransform();
 		const bounds = tileBounds(matrix, candidate.rect);
+		// An unclipped page-covering draw repaints the canvas beneath it:
+		// covered state that lies (mostly) inside it is stale and must not
+		// bounce it as an "overlay" or block later strips in that area.
+		if (candidate.areaFraction >= SCAN_COVERAGE_MIN && !candidate.clipped) {
+			for (let i = coveredBounds.length - 1; i >= 0; i--) {
+				const covered = coveredBounds[i]!;
+				const intersection: DeviceBounds = [
+					Math.max(bounds[0], covered[0]),
+					Math.max(bounds[1], covered[1]),
+					Math.min(bounds[2], covered[2]),
+					Math.min(bounds[3], covered[3]),
+				];
+				const coveredArea = boundsArea(covered);
+				if (coveredArea > 0 && boundsArea(intersection) >= 0.8 * coveredArea) {
+					coveredBounds.splice(i, 1);
+				}
+			}
+		}
 		// White content landing on already-inverted paper is an overlay
 		// (logo, QR block, restated MRC layer) — inverting it again would
 		// un-invert those pixels.
@@ -536,8 +554,17 @@ export function applyContextRecolor(
 		styleProp: "fillStyle" | "strokeStyle",
 	) =>
 		function (this: CanvasRenderingContext2D, ...args: never[]): unknown {
-			paintSerial++;
 			const style = this[styleProp];
+			// Paints that cannot touch pixels (invisible OCR overlays) must
+			// not invalidate pending scan strips. Canvas normalizes
+			// 'transparent' to 'rgba(0, 0, 0, 0)' on readback.
+			if (
+				this.globalAlpha > 0 &&
+				style !== "transparent" &&
+				style !== "rgba(0, 0, 0, 0)"
+			) {
+				paintSerial++;
+			}
 			if (typeof style === "string") {
 				const mapped = map(style);
 				if (mapped !== style) {
@@ -574,6 +601,15 @@ export function applyContextRecolor(
 	for (const name of GRADIENT_METHODS)
 		record[name] = withMappedStops(target[name] as AnyFn);
 	record.drawImage = withImageHandling(target.drawImage as AnyFn);
+	const pristinePutImageData = target.putImageData as AnyFn;
+	record.putImageData = function (
+		this: CanvasRenderingContext2D,
+		...args: never[]
+	) {
+		// Direct pixel writes invalidate retroactive fills like any paint.
+		paintSerial++;
+		return pristinePutImageData.apply(this, args);
+	};
 	record.save = function (this: CanvasRenderingContext2D) {
 		clipFlags.push(clipFlags[clipFlags.length - 1]!);
 		return pristineSave.call(this);
@@ -595,6 +631,7 @@ export function applyContextRecolor(
 			...STROKE_METHODS,
 			...GRADIENT_METHODS,
 			"drawImage",
+			"putImageData",
 			"save",
 			"restore",
 			"clip",

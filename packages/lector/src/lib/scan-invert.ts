@@ -23,11 +23,13 @@ export const SCAN_TILE_DENSITY_MIN = 0.85;
 /** Fraction of near-white opaque pixels above which a source is scan paper. */
 export const SCAN_WHITE_MIN_FRACTION = 0.6;
 /**
- * Minimum fraction of dark "ink" pixels. A pure-white raster is an MRC
- * background layer (its ink lives in a separate dark layer that must stay
- * un-inverted to remain readable) or a blank page — skip both.
+ * Minimum count of dark "ink" pixels in the downsample. A pure-white raster
+ * is an MRC background layer (its ink lives in a separate dark layer that
+ * must stay un-inverted to remain readable) or a blank page — skip both.
+ * A single genuine dark sample suffices so sparse pages (a signature, a few
+ * lines) still qualify; downsample averaging already erases isolated noise.
  */
-export const SCAN_INK_MIN_FRACTION = 0.005;
+export const SCAN_INK_MIN_PIXELS = 1;
 /**
  * Minimum opaque fraction: scans are fully opaque; a cut-out PNG would let
  * the inversion fill bleed into its transparent holes.
@@ -40,7 +42,7 @@ export const SCAN_OPAQUE_MIN_FRACTION = 0.99;
  */
 export const SCAN_SATURATED_MAX_FRACTION = 0.15;
 
-const SAMPLE_TARGET_PX = 48;
+const SAMPLE_TARGET_PX = 64;
 
 export interface SourceCrop {
 	sx: number;
@@ -126,7 +128,7 @@ function sampleScanPaper(
 			white / total >= SCAN_WHITE_MIN_FRACTION &&
 			saturated / total <= SCAN_SATURATED_MAX_FRACTION;
 		if (!isPaper) return null;
-		return { inked: ink / total >= SCAN_INK_MIN_FRACTION };
+		return { inked: ink >= SCAN_INK_MIN_PIXELS };
 	} catch {
 		// Tainted or detached sources never qualify.
 		return null;
