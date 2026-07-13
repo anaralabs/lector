@@ -422,7 +422,7 @@ describe("scan inversion via applyContextRecolor", () => {
 		ctx.drawImage(makeScanSource(), 0, 62, 100, 30, 0, 70, 100, 30);
 		const [r, g, b] = rgbAt(ctx, 10, 5); // paper stays light
 		expect(Math.min(r, g, b)).toBeGreaterThan(240);
-		const [pr, pg, pb] = rgbAt(ctx, 45, 8); // photo untouched
+		const [pr, pg] = rgbAt(ctx, 45, 8); // photo untouched
 		expect(pr).toBeGreaterThan(150);
 		expect(pg).toBeLessThan(100);
 	});
