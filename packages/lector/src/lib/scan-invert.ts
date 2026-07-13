@@ -9,6 +9,17 @@
 
 /** Painted area relative to the page above which a draw "papers the page". */
 export const SCAN_COVERAGE_MIN = 0.7;
+/**
+ * Minimum painted fraction for a draw to count as a scan tile: some raster
+ * PDFs encode a page as strips/tiles whose areas only paper the page in sum.
+ */
+export const SCAN_TILE_MIN_FRACTION = 0.05;
+/**
+ * Minimum density (summed tile area / union bounding box area) for pending
+ * tiles to read as one contiguous scan: strips partitioning a page are dense,
+ * scattered white screenshots on a text page are not.
+ */
+export const SCAN_TILE_DENSITY_MIN = 0.85;
 /** Fraction of near-white opaque pixels above which a source is scan paper. */
 export const SCAN_WHITE_MIN_FRACTION = 0.6;
 /**
@@ -85,7 +96,7 @@ function isScanPaperSample(
 		let opaque = 0;
 		let saturated = 0;
 		for (let i = 0; i < data.length; i += 4) {
-			if (data[i + 3]! <= 200) continue;
+			if (data[i + 3]! < 250) continue;
 			opaque++;
 			const max = Math.max(data[i]!, data[i + 1]!, data[i + 2]!);
 			const min = Math.min(data[i]!, data[i + 1]!, data[i + 2]!);

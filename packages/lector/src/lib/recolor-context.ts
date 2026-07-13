@@ -2,6 +2,8 @@ import type { RenderColorMap } from "./dark-mode";
 import {
 	isScanPaperSource,
 	SCAN_COVERAGE_MIN,
+	SCAN_TILE_DENSITY_MIN,
+	SCAN_TILE_MIN_FRACTION,
 	sourceSize,
 } from "./scan-invert";
 
@@ -145,21 +147,40 @@ export function applyContextRecolor(
 	const mappedBlackLuma = parseHexLuma(map("#000000"));
 
 	const pageArea = options?.pageArea;
+	const scanEnabled =
+		!!pageArea &&
+		pageArea > 0 &&
+		mappedWhiteLuma !== null &&
+		mappedBlackLuma !== null;
 	// Difference-filling with this gray sends scan paper (255) exactly to the
-	// mapped white pole's luma; ink lands near the light foreground. A second
-	// color-blend fill then tints the neutral result toward the palette
-	// background, so tinted palettes (e.g. warm or blue darks) match vector
-	// pages instead of landing on plain gray.
-	const scanInvertGray =
-		pageArea && pageArea > 0 && mappedWhiteLuma !== null
-			? 255 - Math.round(mappedWhiteLuma)
-			: null;
-	const scanTintCss = scanInvertGray !== null ? map("#ffffff") : null;
+	// mapped white pole's luma; an affine luma remap then pins ink to the
+	// foreground pole (paper is a fixed point of the remap), and a final
+	// color-blend fill tints the neutral result toward the palette background
+	// so tinted palettes match vector pages instead of landing on plain gray.
+	const scanInvertGray = scanEnabled ? 255 - Math.round(mappedWhiteLuma) : null;
+	const scanTintCss = scanEnabled ? map("#ffffff") : null;
+	let inkScaleGray = 255;
+	let inkOffsetGray = 0;
+	if (scanEnabled) {
+		const inkLuma = 255 - mappedWhiteLuma; // where ink lands post-difference
+		const span = inkLuma - mappedWhiteLuma;
+		if (span > 8) {
+			const scale = Math.min(
+				1,
+				Math.max(0, (mappedBlackLuma - mappedWhiteLuma) / span),
+			);
+			inkScaleGray = Math.round(scale * 255);
+			inkOffsetGray = Math.round(mappedWhiteLuma * (1 - scale));
+		}
+	}
+	const needsInkRemap = inkScaleGray < 253 || inkOffsetGray > 2;
 	// Captured pre-wrap: the inversion fills must not run through the
 	// style-mapping fillRect wrapper installed below.
 	const pristineFillRect = target.fillRect;
 
 	type DestRect = [number, number, number, number];
+	type DeviceBounds = [number, number, number, number];
+
 	const destRect = (args: readonly unknown[]): DestRect | null => {
 		if (args.length >= 9) {
 			return [args[5], args[6], args[7], args[8]] as DestRect;
@@ -177,14 +198,14 @@ export function applyContextRecolor(
 		];
 	};
 
-	// A qualifying draw papers the page under a plain composite. Checks run
+	// A candidate draw paints white paper under a plain composite. Checks run
 	// cheapest-first; pixel sampling (isScanPaperSource) comes last, and for
 	// cropped draws it samples exactly the drawn source region.
-	const scanInvertRect = (
+	const scanCandidate = (
 		self: CanvasRenderingContext2D,
 		args: readonly unknown[],
-	): DestRect | null => {
-		if (scanInvertGray === null || !pageArea) return null;
+	): { rect: DestRect; areaFraction: number } | null => {
+		if (!scanEnabled || !pageArea) return null;
 		if (self.globalCompositeOperation !== "source-over") return null;
 		if (self.globalAlpha < 0.99) return null;
 		const filter = self.filter;
@@ -195,7 +216,8 @@ export function applyContextRecolor(
 		const t = self.getTransform();
 		const painted =
 			Math.abs(t.a * t.d - t.b * t.c) * Math.abs(rect[2] * rect[3]);
-		if (painted < SCAN_COVERAGE_MIN * pageArea) return null;
+		const areaFraction = painted / pageArea;
+		if (areaFraction < SCAN_TILE_MIN_FRACTION) return null;
 		const crop =
 			args.length >= 9
 				? {
@@ -206,7 +228,105 @@ export function applyContextRecolor(
 					}
 				: undefined;
 		if (!isScanPaperSource(args[0] as CanvasImageSource, crop)) return null;
-		return rect;
+		return { rect, areaFraction };
+	};
+
+	const grayCss = (value: number) => `rgb(${value}, ${value}, ${value})`;
+
+	const invertScanRect = (
+		self: CanvasRenderingContext2D,
+		rect: DestRect,
+		matrix: DOMMatrix,
+	) => {
+		self.save();
+		self.setTransform(matrix);
+		self.globalAlpha = 1;
+		self.globalCompositeOperation = "difference";
+		self.fillStyle = grayCss(scanInvertGray ?? 0);
+		pristineFillRect.call(self, rect[0], rect[1], rect[2], rect[3]);
+		if (needsInkRemap) {
+			self.globalCompositeOperation = "multiply";
+			self.fillStyle = grayCss(inkScaleGray);
+			pristineFillRect.call(self, rect[0], rect[1], rect[2], rect[3]);
+			if (inkOffsetGray > 0) {
+				self.globalCompositeOperation = "lighter";
+				self.fillStyle = grayCss(inkOffsetGray);
+				pristineFillRect.call(self, rect[0], rect[1], rect[2], rect[3]);
+			}
+		}
+		if (scanTintCss) {
+			// Keep the inverted luma, adopt the palette's hue/chroma.
+			self.globalCompositeOperation = "color";
+			self.fillStyle = scanTintCss;
+			pristineFillRect.call(self, rect[0], rect[1], rect[2], rect[3]);
+		}
+		self.restore();
+	};
+
+	// Tiled scans: some raster PDFs paint a page as strips whose areas only
+	// paper the page in sum. Pending white tiles accumulate (per render pass —
+	// the wrapper is re-applied per render) and are inverted retroactively
+	// once they sum to page coverage AND tile densely (summed area ≈ their
+	// union box), which scattered white screenshots on a text page never do.
+	// Overlapping tiles are never accumulated: a second difference fill would
+	// un-invert the overlap (MRC layer stacks land here).
+	interface PendingTile {
+		rect: DestRect;
+		matrix: DOMMatrix;
+		bounds: DeviceBounds;
+	}
+	let scanPageDetected = false;
+	let pendingTileArea = 0;
+	const pendingTiles: PendingTile[] = [];
+
+	const tileBounds = (matrix: DOMMatrix, rect: DestRect): DeviceBounds => {
+		const corners = [
+			matrix.transformPoint({ x: rect[0], y: rect[1] }),
+			matrix.transformPoint({ x: rect[0] + rect[2], y: rect[1] }),
+			matrix.transformPoint({ x: rect[0], y: rect[1] + rect[3] }),
+			matrix.transformPoint({ x: rect[0] + rect[2], y: rect[1] + rect[3] }),
+		];
+		return [
+			Math.min(...corners.map((c) => c.x)),
+			Math.min(...corners.map((c) => c.y)),
+			Math.max(...corners.map((c) => c.x)),
+			Math.max(...corners.map((c) => c.y)),
+		];
+	};
+
+	const boundsOverlap = (a: DeviceBounds, b: DeviceBounds) =>
+		a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+
+	const handleScanCandidate = (
+		self: CanvasRenderingContext2D,
+		candidate: { rect: DestRect; areaFraction: number },
+	) => {
+		const matrix = self.getTransform();
+		if (scanPageDetected || candidate.areaFraction >= SCAN_COVERAGE_MIN) {
+			scanPageDetected = true;
+			invertScanRect(self, candidate.rect, matrix);
+			return;
+		}
+		const bounds = tileBounds(matrix, candidate.rect);
+		if (pendingTiles.some((tile) => boundsOverlap(tile.bounds, bounds))) return;
+		pendingTiles.push({ rect: candidate.rect, matrix, bounds });
+		pendingTileArea += candidate.areaFraction;
+		if (pendingTileArea < SCAN_COVERAGE_MIN) return;
+		const union: DeviceBounds = [
+			Math.min(...pendingTiles.map((t) => t.bounds[0])),
+			Math.min(...pendingTiles.map((t) => t.bounds[1])),
+			Math.max(...pendingTiles.map((t) => t.bounds[2])),
+			Math.max(...pendingTiles.map((t) => t.bounds[3])),
+		];
+		const unionArea = (union[2] - union[0]) * (union[3] - union[1]);
+		if (unionArea <= 0) return;
+		const density = (pendingTileArea * (pageArea ?? 0)) / unionArea;
+		if (density < SCAN_TILE_DENSITY_MIN) return;
+		scanPageDetected = true;
+		for (const tile of pendingTiles) {
+			invertScanRect(self, tile.rect, tile.matrix);
+		}
+		pendingTiles.length = 0;
 	};
 
 	const withImageHandling = (original: AnyFn) =>
@@ -240,23 +360,9 @@ export function applyContextRecolor(
 				return original.apply(this, args);
 			}
 
-			const scanRect = scanInvertRect(this, args);
+			const candidate = scanCandidate(this, args);
 			const result = original.apply(this, args);
-			if (scanRect) {
-				const [dx, dy, dw, dh] = scanRect;
-				this.save();
-				this.globalAlpha = 1;
-				this.globalCompositeOperation = "difference";
-				this.fillStyle = `rgb(${scanInvertGray}, ${scanInvertGray}, ${scanInvertGray})`;
-				pristineFillRect.call(this, dx, dy, dw, dh);
-				if (scanTintCss) {
-					// Keep the inverted luma, adopt the palette's hue/chroma.
-					this.globalCompositeOperation = "color";
-					this.fillStyle = scanTintCss;
-					pristineFillRect.call(this, dx, dy, dw, dh);
-				}
-				this.restore();
-			}
+			if (candidate) handleScanCandidate(this, candidate);
 			return result;
 		};
 

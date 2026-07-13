@@ -243,6 +243,62 @@ describe("scan inversion via applyContextRecolor", () => {
 		expect(b).toBeGreaterThan(r + 8);
 	});
 
+	it("pins ink to the foreground pole on asymmetric palettes", () => {
+		// black background, mid-gray foreground: without the remap, ink would
+		// land at 255 instead of the configured 200.
+		const asymmetricMap = (color: string) =>
+			color === "#ffffff" || color === "white"
+				? "#000000"
+				: color === "#000000" || color === "black"
+					? "#c8c8c8"
+					: color;
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, asymmetricMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeScanSource(), 0, 0, 100, 100);
+		const [pr, pg, pb] = rgbAt(ctx, 10, 10); // paper → background pole (0)
+		expect(Math.max(pr, pg, pb)).toBeLessThan(12);
+		const [ir, ig, ib] = rgbAt(ctx, 50, 50); // ink → foreground pole (200)
+		const inkLuma = 0.3 * ir + 0.59 * ig + 0.11 * ib;
+		expect(Math.abs(inkLuma - 200)).toBeLessThan(12);
+	});
+
+	it("inverts tiled scans once the strips paper the page", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		// two half-page strips, neither passes the per-draw coverage gate
+		ctx.drawImage(makeScanSource(), 0, 0, 100, 50, 0, 0, 100, 50);
+		ctx.drawImage(makeScanSource(), 0, 50, 100, 50, 0, 50, 100, 50);
+		for (const y of [10, 90]) {
+			const [pr, pg, pb] = rgbAt(ctx, 10, y);
+			const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+			expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+		}
+	});
+
+	it("does not invert scattered white figures on a text page", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		// four white screenshots totalling ~81% of the page, but separated by
+		// gutters — the density guard must keep them un-inverted
+		ctx.drawImage(makeScanSource(), 0, 0, 45, 45);
+		ctx.drawImage(makeScanSource(), 55, 0, 45, 45);
+		ctx.drawImage(makeScanSource(), 0, 55, 45, 45);
+		ctx.drawImage(makeScanSource(), 55, 55, 45, 45);
+		const [r, g, b] = rgbAt(ctx, 10, 10);
+		expect(Math.min(r, g, b)).toBeGreaterThan(240);
+	});
+
+	it("rejects semi-transparent white overlays", () => {
+		const source = document.createElement("canvas");
+		source.width = 100;
+		source.height = 100;
+		const sctx = source.getContext("2d")!;
+		sctx.globalAlpha = 0.8;
+		sctx.fillStyle = "#ffffff";
+		sctx.fillRect(0, 0, 100, 100);
+		expect(isScanPaperSource(source)).toBe(false);
+	});
+
 	it("restores pristine drawImage on cleanup", () => {
 		const ctx = makeCtx(100);
 		const cleanup = applyContextRecolor(ctx, testMap, {
