@@ -298,8 +298,9 @@ export function applyContextRecolor(
 	let pendingHasInk = false;
 	const pendingTiles: PendingTile[] = [];
 	const coveredBounds: DeviceBounds[] = [];
-	// Bumped on every vector fill/stroke: a retroactive tile fill is only
-	// safe when nothing vector was painted since the first pending strip.
+	// Bumped on every paint that is not scan paper (vector fills/strokes,
+	// photos, figures): a retroactive tile fill is only safe when nothing
+	// else was painted since the first pending strip.
 	let paintSerial = 0;
 	let pendingBaselineSerial = 0;
 
@@ -422,8 +423,10 @@ export function applyContextRecolor(
 		const tile: PendingTile = { rect: candidate.rect, matrix, bounds };
 		// Disjoint white paper arriving on a page already proven to be a scan
 		// is a continuation strip (blank margins included) — invert in place.
+		// The draw just repainted its whole rect, so no earlier fill survives
+		// under it and the inversion applies to the full rect.
 		if (coveredBounds.length > 0 && !candidate.clipped) {
-			invertTileRemainder(self, tile, coveredBounds);
+			invertScanRect(self, tile.rect, tile.matrix);
 			coveredBounds.push(tile.bounds);
 			return;
 		}
@@ -437,6 +440,12 @@ export function applyContextRecolor(
 			// though, so it never counts as covered/pending geometry.
 			if (candidate.clipped) {
 				invertScanRect(self, candidate.rect, matrix);
+				// Pending strips may partly lie under this clip-inverted
+				// region; a retroactive fill would flip it back. Abandon them
+				// (safe direction: those regions keep their light rendering).
+				pendingTiles.length = 0;
+				pendingTileArea = 0;
+				pendingHasInk = false;
 				return;
 			}
 			invertScanRect(self, tile.rect, tile.matrix);
@@ -507,6 +516,9 @@ export function applyContextRecolor(
 			}
 
 			const candidate = scanCandidate(this, args);
+			// Non-paper draws (photos, figures) invalidate retroactive fills
+			// the same way vector paints do.
+			if (!candidate) paintSerial++;
 			const result = original.apply(this, args);
 			if (candidate) handleScanCandidate(this, candidate);
 			return result;

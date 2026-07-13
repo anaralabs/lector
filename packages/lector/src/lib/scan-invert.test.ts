@@ -412,6 +412,42 @@ describe("scan inversion via applyContextRecolor", () => {
 		expect(Math.min(or_, og, ob)).toBeGreaterThan(240);
 	});
 
+	it("abandons retroactive inversion when a photo interleaves strips", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeScanSource(), 0, 22, 100, 30, 0, 0, 100, 30);
+		// a small photo lands between strips — retro fill would invert it
+		ctx.drawImage(makeColorfulSource(), 40, 5, 20, 15);
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 30, 100, 40);
+		ctx.drawImage(makeScanSource(), 0, 62, 100, 30, 0, 70, 100, 30);
+		const [r, g, b] = rgbAt(ctx, 10, 5); // paper stays light
+		expect(Math.min(r, g, b)).toBeGreaterThan(240);
+		const [pr, pg, pb] = rgbAt(ctx, 45, 8); // photo untouched
+		expect(pr).toBeGreaterThan(150);
+		expect(pg).toBeLessThan(100);
+	});
+
+	it("keeps retroactive fills out of clip-inverted regions", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		// a pending strip accumulates…
+		ctx.drawImage(makeScanSource(), 0, 22, 100, 30, 0, 0, 100, 30);
+		// …then a clipped page-covering scan inverts part of that strip
+		ctx.save();
+		ctx.beginPath();
+		ctx.rect(0, 0, 100, 20);
+		ctx.clip();
+		ctx.drawImage(makeScanSource(), 0, 0, 100, 100);
+		ctx.restore();
+		// …then the rest of the page arrives and triggers the retro fill
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 30, 100, 40);
+		ctx.drawImage(makeScanSource(), 0, 62, 100, 30, 0, 70, 100, 30);
+		// the clip-inverted region must not be difference-filled again
+		const [cr, cg, cb] = rgbAt(ctx, 10, 10);
+		const clippedLuma = 0.3 * cr + 0.59 * cg + 0.11 * cb;
+		expect(Math.abs(clippedLuma - POLE_LUMA)).toBeLessThan(6);
+	});
+
 	it("restores pristine drawImage on cleanup", () => {
 		const ctx = makeCtx(100);
 		const cleanup = applyContextRecolor(ctx, testMap, {
