@@ -715,6 +715,20 @@ describe("scan inversion via applyContextRecolor", () => {
 		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
 	});
 
+	it("re-inverts large restated layers mostly inside covered area", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeScanSource(), 0, 0, 100, 100); // inverted scan
+		// a 60%-page restated layer repaints mostly-covered area white —
+		// too large to be an overlay, so it re-inverts
+		ctx.drawImage(makeScanSource(), 0, 22, 100, 48, 0, 10, 100, 60);
+		for (const y of [15, 65, 90]) {
+			const [pr, pg, pb] = rgbAt(ctx, 10, y);
+			const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+			expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+		}
+	});
+
 	it("restores pristine drawImage on cleanup", () => {
 		const ctx = makeCtx(100);
 		const cleanup = applyContextRecolor(ctx, testMap, {

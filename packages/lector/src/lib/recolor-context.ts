@@ -459,12 +459,13 @@ export function applyContextRecolor(
 			pendingHasInk = false;
 			return;
 		}
-		// White content mostly inside already-inverted regions is an overlay
-		// (logo, QR block, restated partial layer): its freshly repainted
-		// pixels must stay un-inverted. A strip merely BRUSHING covered area
-		// is a continuation — it repainted its whole rect, so the full-rect
-		// fill below is exact even across the overlap.
-		if (coveredBounds.length > 0) {
+		// SMALL white content mostly inside already-inverted regions is an
+		// overlay (logo, QR block): its freshly repainted pixels must stay
+		// un-inverted. Size disambiguates the rest — a LARGE mostly-inside
+		// draw is a restated scan layer, and any strip merely brushing
+		// covered area is a continuation; both repainted their whole rect, so
+		// the full-rect fill below is exact even across the overlap.
+		if (coveredBounds.length > 0 && candidate.areaFraction <= 0.2) {
 			const candidateArea = boundsArea(bounds);
 			let insideArea = 0;
 			for (const covered of coveredBounds) {
