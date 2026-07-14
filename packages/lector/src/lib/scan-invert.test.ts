@@ -585,6 +585,58 @@ describe("scan inversion via applyContextRecolor", () => {
 		}
 	});
 
+	it("keeps ink evidence from strips a blank band did not repaint", () => {
+		const blank = document.createElement("canvas");
+		blank.width = 100;
+		blank.height = 70;
+		const bctx = blank.getContext("2d")!;
+		bctx.fillStyle = "#ffffff";
+		bctx.fillRect(0, 0, 100, 70);
+
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		// small inked strip first…
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 0, 100, 30);
+		// …then a large blank band that does NOT repaint it
+		ctx.drawImage(blank, 0, 30);
+		for (const y of [10, 80]) {
+			const [pr, pg, pb] = rgbAt(ctx, 10, y);
+			const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+			expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+		}
+	});
+
+	it("ignores active shadow state when inverting", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.shadowColor = "#ff0000";
+		ctx.shadowBlur = 12;
+		ctx.shadowOffsetX = 25;
+		ctx.shadowOffsetY = 25;
+		ctx.drawImage(makeScanSource(), 0, 0, 100, 100);
+		// paper lands on the pole with no red shadow smear anywhere
+		for (const [x, y] of [
+			[10, 10],
+			[90, 90],
+		] as const) {
+			const [r, g, b] = rgbAt(ctx, x, y);
+			const luma = 0.3 * r + 0.59 * g + 0.11 * b;
+			expect(Math.abs(luma - POLE_LUMA)).toBeLessThan(6);
+			expect(Math.abs(r - g)).toBeLessThan(12);
+		}
+	});
+
+	it("classifies crops with negative source dimensions", () => {
+		expect(
+			isScanPaperSource(makeScanSource(), {
+				sx: 100,
+				sy: 100,
+				sw: -100,
+				sh: -100,
+			}),
+		).toBe(true);
+	});
+
 	it("restores pristine drawImage on cleanup", () => {
 		const ctx = makeCtx(100);
 		const cleanup = applyContextRecolor(ctx, testMap, {

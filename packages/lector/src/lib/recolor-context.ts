@@ -257,6 +257,11 @@ export function applyContextRecolor(
 		self.save();
 		self.setTransform(matrix);
 		self.globalAlpha = 1;
+		// Shadow state from the image draw must not smear the fills.
+		self.shadowColor = "rgba(0, 0, 0, 0)";
+		self.shadowBlur = 0;
+		self.shadowOffsetX = 0;
+		self.shadowOffsetY = 0;
 		self.globalCompositeOperation = "difference";
 		self.fillStyle = grayCss(scanInvertGray ?? 0);
 		pristineFillRect.call(self, rect[0], rect[1], rect[2], rect[3]);
@@ -292,6 +297,9 @@ export function applyContextRecolor(
 		rect: DestRect;
 		matrix: DOMMatrix;
 		bounds: DeviceBounds;
+		/** Non-overlapping area contributed toward coverage, as a page fraction. */
+		area: number;
+		inked: boolean;
 	}
 	const OVERLAP_TOLERANCE = 0.2;
 	let pendingTileArea = 0;
@@ -454,40 +462,49 @@ export function applyContextRecolor(
 		// (logo, QR block, restated MRC layer) — inverting it again would
 		// un-invert those pixels.
 		if (overlapsAny(bounds, coveredBounds)) return;
-		const tile: PendingTile = { rect: candidate.rect, matrix, bounds };
 		// Disjoint white paper arriving on a page already proven to be a scan
 		// is a continuation strip (blank margins included) — invert in place.
 		// The draw just repainted its whole rect, so no earlier fill survives
 		// under it and the inversion applies to the full rect.
 		if (coveredBounds.length > 0 && !candidate.clipped) {
-			invertScanRect(self, tile.rect, tile.matrix);
-			coveredBounds.push(tile.bounds);
+			invertScanRect(self, candidate.rect, matrix);
+			coveredBounds.push(bounds);
 			return;
 		}
-		if (candidate.areaFraction >= SCAN_COVERAGE_MIN) {
-			// A page-covering pure-white raster can't invert on its own: its
-			// ink may live in a separate MRC layer that must stay readable, or
-			// the page may simply be blank. It repainted whatever strips had
-			// accumulated, so it REPLACES them as one big blank pending tile —
-			// a later inked tile completes the page (large blank tile + inked
-			// tile scans), while a dark MRC ink layer is a non-paper draw that
-			// bumps the paint serial and discards it.
-			if (!candidate.inked) {
-				pendingTiles.length = 0;
-				pendingHasInk = false;
-				pendingBaselineSerial = paintSerial;
-				pendingTiles.push(tile);
-				pendingTileArea = candidate.areaFraction;
-				return;
-			}
-			invertScanRect(self, tile.rect, tile.matrix);
-			coveredBounds.push(tile.bounds);
+		if (candidate.areaFraction >= SCAN_COVERAGE_MIN && candidate.inked) {
+			invertScanRect(self, candidate.rect, matrix);
+			coveredBounds.push(bounds);
 			// Strips that accumulated before the page-covering draw appeared:
 			// invert whatever parts of them it did not repaint.
 			flushPendingTiles(self);
 			return;
 		}
 		if (candidate.clipped) return;
+		if (candidate.areaFraction >= SCAN_COVERAGE_MIN) {
+			// A page-covering pure-white raster can't invert on its own: its
+			// ink may live in a separate MRC layer that must stay readable, or
+			// the page may simply be blank. It joins the tiling as a blank
+			// tile after pruning only the pending strips it actually repainted
+			// — disjoint inked strips keep their evidence ('inked strip + big
+			// blank band' scans complete), while a dark MRC ink layer is a
+			// non-paper draw that bumps the paint serial and discards the
+			// accumulation.
+			for (let i = pendingTiles.length - 1; i >= 0; i--) {
+				const pending = pendingTiles[i]!;
+				const intersection: DeviceBounds = [
+					Math.max(bounds[0], pending.bounds[0]),
+					Math.max(bounds[1], pending.bounds[1]),
+					Math.min(bounds[2], pending.bounds[2]),
+					Math.min(bounds[3], pending.bounds[3]),
+				];
+				const pendingArea = boundsArea(pending.bounds);
+				if (pendingArea > 0 && boundsArea(intersection) >= 0.8 * pendingArea) {
+					pendingTiles.splice(i, 1);
+				}
+			}
+			pendingTileArea = pendingTiles.reduce((sum, t) => sum + t.area, 0);
+			pendingHasInk = pendingTiles.some((t) => t.inked);
+		}
 		// Overlapping tiles are fine — the fills subtract already-filled
 		// regions — but only the non-overlapping remainder counts toward
 		// coverage, so restated layers can't inflate the sum.
@@ -509,7 +526,13 @@ export function applyContextRecolor(
 			return;
 		}
 		if (pendingTiles.length === 0) pendingBaselineSerial = paintSerial;
-		pendingTiles.push(tile);
+		pendingTiles.push({
+			rect: candidate.rect,
+			matrix,
+			bounds,
+			area: contributedArea,
+			inked: candidate.inked,
+		});
 		pendingTileArea += contributedArea;
 		pendingHasInk ||= candidate.inked;
 		if (pendingTileArea < SCAN_COVERAGE_MIN) return;

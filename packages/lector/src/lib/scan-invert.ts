@@ -157,8 +157,19 @@ export function classifyScanPaper(
 		const cached = bitmapVerdicts.get(bitmap);
 		if (cached !== undefined) return cached;
 	}
-	const region = crop ?? { sx: 0, sy: 0, sw: size.width, sh: size.height };
-	if (region.sw <= 0 || region.sh <= 0) return null;
+	const region = {
+		...(crop ?? { sx: 0, sy: 0, sw: size.width, sh: size.height }),
+	};
+	// drawImage accepts negative source dimensions (normalized rectangles).
+	if (region.sw < 0) {
+		region.sx += region.sw;
+		region.sw = -region.sw;
+	}
+	if (region.sh < 0) {
+		region.sy += region.sh;
+		region.sh = -region.sh;
+	}
+	if (region.sw === 0 || region.sh === 0) return null;
 	const verdict = sampleScanPaper(source, region);
 	if (bitmap) bitmapVerdicts.set(bitmap, verdict);
 	return verdict;
