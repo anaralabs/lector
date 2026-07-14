@@ -548,6 +548,41 @@ describe("scan inversion via applyContextRecolor", () => {
 		expect(Math.min(r, g, b)).toBeGreaterThan(240);
 	});
 
+	it("treats luminosity mask composes between strips as interleaved content", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeScanSource(), 0, 22, 100, 30, 0, 0, 100, 30);
+		// a luminosity soft-mask compose lands between strips
+		const mask = document.createElement("canvas");
+		mask.width = 100;
+		mask.height = 100;
+		mask.getContext("2d")!.fillStyle = "#ffffff";
+		mask.getContext("2d")!.fillRect(0, 0, 100, 100);
+		ctx.save();
+		ctx.globalCompositeOperation = "destination-in";
+		ctx.filter = "url(#pdf_luminosity_map_1)";
+		ctx.drawImage(mask, 0, 0);
+		ctx.restore();
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 30, 100, 40);
+		ctx.drawImage(makeScanSource(), 0, 62, 100, 30, 0, 70, 100, 30);
+		// retroactive inversion abandoned — the page stays light
+		const [r, g, b] = rgbAt(ctx, 10, 5);
+		expect(Math.min(r, g, b)).toBeGreaterThan(240);
+	});
+
+	it("ignores zero-alpha colored paints between strips", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeScanSource(), 0, 22, 100, 30, 0, 0, 100, 30);
+		ctx.fillStyle = "rgba(255, 255, 255, 0)"; // invisible non-black overlay
+		ctx.fillRect(10, 10, 30, 5);
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 30, 100, 40);
+		ctx.drawImage(makeScanSource(), 0, 62, 100, 30, 0, 70, 100, 30);
+		const [pr, pg, pb] = rgbAt(ctx, 10, 5); // strips inverted normally
+		const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+	});
+
 	it("ignores invisible paints between strips", () => {
 		const ctx = makeCtx(100);
 		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });

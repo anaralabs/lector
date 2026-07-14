@@ -599,6 +599,9 @@ export function applyContextRecolor(
 				const corrected = sourcePainted
 					? correctLuminosityMask(source, mappedWhiteLuma, mappedBlackLuma)
 					: null;
+				// A destination-in compose mutates pixels under pending strips
+				// — it invalidates retroactive fills like any paint.
+				paintSerial++;
 				if (corrected) {
 					const next = [corrected, ...args.slice(1)] as never[];
 					return original.apply(this, next);
@@ -622,15 +625,18 @@ export function applyContextRecolor(
 		function (this: CanvasRenderingContext2D, ...args: never[]): unknown {
 			const style = this[styleProp];
 			// Paints that cannot touch pixels (invisible OCR overlays) must
-			// not invalidate pending scan strips. Canvas normalizes
-			// 'transparent' to 'rgba(0, 0, 0, 0)' on readback.
-			if (
-				this.globalAlpha > 0 &&
-				style !== "transparent" &&
-				style !== "rgba(0, 0, 0, 0)"
-			) {
-				paintSerial++;
-			}
+			// not invalidate pending scan strips: zero global alpha or any
+			// zero-alpha color (canvas readback normalizes to 'rgba(r, g, b,
+			// 0)', keeping the channels). Only source-over is harmless —
+			// zero-alpha ERASES under composites like destination-in.
+			const invisible =
+				this.globalCompositeOperation === "source-over" &&
+				(this.globalAlpha === 0 ||
+					style === "transparent" ||
+					(typeof style === "string" &&
+						style.startsWith("rgba(") &&
+						style.endsWith(", 0)")));
+			if (!invisible) paintSerial++;
 			if (typeof style === "string") {
 				const mapped = map(style);
 				if (mapped !== style) {
