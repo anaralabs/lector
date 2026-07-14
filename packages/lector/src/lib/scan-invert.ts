@@ -111,15 +111,17 @@ export function sourceSize(
 	return null;
 }
 
+// `undefined` = sampling itself failed (canvas pressure, tainted source) and
+// the verdict must not be cached; `null` = definitively not scan paper.
 function sampleScanPaper(
 	source: CanvasImageSource,
 	crop: SourceCrop,
-): ScanPaperClass | null {
+): ScanPaperClass | null | undefined {
 	const scale = Math.min(1, SAMPLE_TARGET_PX / Math.max(crop.sw, crop.sh));
 	const w = Math.max(1, Math.round(crop.sw * scale));
 	const h = Math.max(1, Math.round(crop.sh * scale));
 	const ctx = getScratchContext(w, h);
-	if (!ctx) return null;
+	if (!ctx) return undefined;
 	try {
 		ctx.drawImage(source, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, w, h);
 		const { data } = ctx.getImageData(0, 0, w, h);
@@ -144,8 +146,7 @@ function sampleScanPaper(
 		if (!isPaper) return null;
 		return { inked: ink >= SCAN_INK_MIN_PIXELS };
 	} catch {
-		// Tainted or detached sources never qualify.
-		return null;
+		return undefined;
 	}
 }
 
@@ -185,6 +186,8 @@ export function classifyScanPaper(
 	}
 	if (region.sw === 0 || region.sh === 0) return null;
 	const verdict = sampleScanPaper(source, region);
+	// Transient failures are not verdicts — retry on the next draw.
+	if (verdict === undefined) return null;
 	if (bitmap) bitmapVerdicts.set(bitmap, verdict);
 	return verdict;
 }

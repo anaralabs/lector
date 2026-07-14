@@ -685,6 +685,21 @@ describe("scan inversion via applyContextRecolor", () => {
 		expect(Math.min(ir, ig, ib)).toBeGreaterThan(200);
 	});
 
+	it("inverts continuation strips that partially overlap covered area", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		// top 70% proves the page is a scan…
+		ctx.drawImage(makeScanSource(), 0, 22, 100, 48, 0, 0, 100, 70);
+		// …then a continuation strip overlaps it by ~30% of its own area
+		// while extending into still-light page area
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 55, 100, 45);
+		for (const y of [10, 60, 95]) {
+			const [pr, pg, pb] = rgbAt(ctx, 10, y);
+			const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+			expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+		}
+	});
+
 	it("restores pristine drawImage on cleanup", () => {
 		const ctx = makeCtx(100);
 		const cleanup = applyContextRecolor(ctx, testMap, {

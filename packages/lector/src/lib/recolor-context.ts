@@ -458,10 +458,25 @@ export function applyContextRecolor(
 			pendingHasInk = false;
 			return;
 		}
-		// White content landing on already-inverted paper is an overlay
-		// (logo, QR block, restated MRC layer) — inverting it again would
-		// un-invert those pixels.
-		if (overlapsAny(bounds, coveredBounds)) return;
+		// White content mostly inside already-inverted regions is an overlay
+		// (logo, QR block, restated partial layer): its freshly repainted
+		// pixels must stay un-inverted. A strip merely BRUSHING covered area
+		// is a continuation — it repainted its whole rect, so the full-rect
+		// fill below is exact even across the overlap.
+		if (coveredBounds.length > 0) {
+			const candidateArea = boundsArea(bounds);
+			let insideArea = 0;
+			for (const covered of coveredBounds) {
+				const intersection: DeviceBounds = [
+					Math.max(bounds[0], covered[0]),
+					Math.max(bounds[1], covered[1]),
+					Math.min(bounds[2], covered[2]),
+					Math.min(bounds[3], covered[3]),
+				];
+				insideArea += boundsArea(intersection);
+			}
+			if (candidateArea > 0 && insideArea >= 0.8 * candidateArea) return;
+		}
 		// Disjoint white paper arriving on a page already proven to be a scan
 		// is a continuation strip (blank margins included) — invert in place.
 		// The draw just repainted its whole rect, so no earlier fill survives
