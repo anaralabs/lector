@@ -66,6 +66,21 @@ export interface ScanPaperClass {
 // vary per call, so those are re-sampled per draw.
 const bitmapVerdicts = new WeakMap<ImageBitmap, ScanPaperClass | null>();
 
+// One reusable scratch canvas: sampling is synchronous and strip-encoded
+// pages can classify many draws per render — no per-draw allocations.
+let scratchCanvas: HTMLCanvasElement | null = null;
+function getScratchContext(
+	width: number,
+	height: number,
+): CanvasRenderingContext2D | null {
+	if (typeof document === "undefined") return null;
+	scratchCanvas ??= document.createElement("canvas");
+	// Resizing also clears the previous sample.
+	scratchCanvas.width = width;
+	scratchCanvas.height = height;
+	return scratchCanvas.getContext("2d", { willReadFrequently: true });
+}
+
 export function sourceSize(
 	source: CanvasImageSource,
 ): { width: number; height: number } | null {
@@ -97,14 +112,10 @@ function sampleScanPaper(
 	source: CanvasImageSource,
 	crop: SourceCrop,
 ): ScanPaperClass | null {
-	if (typeof document === "undefined") return null;
 	const scale = Math.min(1, SAMPLE_TARGET_PX / Math.max(crop.sw, crop.sh));
 	const w = Math.max(1, Math.round(crop.sw * scale));
 	const h = Math.max(1, Math.round(crop.sh * scale));
-	const tmp = document.createElement("canvas");
-	tmp.width = w;
-	tmp.height = h;
-	const ctx = tmp.getContext("2d", { willReadFrequently: true });
+	const ctx = getScratchContext(w, h);
 	if (!ctx) return null;
 	try {
 		ctx.drawImage(source, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, w, h);

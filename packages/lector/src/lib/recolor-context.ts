@@ -479,7 +479,13 @@ export function applyContextRecolor(
 			flushPendingTiles(self);
 			return;
 		}
-		if (candidate.clipped) return;
+		if (candidate.clipped) {
+			// It painted pixels we can't track (unknown clip footprint): a
+			// later retroactive fill over them would alter content, so it
+			// invalidates pending accumulation like any interleaved paint.
+			paintSerial++;
+			return;
+		}
 		if (candidate.areaFraction >= SCAN_COVERAGE_MIN) {
 			// A page-covering pure-white raster can't invert on its own: its
 			// ink may live in a separate MRC layer that must stay readable, or

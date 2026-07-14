@@ -637,6 +637,24 @@ describe("scan inversion via applyContextRecolor", () => {
 		).toBe(true);
 	});
 
+	it("treats clipped white draws between strips as interleaved content", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeScanSource(), 0, 22, 100, 30, 0, 0, 100, 30);
+		// a clipped white paint lands on the first strip…
+		ctx.save();
+		ctx.beginPath();
+		ctx.rect(10, 5, 20, 10);
+		ctx.clip();
+		ctx.drawImage(makeScanSource(), 0, 0, 100, 100);
+		ctx.restore();
+		// …so retroactive inversion must be abandoned
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 30, 100, 40);
+		ctx.drawImage(makeScanSource(), 0, 62, 100, 30, 0, 70, 100, 30);
+		const [r, g, b] = rgbAt(ctx, 50, 5);
+		expect(Math.min(r, g, b)).toBeGreaterThan(240);
+	});
+
 	it("restores pristine drawImage on cleanup", () => {
 		const ctx = makeCtx(100);
 		const cleanup = applyContextRecolor(ctx, testMap, {
