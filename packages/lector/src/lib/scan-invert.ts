@@ -11,9 +11,12 @@
 export const SCAN_COVERAGE_MIN = 0.7;
 /**
  * Minimum painted fraction for a draw to count as a scan tile: some raster
- * PDFs encode a page as strips/tiles whose areas only paper the page in sum.
+ * PDFs encode a page as strips or grids (8×8 grids put single tiles under
+ * 2%) whose areas only paper the page in sum. The floor only excludes
+ * degenerate sliver spam — the density, saturation, page-level ink and
+ * paint-serial guards do the real false-positive filtering.
  */
-export const SCAN_TILE_MIN_FRACTION = 0.05;
+export const SCAN_TILE_MIN_FRACTION = 0.005;
 /**
  * Minimum density (summed tile area / union bounding box area) for pending
  * tiles to read as one contiguous scan: strips partitioning a page are dense,

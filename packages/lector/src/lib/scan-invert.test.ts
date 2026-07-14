@@ -655,6 +655,36 @@ describe("scan inversion via applyContextRecolor", () => {
 		expect(Math.min(r, g, b)).toBeGreaterThan(240);
 	});
 
+	it("inverts scans encoded as a fine tile grid", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		const source = makeScanSource(100);
+		// 5×5 grid: 4% per tile, far below the old 5% floor
+		for (let row = 0; row < 5; row++) {
+			for (let col = 0; col < 5; col++) {
+				ctx.drawImage(
+					source,
+					col * 20,
+					row * 20,
+					20,
+					20,
+					col * 20,
+					row * 20,
+					20,
+					20,
+				);
+			}
+		}
+		for (const y of [10, 90]) {
+			const [pr, pg, pb] = rgbAt(ctx, 10, y);
+			const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+			expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+		}
+		// the ink bar row survives as light ink
+		const [ir, ig, ib] = rgbAt(ctx, 50, 50);
+		expect(Math.min(ir, ig, ib)).toBeGreaterThan(200);
+	});
+
 	it("restores pristine drawImage on cleanup", () => {
 		const ctx = makeCtx(100);
 		const cleanup = applyContextRecolor(ctx, testMap, {
