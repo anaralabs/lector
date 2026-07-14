@@ -700,6 +700,21 @@ describe("scan inversion via applyContextRecolor", () => {
 		}
 	});
 
+	it("stays enabled for 8-digit hex palette poles", () => {
+		const alphaMap = (color: string) =>
+			color === "#ffffff" || color === "white"
+				? "#181a1bff"
+				: color === "#000000" || color === "black"
+					? "#e8e6e3ff"
+					: color;
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, alphaMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeScanSource(), 0, 0, 100, 100);
+		const [pr, pg, pb] = rgbAt(ctx, 10, 10);
+		const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+	});
+
 	it("restores pristine drawImage on cleanup", () => {
 		const ctx = makeCtx(100);
 		const cleanup = applyContextRecolor(ctx, testMap, {

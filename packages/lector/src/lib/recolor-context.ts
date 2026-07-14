@@ -31,7 +31,8 @@ function ntscLuma(r: number, g: number, b: number): number {
 }
 
 function parseHexLuma(color: string): number | null {
-	if (!/^#[0-9a-f]{6}$/i.test(color)) return null;
+	// toCssColor emits #rrggbb, or #rrggbbaa for translucent palette colors.
+	if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return null;
 	return ntscLuma(
 		Number.parseInt(color.slice(1, 3), 16),
 		Number.parseInt(color.slice(3, 5), 16),
