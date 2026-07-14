@@ -360,22 +360,28 @@ describe("scan inversion via applyContextRecolor", () => {
 		}
 	});
 
-	it("abandons retroactive inversion when vector content interleaves strips", () => {
+	it("protects annotated strips but inverts clean ones painted after", () => {
 		const ctx = makeCtx(100);
 		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
 		ctx.drawImage(makeScanSource(), 0, 22, 100, 30, 0, 0, 100, 30);
 		// a vector annotation lands on the first strip…
 		ctx.fillStyle = "#ff0000";
 		ctx.fillRect(10, 10, 20, 5);
-		// …then the remaining strips arrive
+		// …then strips covering the rest of the page arrive clean
 		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 30, 100, 40);
 		ctx.drawImage(makeScanSource(), 0, 62, 100, 30, 0, 70, 100, 30);
-		// retro inversion would have flipped the annotation — page stays light
+		// the annotated strip stays light with the annotation untouched…
 		const [r, g, b] = rgbAt(ctx, 50, 5);
 		expect(Math.min(r, g, b)).toBeGreaterThan(240);
-		const [ar, ag, ab] = rgbAt(ctx, 15, 12); // annotation untouched
+		const [ar, ag, ab] = rgbAt(ctx, 15, 12);
 		expect(ar).toBeGreaterThan(150);
 		expect(Math.max(ag, ab)).toBeLessThan(100);
+		// …while the clean post-annotation strips invert
+		for (const y of [40, 90]) {
+			const [pr, pg, pb] = rgbAt(ctx, 10, y);
+			const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+			expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+		}
 	});
 
 	it("flushes accumulated strips when a page-covering draw arrives", () => {
@@ -733,21 +739,6 @@ describe("scan inversion via applyContextRecolor", () => {
 			const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
 			expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
 		}
-	});
-
-	it("stays enabled for 8-digit hex palette poles", () => {
-		const alphaMap = (color: string) =>
-			color === "#ffffff" || color === "white"
-				? "#181a1bff"
-				: color === "#000000" || color === "black"
-					? "#e8e6e3ff"
-					: color;
-		const ctx = makeCtx(100);
-		applyContextRecolor(ctx, alphaMap, { pageArea: 100 * 100 });
-		ctx.drawImage(makeScanSource(), 0, 0, 100, 100);
-		const [pr, pg, pb] = rgbAt(ctx, 10, 10);
-		const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
-		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
 	});
 
 	it("re-inverts large restated layers mostly inside covered area", () => {

@@ -31,8 +31,10 @@ function ntscLuma(r: number, g: number, b: number): number {
 }
 
 function parseHexLuma(color: string): number | null {
-	// toCssColor emits #rrggbb, or #rrggbbaa for translucent palette colors.
-	if (!/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) return null;
+	// Opaque poles only: a translucent paper pole is ill-defined for the
+	// difference fill (vector fills composite their alpha; a fill cannot),
+	// so translucent palettes keep scans un-inverted, like mask correction.
+	if (!/^#[0-9a-f]{6}$/i.test(color)) return null;
 	return ntscLuma(
 		Number.parseInt(color.slice(1, 3), 16),
 		Number.parseInt(color.slice(3, 5), 16),
@@ -301,6 +303,8 @@ export function applyContextRecolor(
 		/** Non-overlapping area contributed toward coverage, as a page fraction. */
 		area: number;
 		inked: boolean;
+		/** paintSerial at draw time — tiles older than a foreign paint are unsafe. */
+		serial: number;
 	}
 	const OVERLAP_TOLERANCE = 0.2;
 	let pendingTileArea = 0;
@@ -400,14 +404,38 @@ export function applyContextRecolor(
 		}
 	};
 
+	const pendingTriggerReady = () => {
+		if (pendingTileArea < SCAN_COVERAGE_MIN || !pendingHasInk) return false;
+		const union: DeviceBounds = [
+			Math.min(...pendingTiles.map((t) => t.bounds[0])),
+			Math.min(...pendingTiles.map((t) => t.bounds[1])),
+			Math.max(...pendingTiles.map((t) => t.bounds[2])),
+			Math.max(...pendingTiles.map((t) => t.bounds[3])),
+		];
+		const unionArea = boundsArea(union);
+		if (unionArea <= 0) return false;
+		return (
+			(pendingTileArea * (pageArea ?? 0)) / unionArea >= SCAN_TILE_DENSITY_MIN
+		);
+	};
+
 	const flushPendingTiles = (self: CanvasRenderingContext2D) => {
-		// Vector content painted between strips (annotations, signatures)
-		// would be inverted by a retroactive fill — leave the page as-is.
-		if (paintSerial === pendingBaselineSerial) {
-			for (const pending of pendingTiles) {
-				invertTileRemainder(self, pending, coveredBounds);
-				coveredBounds.push(pending.bounds);
-			}
+		// Content painted between strips (annotations, watermarks, photos)
+		// would be inverted by a retroactive fill — but only tiles OLDER than
+		// the last foreign paint are unsafe. Keep the clean suffix so a scan
+		// painted after a watermark still accumulates and inverts.
+		if (paintSerial !== pendingBaselineSerial) {
+			const kept = pendingTiles.filter((t) => t.serial === paintSerial);
+			pendingTiles.length = 0;
+			pendingTiles.push(...kept);
+			pendingTileArea = kept.reduce((sum, t) => sum + t.area, 0);
+			pendingHasInk = kept.some((t) => t.inked);
+			pendingBaselineSerial = paintSerial;
+			if (pendingTiles.length === 0 || !pendingTriggerReady()) return;
+		}
+		for (const pending of pendingTiles) {
+			invertTileRemainder(self, pending, coveredBounds);
+			coveredBounds.push(pending.bounds);
 		}
 		pendingTiles.length = 0;
 		pendingTileArea = 0;
@@ -555,23 +583,13 @@ export function applyContextRecolor(
 			bounds,
 			area: contributedArea,
 			inked: candidate.inked,
+			serial: paintSerial,
 		});
 		pendingTileArea += contributedArea;
 		pendingHasInk ||= candidate.inked;
-		if (pendingTileArea < SCAN_COVERAGE_MIN) return;
 		// Blank tiles count toward coverage, but a page only inverts when its
 		// strips carry ink somewhere (pure-white stacks are MRC backgrounds).
-		if (!pendingHasInk) return;
-		const union: DeviceBounds = [
-			Math.min(...pendingTiles.map((t) => t.bounds[0])),
-			Math.min(...pendingTiles.map((t) => t.bounds[1])),
-			Math.max(...pendingTiles.map((t) => t.bounds[2])),
-			Math.max(...pendingTiles.map((t) => t.bounds[3])),
-		];
-		const unionArea = boundsArea(union);
-		if (unionArea <= 0) return;
-		const density = (pendingTileArea * (pageArea ?? 0)) / unionArea;
-		if (density < SCAN_TILE_DENSITY_MIN) return;
+		if (!pendingTriggerReady()) return;
 		flushPendingTiles(self);
 	};
 
