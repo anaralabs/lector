@@ -576,6 +576,21 @@ describe("scan inversion via applyContextRecolor", () => {
 		expect(Math.min(r, g, b)).toBeGreaterThan(240);
 	});
 
+	it("aborts retroactive inversion when clearRect interleaves strips", () => {
+		const ctx = makeCtx(100);
+		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });
+		ctx.drawImage(makeScanSource(), 0, 22, 100, 30, 0, 0, 100, 30);
+		ctx.clearRect(40, 5, 20, 10); // erases part of the first strip
+		ctx.drawImage(makeScanSource(), 0, 30, 100, 40, 0, 30, 100, 40);
+		ctx.drawImage(makeScanSource(), 0, 62, 100, 30, 0, 70, 100, 30);
+		// the erased strip stays un-inverted; later clean strips invert
+		const [r, g, b] = rgbAt(ctx, 10, 5);
+		expect(Math.min(r, g, b)).toBeGreaterThan(240);
+		const [pr, pg, pb] = rgbAt(ctx, 10, 40);
+		const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+	});
+
 	it("ignores zero-alpha colored paints between strips", () => {
 		const ctx = makeCtx(100);
 		applyContextRecolor(ctx, testMap, { pageArea: 100 * 100 });

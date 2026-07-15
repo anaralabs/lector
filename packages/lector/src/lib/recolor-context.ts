@@ -700,6 +700,15 @@ export function applyContextRecolor(
 		paintSerial++;
 		return pristinePutImageData.apply(this, args);
 	};
+	const pristineClearRect = target.clearRect as AnyFn;
+	record.clearRect = function (
+		this: CanvasRenderingContext2D,
+		...args: never[]
+	) {
+		// Erasing pixels invalidates retroactive fills like any paint.
+		paintSerial++;
+		return pristineClearRect.apply(this, args);
+	};
 	record.save = function (this: CanvasRenderingContext2D) {
 		clipFlags.push(clipFlags[clipFlags.length - 1]!);
 		return pristineSave.call(this);
@@ -722,6 +731,7 @@ export function applyContextRecolor(
 			...GRADIENT_METHODS,
 			"drawImage",
 			"putImageData",
+			"clearRect",
 			"save",
 			"restore",
 			"clip",
