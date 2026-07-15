@@ -386,10 +386,11 @@ export const useDetailCanvasLayer = ({
 
 			// Native dark mode: recolor at draw time; `background` stays the
 			// original color and is mapped by the wrapped fillRect exactly once.
-			if (recolor)
-				applyContextRecolor(bufferCtx, recolor, {
-					pageArea: detailViewport.width * detailViewport.height,
-				});
+			const restoreRecolor = recolor
+				? applyContextRecolor(bufferCtx, recolor, {
+						pageArea: detailViewport.width * detailViewport.height,
+					})
+				: null;
 
 			const releaseBuffer = () => {
 				buffer.width = 0;
@@ -437,6 +438,10 @@ export const useDetailCanvasLayer = ({
 							? `dark:${state.darkModeColors.background},${state.darkModeColors.foreground}`
 							: "light";
 					if (currentRecolorKey !== recolorKey) return;
+
+					// Natural, still-current completion — finalize before the
+					// blit so a blank scanned page's fills land on the buffer.
+					restoreRecolor?.(true);
 
 					// Swap: update the visible detail canvas in one go
 					detailCanvas.width = actualWidth;
@@ -550,6 +555,10 @@ export const useDetailCanvasLayer = ({
 			}
 
 			void renderingTask?.cancel();
+			// Null the task too (same as hideDetailCanvas): cancel() no-ops on
+			// an internally-completed task, and the swap's identity guard must
+			// catch it so a fulfill-after-teardown can't finalize or blit.
+			renderingTask = null;
 			// Don't destroy canvas content — stale detail is better than a
 			// white flash. The next effect run will hide or replace it.
 		};

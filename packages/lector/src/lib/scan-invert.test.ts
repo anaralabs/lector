@@ -770,6 +770,98 @@ describe("scan inversion via applyContextRecolor", () => {
 		}
 	});
 
+	it("inverts genuinely blank scanned pages at end of render", () => {
+		const white = document.createElement("canvas");
+		white.width = 100;
+		white.height = 100;
+		const wctx = white.getContext("2d")!;
+		wctx.fillStyle = "#ffffff";
+		wctx.fillRect(0, 0, 100, 100);
+
+		const ctx = makeCtx(100);
+		const cleanup = applyContextRecolor(ctx, testMap, {
+			pageArea: 100 * 100,
+		});
+		ctx.drawImage(white, 0, 0); // an all-white scanned page
+		// still light mid-render: an MRC ink layer could yet arrive…
+		const [mr, mg, mb] = rgbAt(ctx, 10, 10);
+		expect(Math.min(mr, mg, mb)).toBeGreaterThan(240);
+		// …but at natural end of render nothing came: a blank scan page
+		cleanup(true);
+		const [pr, pg, pb] = rgbAt(ctx, 10, 10);
+		const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+	});
+
+	it("finalizes clean blank tiles painted after a foreign paint", () => {
+		const white = document.createElement("canvas");
+		white.width = 100;
+		white.height = 100;
+		const wctx = white.getContext("2d")!;
+		wctx.fillStyle = "#ffffff";
+		wctx.fillRect(0, 0, 100, 100);
+
+		const ctx = makeCtx(100);
+		const cleanup = applyContextRecolor(ctx, testMap, {
+			pageArea: 100 * 100,
+		});
+		// an early blank strip, then a foreign paint…
+		ctx.drawImage(white, 0, 0, 100, 20);
+		ctx.fillStyle = "#ff0000";
+		ctx.fillRect(10, 5, 20, 5);
+		// …then the real blank page repaints everything, clean
+		ctx.drawImage(white, 0, 0);
+		cleanup(true);
+		const [pr, pg, pb] = rgbAt(ctx, 50, 50);
+		const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+	});
+
+	it("does not finalize blank pages on teardown or cancelled renders", () => {
+		const white = document.createElement("canvas");
+		white.width = 100;
+		white.height = 100;
+		const wctx = white.getContext("2d")!;
+		wctx.fillStyle = "#ffffff";
+		wctx.fillRect(0, 0, 100, 100);
+
+		const ctx = makeCtx(100);
+		const cleanup = applyContextRecolor(ctx, testMap, {
+			pageArea: 100 * 100,
+		});
+		ctx.drawImage(white, 0, 0);
+		// plain cleanup = rewrap/teardown/cancel: the ink layer may simply
+		// not have been drawn yet, so the page must stay light
+		cleanup();
+		const [r, g, b] = rgbAt(ctx, 10, 10);
+		expect(Math.min(r, g, b)).toBeGreaterThan(240);
+	});
+
+	it("keeps true MRC pages light through end of render", () => {
+		const white = document.createElement("canvas");
+		white.width = 100;
+		white.height = 100;
+		const wctx = white.getContext("2d")!;
+		wctx.fillStyle = "#ffffff";
+		wctx.fillRect(0, 0, 100, 100);
+		const inkLayer = document.createElement("canvas");
+		inkLayer.width = 100;
+		inkLayer.height = 100;
+		const ictx = inkLayer.getContext("2d")!;
+		ictx.fillStyle = "#000000";
+		ictx.fillRect(10, 20, 60, 4);
+
+		const ctx = makeCtx(100);
+		const cleanup = applyContextRecolor(ctx, testMap, {
+			pageArea: 100 * 100,
+		});
+		ctx.drawImage(white, 0, 0);
+		ctx.drawImage(inkLayer, 0, 0); // non-paper draw bumps the serial
+		cleanup(true);
+		const [r, g, b] = rgbAt(ctx, 10, 10); // stays light — real MRC page
+		expect(Math.min(r, g, b)).toBeGreaterThan(240);
+	});
+
 	it("restores pristine drawImage on cleanup", () => {
 		const ctx = makeCtx(100);
 		const cleanup = applyContextRecolor(ctx, testMap, {
