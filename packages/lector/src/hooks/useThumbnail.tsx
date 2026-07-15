@@ -98,7 +98,7 @@ export const useThumbnail = (
 				// background fill is mapped by the wrapped fillRect). The context
 				// is long-lived, so restore even when render() throws
 				// synchronously, and strip stale wrappers before light renders.
-				let restoreRecolor: (() => void) | null = null;
+				let restoreRecolor: ((finalizeRender?: boolean) => void) | null = null;
 				if (recolor) {
 					restoreRecolor = applyContextRecolor(context, recolor, {
 						pageArea: scaledViewport.width * scaledViewport.height,
@@ -116,6 +116,9 @@ export const useThumbnail = (
 
 					renderTaskRef.current = renderTask;
 					await renderTask.promise;
+					// Natural completion (cleanup is idempotent; the finally
+					// below is then a no-op).
+					restoreRecolor?.(true);
 				} finally {
 					restoreRecolor?.();
 				}

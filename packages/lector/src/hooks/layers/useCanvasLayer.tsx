@@ -363,7 +363,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		// strip any wrapper a still-pending dark render may have left on the
 		// context (matters in the no-buffer fallback, where renderCtx is the
 		// long-lived visible canvas context).
-		let restoreRecolor: (() => void) | null = null;
+		let restoreRecolor: ((finalizeRender?: boolean) => void) | null = null;
 		if (recolor) {
 			restoreRecolor = applyContextRecolor(renderCtx, recolor, {
 				pageArea: viewport.width * viewport.height,
@@ -389,11 +389,20 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		}
 
 		renderingTask.promise
-			.finally(() => {
-				// Matters for the no-buffer fallback, where renderCtx is the
-				// long-lived visible canvas context.
-				restoreRecolor?.();
-			})
+			.then(
+				() => {
+					// Natural completion: lets an inkless papered page finalize
+					// as a blank scanned page.
+					restoreRecolor?.(true);
+				},
+				(error) => {
+					// Matters for the no-buffer fallback, where renderCtx is the
+					// long-lived visible canvas context. No finalize: a cancelled
+					// render proves nothing about pending blank tiles.
+					restoreRecolor?.();
+					throw error;
+				},
+			)
 			.then(() => {
 				if (cancelled) {
 					releaseBuffer();

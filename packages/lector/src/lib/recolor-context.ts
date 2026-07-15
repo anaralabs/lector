@@ -133,13 +133,15 @@ export interface RecolorContextOptions {
  * (policy in ./scan-invert.ts).
  *
  * Wrapping installs own properties on the context instance (the prototype is
- * never modified). Returns a cleanup that restores the pristine context.
+ * never modified). Returns a cleanup that restores the pristine context; pass
+ * finalizeRender=true only when the render completed naturally, which lets a
+ * papered-but-inkless page finalize as a genuinely blank scanned page.
  */
 export function applyContextRecolor(
 	ctx: CanvasRenderingContext2D,
 	map: RenderColorMap,
 	options?: RecolorContextOptions,
-): () => void {
+): (finalizeRender?: boolean) => void {
 	const target = ctx as RecolorableContext;
 	// Re-wrapping replaces the previous map instead of stacking wrappers.
 	target[RECOLOR_CLEANUP]?.();
@@ -740,10 +742,13 @@ export function applyContextRecolor(
 		pendingHasInk = false;
 	};
 
-	const cleanup = () => {
+	// finalizeRender must be true only on NATURAL render completion: rewraps,
+	// teardown and cancelled renders prove nothing about a pending blank page
+	// (its ink layer may simply not have been drawn yet).
+	const cleanup = (finalizeRender = false) => {
 		// A later applyContextRecolor call already replaced these wrappers.
 		if (target[RECOLOR_CLEANUP] !== cleanup) return;
-		finalizeBlankScanPage();
+		if (finalizeRender) finalizeBlankScanPage();
 		for (const name of [
 			...FILL_METHODS,
 			...STROKE_METHODS,

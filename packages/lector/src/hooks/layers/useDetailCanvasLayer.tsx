@@ -386,10 +386,11 @@ export const useDetailCanvasLayer = ({
 
 			// Native dark mode: recolor at draw time; `background` stays the
 			// original color and is mapped by the wrapped fillRect exactly once.
-			if (recolor)
-				applyContextRecolor(bufferCtx, recolor, {
-					pageArea: detailViewport.width * detailViewport.height,
-				});
+			const restoreRecolor = recolor
+				? applyContextRecolor(bufferCtx, recolor, {
+						pageArea: detailViewport.width * detailViewport.height,
+					})
+				: null;
 
 			const releaseBuffer = () => {
 				buffer.width = 0;
@@ -425,6 +426,9 @@ export const useDetailCanvasLayer = ({
 
 			currentRenderingTask.promise
 				.then(() => {
+					// Natural completion — finalize before any blit so a blank
+					// scanned page's fills land on the buffer.
+					restoreRecolor?.(true);
 					if (renderingTask !== currentRenderingTask) return;
 
 					// Same guard as the base canvas: a render finishing inside the
