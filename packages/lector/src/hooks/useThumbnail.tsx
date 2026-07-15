@@ -100,7 +100,9 @@ export const useThumbnail = (
 				// synchronously, and strip stale wrappers before light renders.
 				let restoreRecolor: (() => void) | null = null;
 				if (recolor) {
-					restoreRecolor = applyContextRecolor(context, recolor);
+					restoreRecolor = applyContextRecolor(context, recolor, {
+						pageArea: scaledViewport.width * scaledViewport.height,
+					});
 				} else {
 					removeContextRecolor(context);
 				}

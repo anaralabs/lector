@@ -365,7 +365,9 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		// long-lived visible canvas context).
 		let restoreRecolor: (() => void) | null = null;
 		if (recolor) {
-			restoreRecolor = applyContextRecolor(renderCtx, recolor);
+			restoreRecolor = applyContextRecolor(renderCtx, recolor, {
+				pageArea: viewport.width * viewport.height,
+			});
 		} else {
 			removeContextRecolor(renderCtx);
 		}
