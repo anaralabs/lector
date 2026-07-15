@@ -426,9 +426,6 @@ export const useDetailCanvasLayer = ({
 
 			currentRenderingTask.promise
 				.then(() => {
-					// Natural completion — finalize before any blit so a blank
-					// scanned page's fills land on the buffer.
-					restoreRecolor?.(true);
 					if (renderingTask !== currentRenderingTask) return;
 
 					// Same guard as the base canvas: a render finishing inside the
@@ -441,6 +438,10 @@ export const useDetailCanvasLayer = ({
 							? `dark:${state.darkModeColors.background},${state.darkModeColors.foreground}`
 							: "light";
 					if (currentRecolorKey !== recolorKey) return;
+
+					// Natural, still-current completion — finalize before the
+					// blit so a blank scanned page's fills land on the buffer.
+					restoreRecolor?.(true);
 
 					// Swap: update the visible detail canvas in one go
 					detailCanvas.width = actualWidth;

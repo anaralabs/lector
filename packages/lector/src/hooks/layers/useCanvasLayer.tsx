@@ -391,9 +391,12 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		renderingTask.promise
 			.then(
 				() => {
-					// Natural completion: lets an inkless papered page finalize
-					// as a blank scanned page.
-					restoreRecolor?.(true);
+					// Natural completion lets an inkless papered page finalize as
+					// a blank scanned page — but pdf.js can fulfill even after a
+					// supersede/scheme-change cancel, and in the no-buffer
+					// fallback these fills would land on the visible canvas:
+					// never finalize a cancelled render.
+					restoreRecolor?.(!cancelled);
 				},
 				(error) => {
 					// Matters for the no-buffer fallback, where renderCtx is the
