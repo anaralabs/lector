@@ -404,8 +404,9 @@ export function applyContextRecolor(
 		}
 	};
 
-	const pendingTriggerReady = () => {
-		if (pendingTileArea < SCAN_COVERAGE_MIN || !pendingHasInk) return false;
+	const pendingTriggerReady = (requireInk = true) => {
+		if (pendingTileArea < SCAN_COVERAGE_MIN) return false;
+		if (requireInk && !pendingHasInk) return false;
 		const union: DeviceBounds = [
 			Math.min(...pendingTiles.map((t) => t.bounds[0])),
 			Math.min(...pendingTiles.map((t) => t.bounds[1])),
@@ -722,9 +723,27 @@ export function applyContextRecolor(
 		return (pristineClip as AnyFn).apply(this, args);
 	};
 
+	const finalizeBlankScanPage = () => {
+		// The render is over: pending white tiles that paper the page with no
+		// foreign paint since (paint serial unchanged) are a genuinely BLANK
+		// scanned page — no MRC ink layer ever arrived — so it goes dark like
+		// its sibling pages. The ink requirement existed only to wait for one.
+		if (pendingTiles.length === 0) return;
+		if (paintSerial !== pendingBaselineSerial) return;
+		if (!pendingTriggerReady(false)) return;
+		for (const pending of pendingTiles) {
+			invertTileRemainder(target, pending, coveredBounds);
+			coveredBounds.push(pending.bounds);
+		}
+		pendingTiles.length = 0;
+		pendingTileArea = 0;
+		pendingHasInk = false;
+	};
+
 	const cleanup = () => {
 		// A later applyContextRecolor call already replaced these wrappers.
 		if (target[RECOLOR_CLEANUP] !== cleanup) return;
+		finalizeBlankScanPage();
 		for (const name of [
 			...FILL_METHODS,
 			...STROKE_METHODS,
