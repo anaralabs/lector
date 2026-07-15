@@ -793,6 +793,30 @@ describe("scan inversion via applyContextRecolor", () => {
 		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
 	});
 
+	it("finalizes clean blank tiles painted after a foreign paint", () => {
+		const white = document.createElement("canvas");
+		white.width = 100;
+		white.height = 100;
+		const wctx = white.getContext("2d")!;
+		wctx.fillStyle = "#ffffff";
+		wctx.fillRect(0, 0, 100, 100);
+
+		const ctx = makeCtx(100);
+		const cleanup = applyContextRecolor(ctx, testMap, {
+			pageArea: 100 * 100,
+		});
+		// an early blank strip, then a foreign paint…
+		ctx.drawImage(white, 0, 0, 100, 20);
+		ctx.fillStyle = "#ff0000";
+		ctx.fillRect(10, 5, 20, 5);
+		// …then the real blank page repaints everything, clean
+		ctx.drawImage(white, 0, 0);
+		cleanup(true);
+		const [pr, pg, pb] = rgbAt(ctx, 50, 50);
+		const paperLuma = 0.3 * pr + 0.59 * pg + 0.11 * pb;
+		expect(Math.abs(paperLuma - POLE_LUMA)).toBeLessThan(4);
+	});
+
 	it("does not finalize blank pages on teardown or cancelled renders", () => {
 		const white = document.createElement("canvas");
 		white.width = 100;

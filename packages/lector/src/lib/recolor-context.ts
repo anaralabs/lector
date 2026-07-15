@@ -422,18 +422,23 @@ export function applyContextRecolor(
 		);
 	};
 
+	// Content painted between strips (annotations, watermarks, photos) would
+	// be inverted by a retroactive fill — but only tiles OLDER than the last
+	// foreign paint are unsafe. Keep the clean suffix so a scan painted after
+	// a watermark still accumulates and inverts.
+	const prunePendingToCleanSuffix = () => {
+		if (paintSerial === pendingBaselineSerial) return;
+		const kept = pendingTiles.filter((t) => t.serial === paintSerial);
+		pendingTiles.length = 0;
+		pendingTiles.push(...kept);
+		pendingTileArea = kept.reduce((sum, t) => sum + t.area, 0);
+		pendingHasInk = kept.some((t) => t.inked);
+		pendingBaselineSerial = paintSerial;
+	};
+
 	const flushPendingTiles = (self: CanvasRenderingContext2D) => {
-		// Content painted between strips (annotations, watermarks, photos)
-		// would be inverted by a retroactive fill — but only tiles OLDER than
-		// the last foreign paint are unsafe. Keep the clean suffix so a scan
-		// painted after a watermark still accumulates and inverts.
 		if (paintSerial !== pendingBaselineSerial) {
-			const kept = pendingTiles.filter((t) => t.serial === paintSerial);
-			pendingTiles.length = 0;
-			pendingTiles.push(...kept);
-			pendingTileArea = kept.reduce((sum, t) => sum + t.area, 0);
-			pendingHasInk = kept.some((t) => t.inked);
-			pendingBaselineSerial = paintSerial;
+			prunePendingToCleanSuffix();
 			if (pendingTiles.length === 0 || !pendingTriggerReady()) return;
 		}
 		for (const pending of pendingTiles) {
@@ -731,7 +736,10 @@ export function applyContextRecolor(
 		// scanned page — no MRC ink layer ever arrived — so it goes dark like
 		// its sibling pages. The ink requirement existed only to wait for one.
 		if (pendingTiles.length === 0) return;
-		if (paintSerial !== pendingBaselineSerial) return;
+		// Same clean-suffix rule as the flush path: tiles drawn after the last
+		// foreign paint are safe to consider.
+		prunePendingToCleanSuffix();
+		if (pendingTiles.length === 0) return;
 		if (!pendingTriggerReady(false)) return;
 		for (const pending of pendingTiles) {
 			invertTileRemainder(target, pending, coveredBounds);
