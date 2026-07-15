@@ -62,6 +62,11 @@ export const useThumbnail = (
 		if (!isVisible && renderedProxyRef.current !== pageProxy) return;
 		renderedProxyRef.current = pageProxy;
 
+		// Set on effect teardown (scheme change, unmount): a render fulfilling
+		// after cancel() must not finalize blank-page fills on the visible
+		// thumbnail canvas.
+		let stale = false;
+
 		const renderThumbnail = async () => {
 			const canvas = canvasRef.current;
 
@@ -117,8 +122,8 @@ export const useThumbnail = (
 					renderTaskRef.current = renderTask;
 					await renderTask.promise;
 					// Natural completion (cleanup is idempotent; the finally
-					// below is then a no-op).
-					restoreRecolor?.(true);
+					// below is then a no-op). Never finalize once stale.
+					restoreRecolor?.(!stale);
 				} finally {
 					restoreRecolor?.();
 				}
@@ -139,6 +144,7 @@ export const useThumbnail = (
 		// Capture ref — React clears refs before passive cleanup runs on unmount
 		const canvas = canvasRef.current;
 		return () => {
+			stale = true;
 			renderTaskRef.current?.cancel();
 			// Release canvas memory for Safari (384 MB total canvas limit on iOS)
 			if (canvas) {

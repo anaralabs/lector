@@ -389,25 +389,12 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		}
 
 		renderingTask.promise
-			.then(
-				() => {
-					// Natural completion lets an inkless papered page finalize as
-					// a blank scanned page — but pdf.js can fulfill even after a
-					// supersede/scheme-change cancel, and in the no-buffer
-					// fallback these fills would land on the visible canvas:
-					// never finalize a cancelled render.
-					restoreRecolor?.(!cancelled);
-				},
-				(error) => {
-					// Matters for the no-buffer fallback, where renderCtx is the
-					// long-lived visible canvas context. No finalize: a cancelled
-					// render proves nothing about pending blank tiles.
-					restoreRecolor?.();
-					throw error;
-				},
-			)
 			.then(() => {
 				if (cancelled) {
+					// Restore-without-finalize: matters for the no-buffer
+					// fallback, where renderCtx is the long-lived visible canvas
+					// context and stale fills would be user-visible.
+					restoreRecolor?.();
 					releaseBuffer();
 					return;
 				}
@@ -423,9 +410,13 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 						? `dark:${state.darkModeColors.background},${state.darkModeColors.foreground}`
 						: undefined;
 				if (currentRecolorKey !== recolorKey) {
+					restoreRecolor?.();
 					releaseBuffer();
 					return;
 				}
+				// The frame WILL be used: finalize under exactly the conditions
+				// it is blitted, so a blank scanned page's fills are part of it.
+				restoreRecolor?.(true);
 				if (useBuffer) {
 					// Swap: size (which clears) and blit in one go — the previous
 					// frame stays on screen up to this exact paint.
@@ -465,6 +456,8 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 				}
 			})
 			.catch((error) => {
+				// Idempotent: a no-op when the fulfilled path already restored.
+				restoreRecolor?.();
 				releaseBuffer();
 				if (cancelled) return;
 				if (error?.name === "RenderingCancelledException") return;
