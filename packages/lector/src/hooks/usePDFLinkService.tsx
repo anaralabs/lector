@@ -181,6 +181,7 @@ export class LinkService {
 		// Navigate to the page, forwarding the explicit destination so the
 		// handler can scroll to the destination's position within the page.
 		const pageNumber = pageIndex + 1;
+		this._currentPageNumber = pageNumber;
 		this._dispatchPageNavigation(pageNumber, explicitDest);
 	}
 
@@ -209,6 +210,7 @@ export class LinkService {
 		) {
 			return;
 		}
+		this._currentPageNumber = pageNumber;
 		this._dispatchPageNavigation(pageNumber);
 	}
 
