@@ -58,6 +58,10 @@ export const getDestinationScrollTop = (
 		case "FitBH":
 			y = explicitDest[2];
 			break;
+		case "FitV":
+		case "FitBV":
+			x = explicitDest[2];
+			break;
 		case "FitR":
 			x = explicitDest[2];
 			y = explicitDest[5];
@@ -66,15 +70,15 @@ export const getDestinationScrollTop = (
 			return null;
 	}
 
-	if (typeof y !== "number") return null;
-
-	// On sideways-rotated pages the viewport Y axis maps to PDF x, so a
-	// destination without a real x coordinate cannot be positioned.
-	if (typeof x !== "number" && viewport.rotation % 180 !== 0) return null;
+	// Viewport Y comes from PDF y on upright pages and from PDF x on
+	// sideways-rotated ones; without that coordinate the destination cannot
+	// be positioned vertically.
+	const sideways = viewport.rotation % 180 !== 0;
+	if (typeof (sideways ? x : y) !== "number") return null;
 
 	const [, top] = viewport.convertToViewportPoint(
 		typeof x === "number" ? x : 0,
-		y,
+		typeof y === "number" ? y : 0,
 	);
 	if (typeof top !== "number" || Number.isNaN(top)) return null;
 

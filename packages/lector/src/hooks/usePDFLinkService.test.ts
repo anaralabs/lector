@@ -129,6 +129,16 @@ describe("getDestinationScrollTop", () => {
 		expect(getDestinationScrollTop(viewport(90), dest)).toBe(50);
 	});
 
+	it("positions x-only FitV destinations on sideways pages", () => {
+		const dest = [{ num: 1, gen: 0 }, { name: "FitV" }, 50];
+		expect(getDestinationScrollTop(viewport(90), dest)).toBe(50);
+	});
+
+	it("falls back to a page jump for FitV destinations on upright pages", () => {
+		const dest = [{ num: 1, gen: 0 }, { name: "FitV" }, 50];
+		expect(getDestinationScrollTop(viewport(0), dest)).toBeNull();
+	});
+
 	it("ignores destinations without a position", () => {
 		const dest = [{ num: 1, gen: 0 }, { name: "Fit" }];
 		expect(getDestinationScrollTop(viewport(0), dest)).toBeNull();
