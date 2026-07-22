@@ -47,6 +47,25 @@ export const getDestinationScrollTop = (
 
 	// PDF destination syntax: [pageRef, {name}, ...args] with args in PDF
 	// user-space units (origin at the bottom-left of the page).
+	// FitR carries a full rectangle; whichever corner is visually topmost
+	// depends on rotation, so convert both corners and take the smaller top.
+	if (destName === "FitR") {
+		const [x1, y1, x2, y2] = explicitDest.slice(2, 6);
+		if (
+			typeof x1 !== "number" ||
+			typeof y1 !== "number" ||
+			typeof x2 !== "number" ||
+			typeof y2 !== "number"
+		) {
+			return null;
+		}
+		const [, t1] = viewport.convertToViewportPoint(x1, y1);
+		const [, t2] = viewport.convertToViewportPoint(x2, y2);
+		const top = Math.min(t1, t2);
+		if (typeof top !== "number" || Number.isNaN(top)) return null;
+		return Math.min(Math.max(top, 0), viewport.height);
+	}
+
 	let x: unknown = null;
 	let y: unknown = null;
 	switch (destName) {
@@ -61,10 +80,6 @@ export const getDestinationScrollTop = (
 		case "FitV":
 		case "FitBV":
 			x = explicitDest[2];
-			break;
-		case "FitR":
-			x = explicitDest[2];
-			y = explicitDest[5];
 			break;
 		default:
 			return null;

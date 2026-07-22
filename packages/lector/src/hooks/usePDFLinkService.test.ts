@@ -153,6 +153,18 @@ describe("getDestinationScrollTop", () => {
 		expect(getDestinationScrollTop(viewport(0), dest)).toBeNull();
 	});
 
+	it("uses the visually topmost FitR corner", () => {
+		// Corners (0, 607) and (596, 597) convert to tops 193 and 203 on an
+		// upright page; the rect's visual top is the smaller viewport offset.
+		const dest = [{ num: 1, gen: 0 }, { name: "FitR" }, 0, 607, 596, 597];
+		expect(getDestinationScrollTop(viewport(0), dest)).toBe(193);
+	});
+
+	it("falls back to a page jump for incomplete FitR rectangles", () => {
+		const dest = [{ num: 1, gen: 0 }, { name: "FitR" }, 0, 607];
+		expect(getDestinationScrollTop(viewport(0), dest)).toBeNull();
+	});
+
 	it("ignores destinations without a position", () => {
 		const dest = [{ num: 1, gen: 0 }, { name: "Fit" }];
 		expect(getDestinationScrollTop(viewport(0), dest)).toBeNull();
