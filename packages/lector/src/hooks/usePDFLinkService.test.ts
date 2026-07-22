@@ -40,6 +40,20 @@ describe("LinkService page navigation callbacks", () => {
 		expect(newer).toHaveBeenCalledWith(5, undefined);
 	});
 
+	it("re-registering an existing callback makes it the latest registrant", () => {
+		const service = new LinkService();
+		const first = vi.fn();
+		const second = vi.fn();
+
+		service.registerPageNavigationCallback(first);
+		service.registerPageNavigationCallback(second);
+		service.registerPageNavigationCallback(first);
+		service.goToPage(4);
+
+		expect(second).not.toHaveBeenCalled();
+		expect(first).toHaveBeenCalledWith(4, undefined);
+	});
+
 	it("clears everything when unregistering without an argument", () => {
 		const service = new LinkService();
 		const callback = vi.fn();

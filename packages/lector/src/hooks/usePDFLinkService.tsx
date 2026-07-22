@@ -225,8 +225,10 @@ export class LinkService {
 		// Intentionally empty
 	}
 
-	// Method to register navigation callback
+	// Method to register navigation callback. Delete-then-add so re-registering
+	// an already-known callback still makes it the latest registrant.
 	registerPageNavigationCallback(callback: PageNavigationCallback): void {
+		this._pageNavigationCallbacks.delete(callback);
 		this._pageNavigationCallbacks.add(callback);
 	}
 

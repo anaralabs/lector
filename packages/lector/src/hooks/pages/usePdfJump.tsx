@@ -49,7 +49,7 @@ export const usePdfJump = () => {
 			additionalOffset: number = 0,
 			behavior: "auto" | "smooth" = "smooth",
 		): boolean => {
-			if (!virtualizer) return false;
+			if (!virtualizer || rects.length === 0) return false;
 
 			const firstPage = Math.min(...rects.map((rect) => rect.pageNumber));
 
