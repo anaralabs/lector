@@ -32,8 +32,8 @@ export interface AnnotationLayerParams {
 // Distance of an explicit destination from the top of its page, in scale-1
 // viewport pixels (the coordinate space the virtualizer scrolls in). Returns
 // null when the destination carries no usable position, so callers can fall
-// back to a whole-page jump.
-const getDestinationScrollTop = (
+// back to a whole-page jump. Exported for tests.
+export const getDestinationScrollTop = (
 	viewport: PageViewport | undefined,
 	explicitDest?: unknown[],
 ): number | null => {
@@ -67,6 +67,10 @@ const getDestinationScrollTop = (
 	}
 
 	if (typeof y !== "number") return null;
+
+	// On sideways-rotated pages the viewport Y axis maps to PDF x, so a
+	// destination without a real x coordinate cannot be positioned.
+	if (typeof x !== "number" && viewport.rotation % 180 !== 0) return null;
 
 	const [, top] = viewport.convertToViewportPoint(
 		typeof x === "number" ? x : 0,
@@ -132,7 +136,8 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 				viewports?.[targetPageNumber - 1],
 				explicitDest,
 			);
-			if (top !== null) {
+			const scrolled =
+				top !== null &&
 				scrollToHighlightRects(
 					[{ pageNumber: targetPageNumber, top, left: 0, width: 0, height: 0 }],
 					"pixels",
@@ -140,7 +145,7 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 					0,
 					mergedParams.jumpOptions?.behavior ?? "smooth",
 				);
-			} else {
+			if (!scrolled) {
 				jumpToPage(targetPageNumber, mergedParams.jumpOptions);
 			}
 		};
@@ -178,13 +183,19 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 			const target = e.target as HTMLAnchorElement;
 			const href = target.getAttribute("href") || "";
 
-			// Internal links navigate via pdf.js's own click handler, which calls
-			// linkService.goToDestination with the real destination. Only stop the
-			// browser's default hash navigation here — dispatching goToPage as well
-			// would double-navigate, and the href's page number comes from the PDF
-			// object number, which is not a page index.
 			if (href.startsWith("#page=")) {
 				e.preventDefault();
+				// pdf.js destination links (marked data-internal-link) navigate via
+				// their own click handler calling goToDestination — dispatching here
+				// too would double-navigate, and their href's page number comes from
+				// the PDF object number, not a page index. Only URI annotations with
+				// a literal #page=N hash need the goToPage fallback.
+				if (!target.closest("[data-internal-link]")) {
+					const pageNumber = parseInt(href.substring(6), 10);
+					if (!Number.isNaN(pageNumber)) {
+						linkService.goToPage(pageNumber);
+					}
+				}
 			}
 			// External links will be handled by browser
 		};
@@ -194,7 +205,7 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 		return () => {
 			element.removeEventListener("click", handleLinkClick as EventListener);
 		};
-	}, []);
+	}, [linkService]);
 
 	useEffect(() => {
 		if (!annotationLayerRef.current) {

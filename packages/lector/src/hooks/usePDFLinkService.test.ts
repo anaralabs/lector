@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { getDestinationScrollTop } from "./layers/useAnnotationLayer";
 import { LinkService } from "./usePDFLinkService";
 
 const xyzDest = (num: number) => [
@@ -96,5 +97,40 @@ describe("LinkService page navigation callbacks", () => {
 		await service.goToDestination(explicitDest);
 
 		expect(callback).toHaveBeenCalledWith(3, explicitDest);
+	});
+});
+
+describe("getDestinationScrollTop", () => {
+	const viewport = (rotation: number) =>
+		({
+			rotation,
+			height: 800,
+			convertToViewportPoint: (x: number, y: number) =>
+				rotation % 180 === 0 ? [x, 800 - y] : [y, x],
+		}) as never;
+
+	it("converts XYZ destinations to a top offset", () => {
+		const dest = [{ num: 1, gen: 0 }, { name: "XYZ" }, 50, 600, null];
+		expect(getDestinationScrollTop(viewport(0), dest)).toBe(200);
+	});
+
+	it("converts FitH destinations on unrotated pages", () => {
+		const dest = [{ num: 1, gen: 0 }, { name: "FitH" }, 600];
+		expect(getDestinationScrollTop(viewport(0), dest)).toBe(200);
+	});
+
+	it("falls back to a page jump for x-less destinations on sideways pages", () => {
+		const dest = [{ num: 1, gen: 0 }, { name: "FitH" }, 600];
+		expect(getDestinationScrollTop(viewport(90), dest)).toBeNull();
+	});
+
+	it("still positions XYZ destinations on sideways pages", () => {
+		const dest = [{ num: 1, gen: 0 }, { name: "XYZ" }, 50, 600, null];
+		expect(getDestinationScrollTop(viewport(90), dest)).toBe(50);
+	});
+
+	it("ignores destinations without a position", () => {
+		const dest = [{ num: 1, gen: 0 }, { name: "Fit" }];
+		expect(getDestinationScrollTop(viewport(0), dest)).toBeNull();
 	});
 });
