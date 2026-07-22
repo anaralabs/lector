@@ -1,3 +1,4 @@
+import type { PageViewport } from "pdfjs-dist";
 import { useEffect, useMemo, useRef } from "react";
 
 import { usePdf } from "../../internal";
@@ -27,6 +28,54 @@ export interface AnnotationLayerParams {
 	 */
 	jumpOptions?: Parameters<ReturnType<typeof usePdfJump>["jumpToPage"]>[1];
 }
+
+// Distance of an explicit destination from the top of its page, in scale-1
+// viewport pixels (the coordinate space the virtualizer scrolls in). Returns
+// null when the destination carries no usable position, so callers can fall
+// back to a whole-page jump.
+const getDestinationScrollTop = (
+	viewport: PageViewport | undefined,
+	explicitDest?: unknown[],
+): number | null => {
+	if (!viewport || !explicitDest) return null;
+
+	const destType = explicitDest[1];
+	const destName =
+		destType && typeof destType === "object" && "name" in destType
+			? (destType as { name?: unknown }).name
+			: null;
+
+	// PDF destination syntax: [pageRef, {name}, ...args] with args in PDF
+	// user-space units (origin at the bottom-left of the page).
+	let x: unknown = null;
+	let y: unknown = null;
+	switch (destName) {
+		case "XYZ":
+			x = explicitDest[2];
+			y = explicitDest[3];
+			break;
+		case "FitH":
+		case "FitBH":
+			y = explicitDest[2];
+			break;
+		case "FitR":
+			x = explicitDest[2];
+			y = explicitDest[5];
+			break;
+		default:
+			return null;
+	}
+
+	if (typeof y !== "number") return null;
+
+	const [, top] = viewport.convertToViewportPoint(
+		typeof x === "number" ? x : 0,
+		y,
+	);
+	if (typeof top !== "number" || Number.isNaN(top)) return null;
+
+	return Math.min(Math.max(top, 0), viewport.height);
+};
 
 const defaultAnnotationLayerParams = {
 	renderForms: true,
@@ -66,25 +115,48 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 		linkService.externalLinkEnabled = mergedParams.externalLinksEnabled;
 	}, [linkService, mergedParams.externalLinksEnabled]);
 
-	const { jumpToPage } = usePdfJump();
+	const { jumpToPage, scrollToHighlightRects } = usePdfJump();
+	const viewports = usePdf((state) => state.viewports);
 
-	// Connect the LinkService to the jumpToPage function to enable PDF navigation through links
+	// Connect the LinkService to the viewer's scrolling so link annotations
+	// navigate. When the destination carries a position, scroll to it within
+	// the target page; otherwise fall back to a whole-page jump.
 	useEffect(() => {
 		if (!jumpToPage) return;
 
-		// Define a callback function to handle page navigation
-		const handlePageNavigation = (pageNumber: number) => {
-			jumpToPage(pageNumber, mergedParams.jumpOptions);
+		const handlePageNavigation = (
+			targetPageNumber: number,
+			explicitDest?: unknown[],
+		) => {
+			const top = getDestinationScrollTop(
+				viewports?.[targetPageNumber - 1],
+				explicitDest,
+			);
+			if (top !== null) {
+				scrollToHighlightRects(
+					[{ pageNumber: targetPageNumber, top, left: 0, width: 0, height: 0 }],
+					"pixels",
+					mergedParams.jumpOptions?.align === "center" ? "center" : "start",
+				);
+			} else {
+				jumpToPage(targetPageNumber, mergedParams.jumpOptions);
+			}
 		};
 
-		// Register our callback with the LinkService
 		linkService.registerPageNavigationCallback(handlePageNavigation);
 
-		// Clean up the callback when the component unmounts
+		// Unregister only this layer's callback: pages mount/unmount constantly
+		// under virtualization and must not clobber each other's registration.
 		return () => {
-			linkService.unregisterPageNavigationCallback();
+			linkService.unregisterPageNavigationCallback(handlePageNavigation);
 		};
-	}, [jumpToPage, linkService, mergedParams.jumpOptions]);
+	}, [
+		jumpToPage,
+		scrollToHighlightRects,
+		viewports,
+		linkService,
+		mergedParams.jumpOptions,
+	]);
 
 	useEffect(() => {
 		ensureAnnotationLayerStyles();
