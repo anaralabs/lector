@@ -1,3 +1,4 @@
+import type { PageViewport } from "pdfjs-dist";
 import { useEffect, useMemo, useRef } from "react";
 
 import { usePdf } from "../../internal";
@@ -27,6 +28,77 @@ export interface AnnotationLayerParams {
 	 */
 	jumpOptions?: Parameters<ReturnType<typeof usePdfJump>["jumpToPage"]>[1];
 }
+
+// Distance of an explicit destination from the top of its page, in scale-1
+// viewport pixels (the coordinate space the virtualizer scrolls in). Returns
+// null when the destination carries no usable position, so callers can fall
+// back to a whole-page jump. Exported for tests.
+export const getDestinationScrollTop = (
+	viewport: PageViewport | undefined,
+	explicitDest?: unknown[],
+): number | null => {
+	if (!viewport || !explicitDest) return null;
+
+	const destType = explicitDest[1];
+	const destName =
+		destType && typeof destType === "object" && "name" in destType
+			? (destType as { name?: unknown }).name
+			: null;
+
+	// PDF destination syntax: [pageRef, {name}, ...args] with args in PDF
+	// user-space units (origin at the bottom-left of the page).
+	// FitR carries a full rectangle; whichever corner is visually topmost
+	// depends on rotation, so convert both corners and take the smaller top.
+	if (destName === "FitR") {
+		const [x1, y1, x2, y2] = explicitDest.slice(2, 6);
+		if (
+			typeof x1 !== "number" ||
+			typeof y1 !== "number" ||
+			typeof x2 !== "number" ||
+			typeof y2 !== "number"
+		) {
+			return null;
+		}
+		const [, t1] = viewport.convertToViewportPoint(x1, y1);
+		const [, t2] = viewport.convertToViewportPoint(x2, y2);
+		const top = Math.min(t1, t2);
+		if (typeof top !== "number" || Number.isNaN(top)) return null;
+		return Math.min(Math.max(top, 0), viewport.height);
+	}
+
+	let x: unknown = null;
+	let y: unknown = null;
+	switch (destName) {
+		case "XYZ":
+			x = explicitDest[2];
+			y = explicitDest[3];
+			break;
+		case "FitH":
+		case "FitBH":
+			y = explicitDest[2];
+			break;
+		case "FitV":
+		case "FitBV":
+			x = explicitDest[2];
+			break;
+		default:
+			return null;
+	}
+
+	// Viewport Y comes from PDF y on upright pages and from PDF x on
+	// sideways-rotated ones; without that coordinate the destination cannot
+	// be positioned vertically.
+	const sideways = viewport.rotation % 180 !== 0;
+	if (typeof (sideways ? x : y) !== "number") return null;
+
+	const [, top] = viewport.convertToViewportPoint(
+		typeof x === "number" ? x : 0,
+		typeof y === "number" ? y : 0,
+	);
+	if (typeof top !== "number" || Number.isNaN(top)) return null;
+
+	return Math.min(Math.max(top, 0), viewport.height);
+};
 
 const defaultAnnotationLayerParams = {
 	renderForms: true,
@@ -66,25 +138,51 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 		linkService.externalLinkEnabled = mergedParams.externalLinksEnabled;
 	}, [linkService, mergedParams.externalLinksEnabled]);
 
-	const { jumpToPage } = usePdfJump();
+	const { jumpToPage, scrollToHighlightRects } = usePdfJump();
+	const viewports = usePdf((state) => state.viewports);
 
-	// Connect the LinkService to the jumpToPage function to enable PDF navigation through links
+	// Connect the LinkService to the viewer's scrolling so link annotations
+	// navigate. When the destination carries a position, scroll to it within
+	// the target page; otherwise fall back to a whole-page jump.
 	useEffect(() => {
 		if (!jumpToPage) return;
 
-		// Define a callback function to handle page navigation
-		const handlePageNavigation = (pageNumber: number) => {
-			jumpToPage(pageNumber, mergedParams.jumpOptions);
+		const handlePageNavigation = (
+			targetPageNumber: number,
+			explicitDest?: unknown[],
+		) => {
+			const top = getDestinationScrollTop(
+				viewports?.[targetPageNumber - 1],
+				explicitDest,
+			);
+			const scrolled =
+				top !== null &&
+				scrollToHighlightRects(
+					[{ pageNumber: targetPageNumber, top, left: 0, width: 0, height: 0 }],
+					"pixels",
+					mergedParams.jumpOptions?.align === "center" ? "center" : "start",
+					0,
+					mergedParams.jumpOptions?.behavior ?? "smooth",
+				);
+			if (!scrolled) {
+				jumpToPage(targetPageNumber, mergedParams.jumpOptions);
+			}
 		};
 
-		// Register our callback with the LinkService
 		linkService.registerPageNavigationCallback(handlePageNavigation);
 
-		// Clean up the callback when the component unmounts
+		// Unregister only this layer's callback: pages mount/unmount constantly
+		// under virtualization and must not clobber each other's registration.
 		return () => {
-			linkService.unregisterPageNavigationCallback();
+			linkService.unregisterPageNavigationCallback(handlePageNavigation);
 		};
-	}, [jumpToPage, linkService, mergedParams.jumpOptions]);
+	}, [
+		jumpToPage,
+		scrollToHighlightRects,
+		viewports,
+		linkService,
+		mergedParams.jumpOptions,
+	]);
 
 	useEffect(() => {
 		ensureAnnotationLayerStyles();
@@ -104,12 +202,18 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 			const target = e.target as HTMLAnchorElement;
 			const href = target.getAttribute("href") || "";
 
-			// Handle internal page links
 			if (href.startsWith("#page=")) {
 				e.preventDefault();
-				const pageNumber = parseInt(href.substring(6), 10);
-				if (!Number.isNaN(pageNumber)) {
-					linkService.goToPage(pageNumber);
+				// pdf.js destination links (marked data-internal-link) navigate via
+				// their own click handler calling goToDestination — dispatching here
+				// too would double-navigate, and their href's page number comes from
+				// the PDF object number, not a page index. Only URI annotations with
+				// a literal #page=N hash need the goToPage fallback.
+				if (!target.closest("[data-internal-link]")) {
+					const pageNumber = parseInt(href.substring(6), 10);
+					if (!Number.isNaN(pageNumber)) {
+						linkService.goToPage(pageNumber);
+					}
 				}
 			}
 			// External links will be handled by browser
