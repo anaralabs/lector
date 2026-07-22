@@ -137,6 +137,8 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 					[{ pageNumber: targetPageNumber, top, left: 0, width: 0, height: 0 }],
 					"pixels",
 					mergedParams.jumpOptions?.align === "center" ? "center" : "start",
+					0,
+					mergedParams.jumpOptions?.behavior ?? "smooth",
 				);
 			} else {
 				jumpToPage(targetPageNumber, mergedParams.jumpOptions);
@@ -176,13 +178,13 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 			const target = e.target as HTMLAnchorElement;
 			const href = target.getAttribute("href") || "";
 
-			// Handle internal page links
+			// Internal links navigate via pdf.js's own click handler, which calls
+			// linkService.goToDestination with the real destination. Only stop the
+			// browser's default hash navigation here — dispatching goToPage as well
+			// would double-navigate, and the href's page number comes from the PDF
+			// object number, which is not a page index.
 			if (href.startsWith("#page=")) {
 				e.preventDefault();
-				const pageNumber = parseInt(href.substring(6), 10);
-				if (!Number.isNaN(pageNumber)) {
-					linkService.goToPage(pageNumber);
-				}
 			}
 			// External links will be handled by browser
 		};
@@ -192,7 +194,7 @@ export const useAnnotationLayer = (params: AnnotationLayerParams) => {
 		return () => {
 			element.removeEventListener("click", handleLinkClick as EventListener);
 		};
-	}, [linkService]);
+	}, []);
 
 	useEffect(() => {
 		if (!annotationLayerRef.current) {

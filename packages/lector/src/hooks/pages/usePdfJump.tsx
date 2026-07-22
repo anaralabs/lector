@@ -47,6 +47,7 @@ export const usePdfJump = () => {
 			type: "pixels" | "percent",
 			align: "start" | "center" = "start",
 			additionalOffset: number = 0,
+			behavior: "auto" | "smooth" = "smooth",
 		) => {
 			if (!virtualizer) return;
 
@@ -106,7 +107,7 @@ export const usePdfJump = () => {
 
 			virtualizer.scrollToOffset(adjustedOffset, {
 				align: "start", // Always use start when we've calculated our own centering
-				behavior: "smooth",
+				behavior,
 			});
 		},
 		[virtualizer],

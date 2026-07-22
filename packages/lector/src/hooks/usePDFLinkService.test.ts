@@ -50,6 +50,23 @@ describe("LinkService page navigation callbacks", () => {
 		expect(callback).not.toHaveBeenCalled();
 	});
 
+	it("rejects out-of-range page numbers in goToPage", () => {
+		const service = new LinkService();
+		const callback = vi.fn();
+
+		service.setDocument({ numPages: 10 } as never);
+		service.registerPageNavigationCallback(callback);
+
+		service.goToPage(0);
+		service.goToPage(-3);
+		service.goToPage(11);
+		service.goToPage(2.5);
+		expect(callback).not.toHaveBeenCalled();
+
+		service.goToPage(10);
+		expect(callback).toHaveBeenCalledWith(10, undefined);
+	});
+
 	it("resolves named destinations and forwards the explicit destination", async () => {
 		const service = new LinkService();
 		const callback = vi.fn();

@@ -202,6 +202,13 @@ export class LinkService {
 	}
 
 	goToPage(pageNumber: number): void {
+		if (
+			!Number.isInteger(pageNumber) ||
+			pageNumber < 1 ||
+			(this.pagesCount > 0 && pageNumber > this.pagesCount)
+		) {
+			return;
+		}
 		this._dispatchPageNavigation(pageNumber);
 	}
 
