@@ -91,6 +91,16 @@ export function PDFViewer() {
 import "pdfjs-dist/web/pdf_viewer.css";
 ```
 
+## Production Assets and CSP
+
+For production deployments, especially applications with a strict Content Security Policy, make sure
+the PDF.js worker and auxiliary assets are available from URLs your app is allowed to load.
+
+Some scanned PDFs and image-heavy documents require PDF.js WASM, CMaps, standard fonts, or ICC
+profiles. If those assets are blocked, pages may load but render blank or partially blank.
+
+See [Production PDF.js Assets](/docs/production-assets) for a recommended setup.
+
 ## Verifying Installation
 
 To verify that Lector is properly installed, create a basic PDF viewer component:
