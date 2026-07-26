@@ -28,7 +28,9 @@
   },
   "pnpm": {
     "overrides": {
-      "@babel/core": "^7.29.7"
+      "@babel/core": "^7.29.7",
+      "postcss@8": "8.5.19",
+      "brace-expansion@2": "^2.1.2"
     }
   }
 }
