@@ -106,6 +106,7 @@
       "vite@6": "^6.4.3",
       "@babel/core": "^7.29.7",
       "socks": "^2.8.9",
+      "ip-address@10": "10.3.1",
       "sharp": "^0.35.0",
       "@emnapi/runtime": "1.11.2"
     }
