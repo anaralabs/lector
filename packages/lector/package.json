@@ -45,7 +45,7 @@
 		"@vitejs/plugin-react": "^4.3.4",
 		"@vitest/browser": "^3.2.6",
 		"clsx": "^2.1.1",
-		"pdfjs-dist": "^5.5.207",
+		"pdfjs-dist": "^6.2.108",
 		"playwright": "^1.45.3",
 		"react": "^19.1.1",
 		"size-limit": "^11.1.6",
@@ -58,7 +58,7 @@
 		"webdriverio": "^8.39.1"
 	},
 	"peerDependencies": {
-		"pdfjs-dist": "^5.5.207",
+		"pdfjs-dist": "^5.5.207 || ^6.2.108",
 		"react": ">=19"
 	},
 	"dependencies": {

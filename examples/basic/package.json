@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@anaralabs/lector": "latest",
-    "pdfjs-dist": "^5.5.207",
+    "pdfjs-dist": "^6.2.108",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -29,8 +29,9 @@
   "pnpm": {
     "overrides": {
       "@babel/core": "^7.29.7",
-      "postcss@8": "8.5.19",
-      "brace-expansion@2": "^2.1.2"
+      "postcss@8": "8.5.23",
+      "brace-expansion@2": "2.1.4",
+      "nanoid@3": "3.3.17"
     }
   }
 }
