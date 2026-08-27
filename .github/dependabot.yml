@@ -1,0 +1,23 @@
+# Dependency update policy.
+#
+# 7-day minimum release age: Dependabot will not propose any dependency
+# update (security fix or version bump) to a release younger than 7 days.
+# This is a supply-chain guard — a freshly published version may be
+# compromised and not yet flagged, so we deliberately wait out the window
+# rather than installing brand-new releases. Alerts whose only fix is a
+# <7-day-old version are effectively held until the fix has aged in.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
