@@ -60,7 +60,7 @@ The `Root` component is the main container that manages the PDF document state:
   source='/path/to/pdf' // URL or path to PDF file
   className='...' // Container styling
   loader={<Loading />} // Custom loading component
-  onLoad={handleLoad} // Called when PDF is loaded
+  onDocumentLoad={handleLoad} // Called when PDF is loaded
   onError={handleError} // Called on load error
 >
   {/* Child components */}
