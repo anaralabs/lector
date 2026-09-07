@@ -56,3 +56,32 @@ it("keeps tooltip actions clickable when a pointer press triggers selectionchang
 	fireEvent.click(button);
 	expect(onHighlight).toHaveBeenCalledOnce();
 });
+
+it("restores keyboard selection after a drag loses window focus", async () => {
+	viewportRef.current = document.createElement("div");
+	document.body.append(viewportRef.current);
+	const { getByText, queryByText } = render(
+		<>
+			<p>PDF text</p>
+			<SelectionTooltip>Selection actions</SelectionTooltip>
+		</>,
+		{ container: viewportRef.current },
+	);
+	const text = getByText("PDF text");
+	fireEvent.pointerDown(text, { button: 0 });
+	const range = document.createRange();
+	range.selectNodeContents(text);
+	act(() => {
+		document.getSelection()?.addRange(range);
+		fireEvent(document, new Event("selectionchange"));
+	});
+	await act(
+		() =>
+			new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+	);
+	expect(queryByText("Selection actions")).toBeNull();
+	fireEvent(window, new Event("blur"));
+	fireEvent(window, new Event("focus"));
+	fireEvent(document, new Event("selectionchange"));
+	await waitFor(() => expect(getByText("Selection actions")).toBeTruthy());
+});

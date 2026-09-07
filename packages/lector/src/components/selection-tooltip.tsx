@@ -89,10 +89,15 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
 			isPointerDownRef.current = false;
 			requestAnimationFrame(updateTooltipPosition);
 		};
+		const handleBlur = () => {
+			isPointerDownRef.current = false;
+		};
+		window.addEventListener("blur", handleBlur);
 		document.addEventListener("pointerdown", handlePointerDown, true);
 		document.addEventListener("pointerup", handlePointerUp, true);
 		document.addEventListener("pointercancel", handlePointerUp, true);
 		return () => {
+			window.removeEventListener("blur", handleBlur);
 			document.removeEventListener("pointerdown", handlePointerDown, true);
 			document.removeEventListener("pointerup", handlePointerUp, true);
 			document.removeEventListener("pointercancel", handlePointerUp, true);
