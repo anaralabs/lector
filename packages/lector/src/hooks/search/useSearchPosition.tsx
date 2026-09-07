@@ -1,5 +1,5 @@
 import type { PDFPageProxy } from "pdfjs-dist";
-import type { TextItem } from "pdfjs-dist/types/src/display/api";
+import type { TextContent, TextItem } from "pdfjs-dist/types/src/display/api";
 
 import type { HighlightRect } from "../../internal";
 import type { SearchResult } from "./useSearch";
@@ -11,24 +11,25 @@ interface TextPosition {
 	searchText?: string; // Optional parameter to specify the exact search text to highlight
 }
 
-/**
- * Calculates the highlight rectangles for a given text match.
- *
- * @param pageProxy - The PDF page proxy object
- * @param textMatch - An object containing:
- *   - pageNumber: The page number where the match is found
- *   - text: The text content containing the match (usually a larger chunk of text)
- *   - matchIndex: The index within the text where the match starts
- *   - searchText: (Optional) The exact search term to highlight. If provided, only highlights
- *                 this exact term instead of the entire text. If not provided, highlights the full text.
- * @returns An array of HighlightRect objects representing the areas to highlight
- */
 export async function calculateHighlightRects(
 	pageProxy: PDFPageProxy,
 	textMatch: TextPosition,
 ): Promise<HighlightRect[]> {
-	const textContent = await pageProxy.getTextContent();
-	const items = textContent.items as TextItem[];
+	const reader: ReadableStreamDefaultReader<TextContent> = pageProxy
+		.streamTextContent()
+		.getReader();
+	const items: TextItem[] = [];
+	try {
+		for (;;) {
+			const { value, done } = await reader.read();
+			if (done) break;
+			items.push(
+				...value.items.filter((item): item is TextItem => "str" in item),
+			);
+		}
+	} finally {
+		reader.releaseLock();
+	}
 
 	const matchLength = textMatch.searchText
 		? textMatch.searchText.length

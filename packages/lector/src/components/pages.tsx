@@ -16,6 +16,7 @@ import { useScrollFn } from "../hooks/pages/useScrollFn";
 import { useVisiblePage } from "../hooks/pages/useVisiblePage";
 import { useViewportContainer } from "../hooks/viewport/useViewportContainer";
 import { usePdf } from "../internal";
+import { USE_LAYOUT_ZOOM } from "../lib/zoom";
 import { Primitive } from "./primitive";
 
 const selectLargestPageWidth = (state: {
@@ -222,7 +223,6 @@ export const Pages = ({
 			{...props}
 			style={{
 				display: "flex",
-				justifyContent: "center",
 				height: "100%",
 				position: "relative",
 				overflow: "auto",
@@ -233,6 +233,9 @@ export const Pages = ({
 				ref={elementWrapperRef}
 				style={{
 					width: "max-content",
+					marginLeft: "auto",
+					marginRight: "auto",
+					flexShrink: 0,
 				}}
 			>
 				<div
@@ -244,8 +247,7 @@ export const Pages = ({
 						alignItems: "center",
 						flexDirection: "column",
 						transformOrigin: "0 0",
-						willChange: "transform",
-						// width: "max-content",
+						willChange: USE_LAYOUT_ZOOM ? "auto" : "transform",
 						width: largestPageWidth,
 						margin: "0 auto",
 					}}

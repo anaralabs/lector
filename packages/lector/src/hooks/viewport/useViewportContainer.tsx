@@ -1,12 +1,12 @@
 import { useGesture } from "@use-gesture/react";
 import { type RefObject, useCallback, useEffect, useRef } from "react";
 
-import { usePdf } from "../../internal";
+import { PDFStore, usePdf } from "../../internal";
 import { clamp } from "../../lib/clamp";
 import { firstMemo } from "../../lib/memo";
+import { USE_LAYOUT_ZOOM } from "../../lib/zoom";
 
 const WHEEL_ZOOM_SENSITIVITY = 0.01;
-// Heuristics for suppressing trackpad inertia after a CTRL+wheel zoom.
 const WHEEL_INERTIA_GAP_MS = 140;
 const WHEEL_INERTIA_ESCAPE_FACTOR = 1.35;
 
@@ -19,8 +19,9 @@ export const useViewportContainer = ({
 	elementWrapperRef: RefObject<HTMLDivElement | null>;
 	elementRef: RefObject<HTMLDivElement | null>;
 }) => {
-	// Ref instead of useState — the return value isn't consumed by any caller,
-	// so useState was causing a wasted React re-render on every pinch start.
+	const store = PDFStore.useContext();
+	const isPinching = usePdf((state) => state.isPinching);
+	const gestureTransformAppliedRef = useRef(false);
 	const originRef = useRef<[number, number]>([0, 0]);
 	const wheelInertia = useRef<{
 		active: boolean;
@@ -45,11 +46,6 @@ export const useViewportContainer = ({
 		viewportRef.current = containerRef.current;
 	}, [containerRef, viewportRef]);
 
-	// Initialized to 1 — the DOM's actual state at mount (no transform yet) —
-	// NOT the store zoom. Initializing to the store zoom made the sync effect
-	// below treat an initial `zoom` prop != 1 as already applied, so the
-	// scale3d was never written: pages rendered for the requested zoom but
-	// displayed at zoom 1 (mis-sized and resampled-blurry canvases).
 	const transformations = useRef<{
 		translateX: number;
 		translateY: number;
@@ -60,20 +56,7 @@ export const useViewportContainer = ({
 		zoom: 1,
 	});
 
-	// rAF handle for debouncing Zustand store updates during pinch.
-	// The imperative DOM transform runs every frame; the store update
-	// (which triggers React re-renders in all zoom subscribers) is
-	// coalesced to at most one per animation frame.
 	const zoomRafRef = useRef<number | null>(null);
-	// Track the last zoom value we pushed to the store so the sync effect
-	// can distinguish our own rAF-deferred updates from external changes
-	// (e.g. zoom slider). Without this, the sync effect sees a mismatch
-	// between the store (stale rAF value) and transformations.current
-	// (already advanced by a newer pinch frame) and snaps back.
-	// null = "no pending self-push": a real zoom value here could mask an
-	// external change to that same number (e.g. init 1 swallowing an external
-	// reset to 1x after mounting with an initial zoom prop). The sentinel is
-	// consumed on match and cleared when an external change is applied.
 	const lastPushedZoomRef = useRef<number | null>(null);
 
 	const updateTransform = useCallback(
@@ -88,10 +71,6 @@ export const useViewportContainer = ({
 
 			const { zoom, translateX, translateY } = transformations.current;
 
-			// Read natural dimensions BEFORE writing the transform — avoids
-			// forced synchronous layout. getBoundingClientRect() after a
-			// transform write forces Firefox to re-rasterize the compositor
-			// layer mid-frame, briefly flashing the canvas background color.
 			const naturalWidth =
 				parseFloat(elementRef.current.style.width) ||
 				elementRef.current.offsetWidth;
@@ -99,8 +78,24 @@ export const useViewportContainer = ({
 				parseFloat(elementRef.current.style.height) ||
 				elementRef.current.offsetHeight;
 
-			// Batch all writes — no layout reads after this point.
-			elementRef.current.style.transform = `scale3d(${zoom}, ${zoom}, 1)`;
+			if (USE_LAYOUT_ZOOM) {
+				const element = elementRef.current;
+				if (store.getState().isPinching) {
+					const layoutZoom = parseFloat(element.style.zoom) || 1;
+					const gestureScale = zoom / layoutZoom;
+					element.style.transform = `scale3d(${gestureScale}, ${gestureScale}, 1)`;
+					element.style.willChange = "transform";
+					gestureTransformAppliedRef.current = true;
+				} else {
+					// WebKit downsamples canvases under transformed ancestors: https://bugs.webkit.org/show_bug.cgi?id=264954
+					element.style.zoom = String(zoom);
+					element.style.transform = "none";
+					element.style.willChange = "auto";
+					gestureTransformAppliedRef.current = false;
+				}
+			} else {
+				elementRef.current.style.transform = `scale3d(${zoom}, ${zoom}, 1)`;
+			}
 			elementWrapperRef.current.style.width = `${naturalWidth * zoom}px`;
 			elementWrapperRef.current.style.height = `${naturalHeight * zoom}px`;
 			containerRef.current.scrollTop = translateY;
@@ -115,10 +110,14 @@ export const useViewportContainer = ({
 				});
 			}
 		},
-		[containerRef, elementRef, elementWrapperRef, updateZoom],
+		[containerRef, elementRef, elementWrapperRef, updateZoom, store],
 	);
 
-	// Cancel pending rAF on unmount
+	useEffect(() => {
+		if (USE_LAYOUT_ZOOM && gestureTransformAppliedRef.current && !isPinching)
+			updateTransform();
+	}, [isPinching, updateTransform]);
+
 	useEffect(() => {
 		return () => {
 			if (zoomRafRef.current !== null) {
@@ -127,27 +126,16 @@ export const useViewportContainer = ({
 		};
 	}, []);
 
-	// Sync external zoom changes (e.g. zoom slider, programmatic setZoom)
-	// into the imperative transform. Skip updates that originated from our
-	// own rAF-deferred store push to avoid overwriting a newer pinch value.
 	useEffect(() => {
 		if (transformations.current.zoom === zoom || !containerRef.current) {
 			return;
 		}
 
 		if (zoom === lastPushedZoomRef.current) {
-			// Consume the sentinel: each self-push produces exactly one store
-			// update, so leaving the value armed could only ever mask a FUTURE
-			// external change to the same number.
 			lastPushedZoomRef.current = null;
 			return;
 		}
 
-		// An external change is being applied — any stale self-push value must
-		// not mask a later external return to that zoom, and a pending rAF
-		// push must not fire afterwards: it would re-arm the sentinel and
-		// reset isZoomFitWidth even though its zoom write (it reads the live
-		// transform, which we are about to overwrite) is a no-op.
 		if (zoomRafRef.current !== null) {
 			cancelAnimationFrame(zoomRafRef.current);
 			zoomRafRef.current = null;
@@ -192,8 +180,6 @@ export const useViewportContainer = ({
 		};
 	}, []);
 
-	// Prevent scroll when CTRL is held (zoom mode) and suppress the inertial tail
-	// after releasing CTRL so the PDF doesn't "keep scrolling" from trackpad velocity.
 	useEffect(() => {
 		const container = containerRef.current;
 		if (!container) return;
@@ -271,10 +257,6 @@ export const useViewportContainer = ({
 					const containerRect = currentContainer.getBoundingClientRect();
 					const currentZoom = transformations.current.zoom;
 
-					// containerRect is the border box, but the inner element
-					// sits in the padding box. Bake padding into containerPosition
-					// so the pinch math doesn't drop scrollTop by paddingTop on
-					// the first frame when the scroll container has padding.
 					const containerStyle = getComputedStyle(currentContainer);
 					const paddingTop = parseFloat(containerStyle.paddingTop) || 0;
 					const paddingLeft = parseFloat(containerStyle.paddingLeft) || 0;
