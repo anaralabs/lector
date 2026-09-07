@@ -78,7 +78,8 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
 		const handlePointerDown = (event: PointerEvent) => {
 			if (
 				event.button === 0 &&
-				viewportRef.current?.contains(event.target as Node)
+				viewportRef.current?.contains(event.target as Node) &&
+				!refs.floating.current?.contains(event.target as Node)
 			) {
 				isPointerDownRef.current = true;
 			}
@@ -96,7 +97,7 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
 			document.removeEventListener("pointerup", handlePointerUp, true);
 			document.removeEventListener("pointercancel", handlePointerUp, true);
 		};
-	}, [updateTooltipPosition, viewportRef]);
+	}, [updateTooltipPosition, viewportRef, refs.floating]);
 
 	useEffect(() => {
 		const handleSelectionChange = () => {
