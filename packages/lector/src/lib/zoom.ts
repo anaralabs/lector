@@ -1,5 +1,10 @@
 import type { PageViewport } from "pdfjs-dist";
 
+export const USE_LAYOUT_ZOOM =
+	typeof navigator !== "undefined" &&
+	/AppleWebKit/i.test(navigator.userAgent) &&
+	!/Chrome|Chromium|Android/i.test(navigator.userAgent);
+
 export const getFitWidthZoom = (
 	containerWidth: number,
 	viewports: PageViewport[],

@@ -226,8 +226,17 @@ export const useDetailCanvasLayer = ({
 			const scrollX = scrollContainer.scrollLeft / zoom;
 			const scrollY = scrollContainer.scrollTop / zoom;
 
-			const viewportWidth = scrollContainer.clientWidth / zoom;
-			const viewportHeight = scrollContainer.clientHeight / zoom;
+			const containerStyle = getComputedStyle(scrollContainer);
+			const padLeft = parseFloat(containerStyle.paddingLeft) || 0;
+			const padRight = parseFloat(containerStyle.paddingRight) || 0;
+			const padTop = parseFloat(containerStyle.paddingTop) || 0;
+			const padBottom = parseFloat(containerStyle.paddingBottom) || 0;
+			const viewportWidth =
+				(scrollContainer.clientWidth - padLeft - padRight) / zoom;
+			const viewportHeight =
+				(scrollContainer.clientHeight - padTop - padBottom) / zoom;
+			const viewX = scrollX + padLeft / zoom;
+			const viewY = scrollY + padTop / zoom;
 
 			const pageRect = pageContainer.getBoundingClientRect();
 			const containerRect = scrollContainer.getBoundingClientRect();
@@ -235,15 +244,15 @@ export const useDetailCanvasLayer = ({
 			const pageLeft = (pageRect.left - containerRect.left) / zoom + scrollX;
 			const pageTop = (pageRect.top - containerRect.top) / zoom + scrollY;
 
-			const visibleLeft = Math.max(0, scrollX - pageLeft);
-			const visibleTop = Math.max(0, scrollY - pageTop);
+			const visibleLeft = Math.max(0, viewX - pageLeft);
+			const visibleTop = Math.max(0, viewY - pageTop);
 			const visibleRight = Math.min(
 				pageWidth,
-				scrollX + viewportWidth - pageLeft,
+				viewX + viewportWidth - pageLeft,
 			);
 			const visibleBottom = Math.min(
 				pageHeight,
-				scrollY + viewportHeight - pageTop,
+				viewY + viewportHeight - pageTop,
 			);
 
 			const visibleWidth = Math.max(0, visibleRight - visibleLeft);
@@ -291,7 +300,7 @@ export const useDetailCanvasLayer = ({
 				painted &&
 				painted.proxy === pdfPageProxy &&
 				painted.key === contentKey &&
-				painted.scale === effectiveScale &&
+				painted.scale >= effectiveScale - 1e-3 &&
 				visibleLeft >= painted.left - eps &&
 				visibleTop >= painted.top - eps &&
 				visibleRight <= painted.left + painted.width + eps &&

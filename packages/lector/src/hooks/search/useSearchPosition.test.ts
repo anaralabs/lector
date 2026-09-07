@@ -1,43 +1,66 @@
-import { describe, expect, it } from "vitest";
-
+import type { PDFPageProxy } from "pdfjs-dist";
+import { describe, expect, it, vi } from "vitest";
 import { calculateHighlightRects } from "./useSearchPosition";
 
-// Safety invariant for the scroll-idle text-layer deferral: search/citation
-// highlight rects are derived from the pdf.js text CONTENT (getTextContent +
-// item transforms), never from the rendered .textLayer DOM. So deferring the
-// text-layer build cannot break search highlighting — there is no DOM here at
-// all and the rects still compute. If someone refactors search to read the
-// rendered spans, this test fails alongside the defer.
-describe("calculateHighlightRects (search ⊥ rendered text layer)", () => {
-	const fakePageProxy = {
-		getTextContent: async () => ({
-			items: [
-				{
-					str: "hello world",
-					transform: [1, 0, 0, 1, 10, 700],
-					width: 110,
-					height: 12,
+const item = (str: string, left: number) => ({
+	str,
+	transform: [1, 0, 0, 1, left, 700],
+	width: str.length * 10,
+	height: 12,
+});
+
+function pageWithChunks(chunks: ReturnType<typeof item>[][]) {
+	const streamTextContent = vi.fn(
+		() =>
+			new ReadableStream({
+				start(controller) {
+					for (const items of chunks) controller.enqueue({ items });
+					controller.close();
 				},
-			],
+			}),
+	);
+	const page = {
+		streamTextContent,
+		getTextContent: vi.fn(() => {
+			throw new Error("shared getTextContent must not be used");
 		}),
 		getViewport: () => ({ width: 600, height: 800 }),
-	} as any;
+	};
+	return { page: page as unknown as PDFPageProxy, streamTextContent };
+}
 
-	it("computes rects from text content with no text-layer DOM present", async () => {
-		const rects = await calculateHighlightRects(fakePageProxy, {
+describe("calculateHighlightRects", () => {
+	it("computes a match spanning independently streamed chunks without text-layer DOM", async () => {
+		const { page } = pageWithChunks([
+			[item("hello ", 10)],
+			[item("world", 70)],
+		]);
+		const rects = await calculateHighlightRects(page, {
 			pageNumber: 3,
 			text: "hello world",
-			matchIndex: 6, // start of "world"
-			searchText: "world",
+			matchIndex: 4,
+			searchText: "o world",
 		});
+		expect(rects).toEqual([
+			{ pageNumber: 3, left: 50, top: 88, width: 70, height: 12 },
+		]);
+	});
 
-		expect(rects.length).toBeGreaterThan(0);
-		const r = rects[0]!;
-		expect(r.pageNumber).toBe(3);
-		// "world" starts ~6/11 into the 110-wide item → left offset past the item origin.
-		expect(r.left).toBeGreaterThan(10);
-		expect(r.width).toBeGreaterThan(0);
-		expect(Number.isFinite(r.top)).toBe(true);
-		expect(r.height).toBe(12);
+	it("keeps concurrent searches independent", async () => {
+		const { page, streamTextContent } = pageWithChunks([
+			[item("hello world", 10)],
+		]);
+		const searches = await Promise.all(
+			[0, 6].map((matchIndex) =>
+				calculateHighlightRects(page, {
+					pageNumber: 1,
+					text: "hello world",
+					matchIndex,
+					searchText: "hello",
+				}),
+			),
+		);
+		expect(streamTextContent).toHaveBeenCalledTimes(2);
+		expect(searches.map((rects) => rects[0]?.left)).toEqual([10, 70]);
 	});
 });
