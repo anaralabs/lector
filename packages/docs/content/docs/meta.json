@@ -5,6 +5,7 @@
 	"pages": [
 		"---Getting Started---",
 		"installation",
+		"production-assets",
 		"basic-usage",
 		"---Components---",
 		"code/basic",
