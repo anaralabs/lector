@@ -167,3 +167,25 @@ for (const mode of ["modern", "legacy"] as const) {
 		},
 	);
 }
+
+test("preview root redirects to the base path while prefixed routes remain accessible", async () => {
+	const response = await fetch(new URL("/?ref=preview", origin), {
+		redirect: "manual",
+	});
+	assert.equal(response.status, 307);
+	assert.equal(response.headers.get("location"), "/lector?ref=preview");
+	for (const path of [
+		"/lector",
+		"/lector/docs/installation",
+		"/lector/llms.json",
+		"/lector/pdf/pathways.pdf",
+		"/lector/api/search?query=worker",
+	]) {
+		const response = await fetch(new URL(path, origin), { redirect: "manual" });
+		assert.equal(response.status, 200, path);
+	}
+	const missing = await fetch(new URL("/lector/docs/does-not-exist", origin), {
+		redirect: "manual",
+	});
+	assert.equal(missing.status, 404);
+});

@@ -25,6 +25,12 @@ const config = {
 				basePath: false,
 				permanent: true,
 			},
+			{
+				source: "/",
+				destination: "/lector",
+				basePath: false,
+				permanent: false,
+			},
 		];
 	},
 	async rewrites() {
