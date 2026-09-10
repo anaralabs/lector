@@ -19,6 +19,14 @@ afterEach(() => {
 	});
 });
 
+function isPointInFill(path: SVGPathElement, x: number, y: number) {
+	// Chromium 131 (pinned by Playwright) requires SVGPoint rather than DOMPoint.
+	const point = path.ownerSVGElement!.createSVGPoint();
+	point.x = x;
+	point.y = y;
+	return path.isPointInFill(point);
+}
+
 function fixture() {
 	const style = document.createElement("style");
 	style.dataset.test = "";
@@ -198,7 +206,7 @@ test.each([1, 1.75, 3])(
 		select(layer);
 		const path = layer.querySelector("path")!;
 		for (const x of gaps) {
-			expect(path.isPointInFill(new DOMPoint(x, 40))).toBe(true);
+			expect(isPointInFill(path, x, 40)).toBe(true);
 		}
 		expect(path.getAttribute("d")!.match(/M/g)).toHaveLength(1);
 	},
@@ -212,7 +220,7 @@ test("leaves a column gutter unpainted even when text shares a baseline", () => 
 	spans[2]!.style.left = `${right + 60}px`;
 	select(layer);
 	const path = layer.querySelector("path")!;
-	expect(path.isPointInFill(new DOMPoint(right + 20, 40))).toBe(false);
+	expect(isPointInFill(path, right + 20, 40)).toBe(false);
 	expect(path.getAttribute("d")!.match(/M/g)).toHaveLength(2);
 });
 
@@ -250,7 +258,7 @@ test.each(["getDimension", "getSelection", "getAnnotationDimension"] as const)(
 			[12, 40],
 			[200, 120],
 		]) {
-			expect(path.isPointInFill(new DOMPoint(x, y))).toBe(false);
+			expect(isPointInFill(path, x!, y!)).toBe(false);
 			expect(contains(x!, y!)).toBe(false);
 		}
 		expect(contains(200, 80)).toBe(true);
