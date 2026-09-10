@@ -26,7 +26,7 @@ import { useState } from "react";
 import "@/lib/setup";
 import { ReaderLoading } from "./reader-loading";
 
-const source = "/pdf/attention-is-all-you-need.pdf";
+const source = "/lector/pdf/attention-is-all-you-need.pdf";
 
 function HighlightSelection() {
 	const { getDimension } = useSelectionDimensions();

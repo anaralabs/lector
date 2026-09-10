@@ -12,9 +12,12 @@ import type { DocCatalog } from "../lib/agent-docs/catalog";
 
 const origin = process.env.DOCS_URL ?? "http://localhost:3000";
 async function get(path: string) {
-	const response = await fetch(new URL(path, origin), {
-		signal: AbortSignal.timeout(15000),
-	});
+	const response = await fetch(
+		new URL(path.startsWith("/lector/") ? path : `/lector${path}`, origin),
+		{
+			signal: AbortSignal.timeout(15000),
+		},
+	);
 	assert.equal(response.status, 200, `${path}: HTTP ${response.status}`);
 	return response;
 }
@@ -88,7 +91,7 @@ test(
 			});
 		}
 		assert.equal(
-			(await fetch(new URL("/docs/does-not-exist.md", origin))).status,
+			(await fetch(new URL("/lector/docs/does-not-exist.md", origin))).status,
 			404,
 		);
 	},
@@ -108,8 +111,8 @@ for (const mode of ["modern", "legacy"] as const) {
 					: new LegacyClient({ name: "integration-test", version: "1" });
 			const transport =
 				mode === "modern"
-					? new StreamableHTTPClientTransport(new URL("/mcp", origin))
-					: new LegacyTransport(new URL("/mcp", origin));
+					? new StreamableHTTPClientTransport(new URL("/lector/mcp", origin))
+					: new LegacyTransport(new URL("/lector/mcp", origin));
 			try {
 				await client.connect(transport);
 				if (client instanceof Client)

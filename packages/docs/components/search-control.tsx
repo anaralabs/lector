@@ -11,7 +11,7 @@ import {
 import { SearchUI, SearchUIFullHighlight } from "./custom-search";
 import { ExampleRoot } from "./example-root";
 
-const fileUrl = "/pdf/pathways.pdf";
+const fileUrl = "/lector/pdf/pathways.pdf";
 
 const ViewerZoomControl = () => {
 	return (
