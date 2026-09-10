@@ -6,6 +6,7 @@ import {
 	type ReactElement,
 	useCallback,
 	useEffect,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
@@ -18,10 +19,6 @@ import { useViewportContainer } from "../hooks/viewport/useViewportContainer";
 import { usePdf } from "../internal";
 import { USE_LAYOUT_ZOOM } from "../lib/zoom";
 import { Primitive } from "./primitive";
-
-const selectLargestPageWidth = (state: {
-	viewports: Array<{ width: number }>;
-}) => state.viewports.reduce((max, vp) => Math.max(max, vp.width), 0);
 
 const DEFAULT_HEIGHT = 600;
 const EXTRA_HEIGHT = 0;
@@ -175,7 +172,10 @@ export const Pages = ({
 	});
 
 	useFitWidth({ viewportRef: containerRef });
-	const largestPageWidth = usePdf(selectLargestPageWidth);
+	const largestPageWidth = useMemo(
+		() => viewports.reduce((max, viewport) => Math.max(max, viewport.width), 0),
+		[viewports],
+	);
 
 	useEffect(() => {
 		virtualizer.getOffsetForAlignment = (

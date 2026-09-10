@@ -149,12 +149,15 @@ export const PDFStore = createZustandContext(
 				const { minZoom, maxZoom } = get().zoomOptions;
 
 				set((state) => {
-					if (typeof zoom === "function") {
-						const newZoom = clamp(zoom(state.zoom), minZoom, maxZoom);
-						return { zoom: newZoom, isZoomFitWidth };
-					}
-					const newZoom = clamp(zoom, minZoom, maxZoom);
-					return { zoom: newZoom, isZoomFitWidth };
+					const newZoom = clamp(
+						typeof zoom === "function" ? zoom(state.zoom) : zoom,
+						minZoom,
+						maxZoom,
+					);
+					return newZoom === state.zoom &&
+						isZoomFitWidth === state.isZoomFitWidth
+						? state
+						: { zoom: newZoom, isZoomFitWidth };
 				});
 			},
 
@@ -169,26 +172,23 @@ export const PDFStore = createZustandContext(
 					zoomOptions,
 				);
 
-				set({
-					zoom: clampedZoom,
-					isZoomFitWidth: true,
-				});
+				get().updateZoom(clampedZoom, true);
 
 				return clampedZoom;
 			},
 
 			currentPage: 1,
 			setCurrentPage: (val) => {
-				set({
-					currentPage: val,
-				});
+				set((state) =>
+					state.currentPage === val ? state : { currentPage: val },
+				);
 			},
 
 			isPinching: false,
 			setIsPinching: (val) => {
-				set({
-					isPinching: val,
-				});
+				set((state) =>
+					state.isPinching === val ? state : { isPinching: val },
+				);
 			},
 
 			isResizing: false,
@@ -200,9 +200,9 @@ export const PDFStore = createZustandContext(
 
 			virtualizer: null,
 			setVirtualizer: (val) => {
-				set({
-					virtualizer: val,
-				});
+				set((state) =>
+					state.virtualizer === val ? state : { virtualizer: val },
+				);
 			},
 
 			pageProxies: initialState.pageProxies,
@@ -216,22 +216,24 @@ export const PDFStore = createZustandContext(
 
 			textContent: [],
 			setTextContent: (val) => {
-				set({
-					textContent: val,
-				});
+				set((state) =>
+					state.textContent === val ? state : { textContent: val },
+				);
 			},
 			highlights: [],
 			setHighlight: (val) => {
-				set({
-					highlights: val,
-				});
+				set((state) =>
+					state.highlights === val ? state : { highlights: val },
+				);
 			},
 
 			customSelectionRects: [],
 			setCustomSelectionRects: (val) => {
-				set({
-					customSelectionRects: val,
-				});
+				set((state) =>
+					state.customSelectionRects === val
+						? state
+						: { customSelectionRects: val },
+				);
 			},
 
 			coloredHighlights: [],

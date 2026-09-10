@@ -1,8 +1,6 @@
-import type { PDFPageProxy } from "pdfjs-dist";
-import type { TextItem } from "pdfjs-dist/types/src/display/api";
-import { useCallback, useEffect, useState } from "react";
-
+import { useEffect, useState } from "react";
 import { usePdf } from "../internal";
+import { acquireDocumentText } from "../lib/document-text";
 
 interface SearchProps {
 	children: React.ReactNode;
@@ -10,36 +8,30 @@ interface SearchProps {
 }
 
 export const Search = ({ children, loading = "Loading..." }: SearchProps) => {
-	const [isLoading, setIsLoading] = useState(false);
-
+	const [isLoading, setIsLoading] = useState(true);
 	const proxies = usePdf((state) => state.pageProxies);
 	const setTextContent = usePdf((state) => state.setTextContent);
 
-	const getTextContent = useCallback(
-		async (pages: PDFPageProxy[]) => {
-			setIsLoading(true);
-			const promises = pages.map(async (proxy) => {
-				const content = await proxy.getTextContent();
-				const text = content.items
-					.map((item) => (item as TextItem)?.str || "")
-					.join("");
-
-				return Promise.resolve({
-					pageNumber: proxy.pageNumber,
-					text,
-				});
-			});
-			const text = await Promise.all(promises);
-
-			setIsLoading(false);
-			setTextContent(text);
-		},
-		[setTextContent],
-	);
-
 	useEffect(() => {
-		getTextContent(proxies);
-	}, [proxies, getTextContent]);
+		let disposed = false;
+		setIsLoading(true);
+		const task = acquireDocumentText(proxies);
+		void task.promise
+			.then((text) => {
+				if (disposed) return;
+				setTextContent(text);
+				setIsLoading(false);
+			})
+			.catch((error) => {
+				if (disposed) return;
+				console.error("Error extracting PDF text", error);
+				setIsLoading(false);
+			});
+		return () => {
+			disposed = true;
+			task.release();
+		};
+	}, [proxies, setTextContent]);
 
 	return isLoading ? loading : children;
 };

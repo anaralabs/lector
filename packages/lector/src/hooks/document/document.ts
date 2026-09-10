@@ -1,5 +1,4 @@
 import type {
-	OnProgressParameters,
 	PDFDocumentLoadingTask,
 	PDFDocumentProxy,
 	PDFPageProxy,
@@ -57,7 +56,7 @@ export interface usePDFDocumentParams {
 	/**
 	 * Override or extend the PDF.js DocumentInitParameters passed to getDocument().
 	 * These take highest precedence over both the source object and lector's defaults.
-	 * Must be a stable reference (module-level constant or useMemo) to avoid reloading the document.
+	 * Read when source changes; changing options alone does not reload the document.
 	 */
 	documentOptions?: Partial<DocumentInitParameters>;
 	/**
@@ -149,8 +148,6 @@ export const usePDFDocumentContext = ({
 	colorScheme,
 	darkModeColors,
 }: usePDFDocumentParams) => {
-	const [_, setProgress] = useState(0);
-
 	const [initialState, setInitialState] = useState<InitialPDFState | null>();
 	const [rotation] = useState<number>(initialRotation);
 
@@ -182,9 +179,9 @@ export const usePDFDocumentContext = ({
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: <onDocumnetLoad,zoomOptions>
 	useEffect(() => {
+		let isDisposed = false;
 		const generateViewports = async (pdf: PDFDocumentProxy) => {
 			const pageProxies: Array<PDFPageProxy> = [];
-			const rotations: number[] = [];
 			const viewports = await Promise.all(
 				Array.from({ length: pdf.numPages }, async (_, index) => {
 					const page = await pdf.getPage(index + 1);
@@ -195,20 +192,17 @@ export const usePDFDocumentContext = ({
 						scale: 1,
 						rotation: rotation + deltaRotate,
 					});
-					pageProxies.push(page);
-					rotations.push(page.rotate);
+					pageProxies[index] = page;
 					return viewport;
 				}),
 			);
 
-			const sortedPageProxies = pageProxies.toSorted(
-				(a, b) => a.pageNumber - b.pageNumber,
-			);
+			if (isDisposed) return;
 			setInitialState((prev) => ({
 				...prev,
 				isZoomFitWidth,
 				viewports,
-				pageProxies: sortedPageProxies,
+				pageProxies,
 				pdfDocumentProxy: pdf,
 				zoom,
 				zoomOptions,
@@ -220,9 +214,7 @@ export const usePDFDocumentContext = ({
 
 		const loadDocument = () => {
 			setInitialState(null);
-			setProgress(0);
 			let loadingTask: PDFDocumentLoadingTask | null = null;
-			let isDisposed = false;
 
 			void loadPdfJs()
 				.then(({ getDocument, version }) => {
@@ -238,13 +230,6 @@ export const usePDFDocumentContext = ({
 							documentOptionsRef.current,
 						),
 					);
-					loadingTask.onProgress = (progressEvent: OnProgressParameters) => {
-						if (progressEvent.loaded === progressEvent.total) {
-							return;
-						}
-
-						setProgress(progressEvent.loaded / progressEvent.total);
-					};
 
 					return loadingTask.promise
 						.then(async (proxy) => {
@@ -253,7 +238,6 @@ export const usePDFDocumentContext = ({
 							}
 
 							onDocumentLoad?.({ proxy, source });
-							setProgress(1);
 
 							try {
 								await generateViewports(proxy);
