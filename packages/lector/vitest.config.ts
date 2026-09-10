@@ -1,5 +1,5 @@
 import react from "@vitejs/plugin-react";
-import type {} from "@vitest/browser/providers/playwright";
+import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
 
 const browser =
@@ -34,25 +34,22 @@ export default defineConfig({
 		],
 		browser: {
 			enabled: true,
-			provider: "playwright",
+			provider: playwright({
+				launchOptions: {
+					executablePath:
+						browser === "chromium"
+							? process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+							: undefined,
+					channel:
+						browser === "chromium"
+							? (process.env.LECTOR_BROWSER_CHANNEL ??
+								(process.env.CI ? undefined : "chrome"))
+							: undefined,
+				},
+			}),
 			headless: true,
 			screenshotFailures: false,
-			instances: [
-				{
-					browser,
-					launch: {
-						executablePath:
-							browser === "chromium"
-								? process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
-								: undefined,
-						channel:
-							browser === "chromium"
-								? (process.env.LECTOR_BROWSER_CHANNEL ??
-									(process.env.CI ? undefined : "chrome"))
-								: undefined,
-					},
-				},
-			],
+			instances: [{ browser }],
 		},
 	},
 });

@@ -1,7 +1,7 @@
 import "pdfjs-dist/web/pdf_viewer.css";
 import { cleanup, renderHook } from "@testing-library/react";
-import { page } from "@vitest/browser/context";
 import { afterEach, expect, test } from "vitest";
+import { page } from "vitest/browser";
 import { bindMouseEvents } from "../src/hooks/layers/useTextLayer";
 import { useSelectionDimensions } from "../src/hooks/useSelectionDimensions";
 import { wrapperFor } from "./helpers";
