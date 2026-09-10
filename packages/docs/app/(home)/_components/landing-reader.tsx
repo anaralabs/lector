@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import "@/lib/setup";
+import { ReaderLoading } from "./reader-loading";
 
 const source = "/pdf/attention-is-all-you-need.pdf";
 
@@ -191,26 +192,16 @@ export default function LandingReader() {
 			zoomOptions={{ minZoom: 0.25, maxZoom: 3 }}
 			onError={() => setError(true)}
 			loader={
-				<div className="reader-loading" role="status">
-					<span className="loading-paper" />
-					<span>
-						{error
-							? "The document couldn’t be opened."
-							: "Opening the document…"}
-					</span>
-					{error ? (
-						<button
-							type="button"
-							className="text-link"
-							onClick={() => {
-								setError(false);
-								setAttempt(attempt + 1);
-							}}
-						>
-							Try again <ChevronRight size={14} />
-						</button>
-					) : null}
-				</div>
+				<ReaderLoading
+					onRetry={
+						error
+							? () => {
+									setError(false);
+									setAttempt(attempt + 1);
+								}
+							: undefined
+					}
+				/>
 			}
 		>
 			<ReaderContent />
