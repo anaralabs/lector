@@ -1,0 +1,37 @@
+---
+title: Build a PDF viewer with Lector
+description: Start with a readable document, then add the controls your app needs.
+---
+
+Lector is a headless PDF viewer for React. PDF.js loads and renders the document; Lector provides page virtualization, composable layers, and hooks for navigation, search, and selection. You own the toolbar, layout, and application state.
+
+## Start here
+
+1. [Install Lector](/docs/installation) and configure the PDF.js worker.
+2. [Build your first viewer](/docs/basic-usage) with selectable text, a toolbar, and a visible loading state.
+3. [Load your own documents](/docs/document-loading), including authenticated URLs and local files.
+
+Already integrating Lector? Keep the [API reference](/docs/api) and [troubleshooting guide](/docs/troubleshooting) nearby.
+
+## Add a feature
+
+| I want to… | Guide |
+| --- | --- |
+| See a minimal viewer running | [Basic example](/docs/code/basic) |
+| Go to a page or build previous/next buttons | [Page navigation](/docs/code/page-navigation) |
+| Fit a document to its container | [Zoom controls](/docs/code/zoom-control) |
+| Navigate using page previews | [Thumbnails](/docs/code/thumbnails) |
+| Find text and jump to a match | [Search](/docs/code/search) |
+| Draw a citation or a saved region | [Highlights](/docs/code/highlight) |
+| Capture selected text and its coordinates | [Text selection](/docs/code/select) |
+| Enable links inside a PDF | [PDF links](/docs/code/links) |
+| Fill and download a PDF form | [PDF forms](/docs/code/pdf-form) |
+| Render light text on dark paper | [Dark mode](/docs/dark-mode) |
+
+## What your application supplies
+
+Lector supplies primitives, not a finished reader. Give the viewer a bounded height, label its controls, and decide how to handle errors and save user data. Search reads a PDF's existing text; it does not perform OCR. Highlight overlays live in memory until your application stores them, and they do not modify the PDF file.
+
+These docs track the repository's `main` branch. If an API is missing from your installed package, compare its version with the [releases](https://github.com/anaralabs/lector/releases). The current source declares React 19+ and `pdfjs-dist` `^5.5.207` as peer dependencies.
+
+Contributing to Lector itself? See the [contributor guide](https://github.com/anaralabs/lector/blob/main/CONTRIBUTING.md).

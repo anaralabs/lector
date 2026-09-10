@@ -232,7 +232,9 @@ export const Pages = ({
 			<div
 				ref={elementWrapperRef}
 				style={{
-					width: "max-content",
+					// The absolute page list contributes no intrinsic width. Reserve
+					// its width before any zoom effect runs (including zoom === 1).
+					width: largestPageWidth,
 					marginLeft: "auto",
 					marginRight: "auto",
 					flexShrink: 0,

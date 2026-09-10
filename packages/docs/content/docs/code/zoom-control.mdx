@@ -1,88 +1,60 @@
 ---
-title: Zoom Control
-description: PDF viewer with zoom controls and configurable zoom limits
+title: Zoom controls
+description: Set zoom limits, build a toolbar, and keep pages fitted to the container.
 ---
 
-import ViewerZoomControl from "@/components/zoom-control.tsx";
+Zoom values are multipliers: `1` means 100%, `0.5` means 50%. The `CurrentZoom` input displays a percentage.
 
-<ViewerZoomControl />
+## Add a toolbar
 
-## Implementation
+Mount this component inside `Root`. It includes a fit-width action and disables zoom buttons at the configured limits.
 
-```tsx
+```tsx title="zoom-controls.tsx"
 "use client";
 
-import {
-  CanvasLayer,
-  CurrentZoom,
-  Page,
-  Pages,
-  Root,
-  TextLayer,
-  ZoomIn,
-  ZoomOut,
-} from "@anaralabs/lector";
+import { CurrentZoom, ZoomIn, ZoomOut, usePdf } from "@anaralabs/lector";
 
-const ViewerZoomControl = () => {
+export default function ZoomControls() {
+  const zoom = usePdf((state) => state.zoom);
+  const min = usePdf((state) => state.zoomOptions.minZoom);
+  const max = usePdf((state) => state.zoomOptions.maxZoom);
+  const fitWidth = usePdf((state) => state.zoomFitWidth);
+
   return (
-    <Root
-      source="/pdf/document.pdf"
-      className="bg-gray-100 border rounded-md overflow-hidden relative h-[500px] flex flex-col justify-stretch"
-      loader={<div className="p-4">Loading...</div>}
-      zoomOptions={{
-        minZoom: 0.5, // 50% minimum zoom
-        maxZoom: 10, // 1000% maximum zoom
-      }}
-    >
-      <div className="bg-gray-100 border-b p-1 flex items-center justify-center text-sm text-gray-600 gap-2">
-        Zoom
-        <ZoomOut className="px-3 py-1 -mr-2 text-gray-900">-</ZoomOut>
-        <CurrentZoom className="bg-white rounded-full px-3 py-1 border text-center w-16" />
-        <ZoomIn className="px-3 py-1 -ml-2 text-gray-900">+</ZoomIn>
-      </div>
-      <Pages className="p-4 h-full">
-        <Page>
-          <CanvasLayer />
-          <TextLayer />
-        </Page>
-      </Pages>
-    </Root>
+    <div role="group" aria-label="Zoom controls" style={{ display: "flex", gap: 8 }}>
+      <ZoomOut type="button" disabled={zoom <= min}>Zoom out</ZoomOut>
+      <label>Zoom <CurrentZoom style={{ width: 56 }} /> %</label>
+      <ZoomIn type="button" disabled={zoom >= max}>Zoom in</ZoomIn>
+      <button type="button" onClick={fitWidth}>Fit width</button>
+    </div>
   );
-};
-
-export default ViewerZoomControl;
+}
 ```
 
-## Features
-
-- Interactive zoom controls with real-time display
-- Configurable zoom limits through `zoomOptions` prop
-- Clean, minimal interface
-- Text selection support
-- Responsive layout
-
-## Zoom Configuration
-
-You can customize the zoom limits by passing `zoomOptions` to the Root component:
+## Initial zoom and limits
 
 ```tsx
 <Root
-  zoomOptions={{
-    minZoom: 0.1,  // Allow 10% minimum zoom
-    maxZoom: 20,   // Allow 2000% maximum zoom
-  }}
+  source="/sample.pdf"
+  zoom={1}
+  zoomOptions={{ minZoom: 0.5, maxZoom: 4 }}
 >
+  {/* Your toolbar and bounded Pages container */}
+</Root>
 ```
 
-Default zoom limits if not specified:
+The defaults are `zoom: 1`, `minZoom: 0.5`, and `maxZoom: 10`. Supply a positive minimum and a maximum at least as large as the minimum. Initial zoom and limits initialize the document store; they are not controlled props that update the zoom after mounting.
 
-- Minimum zoom: 0.1 (10%)
-- Maximum zoom: 10 (1000%)
+For runtime changes, select `updateZoom` from `usePdf` and call `updateZoom(1.5)` or `updateZoom((previous) => previous + 0.1)`. Updates are clamped to the configured limits. `ZoomIn` and `ZoomOut` change zoom in steps of `0.1`.
 
-## Best Practices
+## Fit width
 
-- Implement responsive zoom increments
-- Include proper loading states
-- Maintain consistent styling
-- Consider user experience when setting custom zoom limits
-- Test text readability at custom zoom levels
+Set `isZoomFitWidth` on `Root` to start fitted to the container. `zoomFitWidth()` enables the same mode from a control. Fit mode responds to container resizing and respects zoom limits. A manual `updateZoom` call leaves fit mode by default.
+
+For a toolbar layout, keep `Pages` in a `flex: 1; min-height: 0` wrapper. See [your first viewer](/docs/basic-usage) for the complete structure. Avoid CSS `transform: scale(...)` on the viewer: the library must know the zoom to position selection and overlays correctly.
+
+## Live example
+
+import ViewerZoomControl from "@/components/zoom-control";
+
+<ViewerZoomControl />

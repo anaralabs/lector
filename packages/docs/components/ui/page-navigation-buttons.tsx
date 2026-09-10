@@ -27,7 +27,7 @@ const PageNavigationButtons = () => {
 	}, [currentPage]);
 
 	return (
-		<div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 flex items-center gap-3 bg-white/90 backdrop-blur-sm rounded-full shadow-lg px-4 py-2.5 border border-gray-200 pointer-events-auto z-50">
+		<div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 flex items-center gap-3 bg-background/90 backdrop-blur-sm rounded-full shadow-lg px-4 py-2.5 border border-border pointer-events-auto z-50">
 			<Button
 				variant={"ghost"}
 				onClick={handlePreviousPage}
@@ -45,7 +45,7 @@ const PageNavigationButtons = () => {
 					strokeWidth="2"
 					strokeLinecap="round"
 					strokeLinejoin="round"
-					className="text-gray-600"
+					className="text-muted-foreground"
 				>
 					<path d="m15 18-6-6 6-6" />
 				</svg>
@@ -69,9 +69,9 @@ const PageNavigationButtons = () => {
 							e.currentTarget.blur();
 						}
 					}}
-					className="w-12 h-7 text-center bg-gray-50 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+					className="w-12 h-7 text-center bg-muted border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
 				/>
-				<span className="text-sm text-gray-500 font-medium min-w-[40px]">
+				<span className="text-sm text-muted-foreground font-medium min-w-[40px]">
 					/ {pages || 1}
 				</span>
 			</div>
@@ -93,7 +93,7 @@ const PageNavigationButtons = () => {
 					strokeWidth="2"
 					strokeLinecap="round"
 					strokeLinejoin="round"
-					className="text-gray-600"
+					className="text-muted-foreground"
 				>
 					<path d="m9 18 6-6-6-6" />
 				</svg>

@@ -5,34 +5,29 @@ import {
 	CanvasLayer,
 	Page,
 	Pages,
-	Root,
 	TextLayer,
 } from "@anaralabs/lector";
-import { useTheme } from "next-themes";
-import "@/lib/setup";
 import DocumentMenu from "../app/(home)/_components/document-menu";
 import { PageNavigation } from "../app/(home)/_components/page-navigation";
 import ZoomMenu from "../app/(home)/_components/zoom-menu";
+import { ExampleRoot } from "./example-root";
 
 const fileUrl = "/pdf/links.pdf";
 
 const LinkDemo = () => {
-	const { resolvedTheme } = useTheme();
-
 	return (
-		<Root
+		<ExampleRoot
 			source={fileUrl}
 			className="border not-prose overflow-hidden flex flex-col w-full h-[600px] rounded-lg"
 			isZoomFitWidth={true}
 			loader={<div className="w-full"></div>}
-			colorScheme={resolvedTheme === "dark" ? "dark" : "light"}
 		>
 			<div className="p-1 relative flex justify-between border-b">
 				<ZoomMenu />
 				<PageNavigation />
 				<DocumentMenu documentUrl={fileUrl} />
 			</div>
-			<Pages>
+			<Pages className="min-h-0 flex-1" style={{ height: "auto" }}>
 				<Page>
 					<CanvasLayer />
 					<TextLayer />
@@ -45,7 +40,7 @@ const LinkDemo = () => {
 					/>
 				</Page>
 			</Pages>
-		</Root>
+		</ExampleRoot>
 	);
 };
 

@@ -1,34 +1,23 @@
 ---
-title: Basic Example
-description: A minimal PDF viewer implementation with basic rendering capabilities
-full: true
+title: Basic example
+description: The smallest viewer, with visible pages and selectable text.
 ---
 
-import Basic from "@/components/basic.tsx";
+This viewer renders a PDF with a canvas and a text layer. Complete [installation](/docs/installation), create `pdf-setup.ts`, and put a PDF at `public/sample.pdf` before using the code.
 
-<Basic />
-
-## Implementation
-
-```tsx
+```tsx title="basic-viewer.tsx"
 "use client";
 
 import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
-import { useTheme } from "next-themes";
-import React from "react";
-import "@/lib/setup";
+import "./pdf-setup";
 
-const fileUrl = "/pdf/pathways.pdf";
-
-const Basic = () => {
-  const { resolvedTheme } = useTheme();
-
+export default function BasicViewer() {
   return (
     <Root
-      source={fileUrl}
-      className='w-full h-[500px] border overflow-hidden rounded-lg'
-      loader={<div className='p-4'>Loading...</div>}
-      colorScheme={resolvedTheme === "dark" ? "dark" : "light"}>
+      source="/sample.pdf"
+      style={{ height: 600, overflow: "hidden" }}
+      loader={<p role="status">Loading PDF…</p>}
+    >
       <Pages>
         <Page>
           <CanvasLayer />
@@ -37,15 +26,15 @@ const Basic = () => {
       </Pages>
     </Root>
   );
-};
-
-export default Basic;
+}
 ```
 
-The example above shows:
+The fixed height gives `Pages` a scrollable viewport. Remove `TextLayer` if you only need the page image. To follow your app theme, pass `colorScheme="dark"` or `"light"` to `Root`; the live example below follows the docs theme.
 
-- Basic PDF viewer setup with a fixed height container
-- Native dark mode rendering driven by the app theme via the `colorScheme` prop
-- Loading state handling
-- Canvas rendering of PDF pages
-- Text layer for text selection and copying
+Continue with [a toolbar](/docs/basic-usage), [error handling](/docs/document-loading#show-errors-and-retry), or [links and form widgets](/docs/code/links).
+
+## Live example
+
+import Basic from "@/components/basic";
+
+<Basic />

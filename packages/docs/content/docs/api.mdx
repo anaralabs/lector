@@ -1,0 +1,142 @@
+---
+title: API reference
+description: Component contracts, defaults, hook scope, and public exports in the current source.
+---
+
+Import public APIs from `@anaralabs/lector`. This reference follows `packages/lector/src/index.ts` and the implementation on `main`; compare your installed version with the [releases](https://github.com/anaralabs/lector/releases) if a symbol is missing. Do not import from `src/internal` or a package-internal path.
+
+## Root
+
+Loads one document and supplies its context. Accepts HTML `div` props in addition to the document options below. Its `onError` is a Lector callback, not a DOM error handler.
+
+| Prop | Default | Contract |
+| --- | --- | --- |
+| `source` | Required | URL string, `URL`, typed array, `ArrayBuffer`, or PDF.js loading-parameters object |
+| `loader` | `"Loading..."` | Content shown until the document and viewports are ready |
+| `onDocumentLoad` | — | Receives `{ proxy, source }` after PDF.js loads the document, before viewport generation |
+| `onError` | — | Receives `{ error, phase, source }` for initialization failures |
+| `documentOptions` | Lector defaults | PDF.js loading-parameter overrides; applied on the next load |
+| `zoom` | `1` | Initial zoom multiplier |
+| `isZoomFitWidth` | `false` | Initial fit-width mode |
+| `zoomOptions` | `{ minZoom: 0.5, maxZoom: 10 }` | Initial limits for zoom updates |
+| `colorScheme` | `"light"` | `"light"` or `"dark"`; changes synchronize with the store |
+| `darkModeColors` | See [dark mode](/docs/dark-mode) | Optional `background` and `foreground`; changes synchronize with the store |
+
+`source` changes trigger loading. Keep object and binary sources stable. The zoom props initialize state; use store actions for subsequent changes. Changing `documentOptions` alone does not reload the document. See [loading documents](/docs/document-loading) for source handling, retries, and asset paths.
+
+The current type also contains `initialRotation`, but `Root` does not forward it into document initialization. Do not rely on it for rotation controls.
+
+## Pages and Page
+
+| Component / prop | Default | Contract |
+| --- | --- | --- |
+| `Pages.children` | Required | One React element, normally a `Page` template |
+| `Pages.gap` | `10` | Gap between virtualized pages |
+| `Pages.virtualizerOptions` | `{ overscan: 1 }` | Extra pages mounted outside the visible range |
+| `Pages.initialOffset` | — | Initial vertical scroll offset in pixels |
+| `Pages.onOffsetChange` | — | Reports nonzero scroll offsets; zero is currently omitted |
+| `Page.pageNumber` | `1` | One-based page number; supplied automatically by `Pages` |
+
+Both accept HTML `div` props. `Pages` supplies its own scrolling and a default height of 100%; its parent needs a definite height. `Page` establishes page-number context and owns viewport dimensions. See [layout](/docs/basic-usage#give-the-pages-room-to-scroll).
+
+## Page layers
+
+All page layers belong under `Page`.
+
+| Component | Purpose and special props |
+| --- | --- |
+| `CanvasLayer` | Visible content; accepts canvas props and optional `background` |
+| `TextLayer` | Selectable text; accepts div props and adds PDF.js's `textLayer` class |
+| `AnnotationLayer` | Existing PDF links and fields; `renderForms=true`, `externalLinksEnabled=true`, `jumpOptions={ behavior: "smooth", align: "start" }` |
+| `HighlightLayer` | Draws current `highlights`; div props and `asChild` apply to each rectangle |
+| `ColoredHighlightLayer` | Color-selection tools and stored colored overlays; `onHighlight(highlight)` reports a new record |
+| `CustomLayer` | Render prop: `children(pageNumber)` returns JSX; position your own overlay |
+| `AnnotationHighlightLayer` | Draws application annotation records; used with `AnnotationsStoreProvider` |
+
+`CanvasLayer` does not provide searchable DOM text. `HighlightLayer` needs a visible color or border from your styles. Links and fields need the PDF.js stylesheet.
+
+## Controls and thumbnails
+
+Mount document controls under `Root`.
+
+| Export | Contract |
+| --- | --- |
+| `CurrentPage` | Labeled number input; commits on blur or Enter |
+| `TotalPages` | A div containing the page count |
+| `CurrentZoom` | Labeled input displaying zoom as a percentage |
+| `ZoomIn`, `ZoomOut` | Buttons that change zoom by 0.1; supply text, labels, and `type="button"` |
+| `Thumbnails` | Clones one thumbnail template per page |
+| `Thumbnail` | Canvas preview with a one-based `pageNumber`; click or Enter navigates |
+| `NextPage`, `PreviousPage` | Exported placeholders; use [custom navigation buttons](/docs/code/page-navigation) |
+
+`Outline`, `OutlineItem`, and `OutlineChildItems` compose a document outline. Their current destination handling has page-index limitations, so verify navigation against your PDFs before using them. For a custom outline, the PDF.js document proxy exposes `getOutline()` and `getDestination()`. Convert PDF.js's zero-based `getPageIndex()` result to a one-based page number before calling `jumpToPage`.
+
+## usePdf
+
+`usePdf(selector)` subscribes to the store belonging to the nearest `Root`. Select only the values your component needs. The provider is unavailable in `Root`'s loader and outside its children.
+
+```tsx title="fit-width-button.tsx"
+"use client";
+
+import { usePdf } from "@anaralabs/lector";
+
+export default function FitWidthButton() {
+  const fitWidth = usePdf((state) => state.zoomFitWidth);
+  return <button type="button" onClick={fitWidth}>Fit width</button>;
+}
+```
+
+These are the store fields most useful to application code:
+
+| Read | Update / action |
+| --- | --- |
+| `pdfDocumentProxy` | PDF.js document methods such as `saveDocument()` |
+| `currentPage` | Use `usePdfJump().jumpToPage()` to navigate; `setCurrentPage()` alone does not scroll |
+| `zoom`, `isZoomFitWidth`, `zoomOptions` | `updateZoom(numberOrUpdater, isZoomFitWidth?)`, `zoomFitWidth()` |
+| `colorScheme`, `darkModeColors` | `setColorScheme(scheme, colors?)` |
+| `highlights` | `setHighlight(rectangles)` replaces the array |
+| `coloredHighlights` | `addColoredHighlight(record)`, `deleteColoredHighlight(uuid)` |
+| `viewports` | Scale-1 PDF.js page viewports, indexed from 0 |
+| `pageProxies` | `getPdfPageProxy(pageNumber)` takes a one-based page number |
+| `textContent` | Populated by `Search` |
+
+The store also exposes rendering and virtualizer internals. Prefer the components and hooks above over mutating those fields.
+
+## usePdfJump
+
+Requires `Root` and a mounted `Pages` virtualizer.
+
+| Method | Contract |
+| --- | --- |
+| `jumpToPage(page, options?)` | One-based page; `align` defaults to `"start"`, `behavior` to `"smooth"` |
+| `jumpToOffset(offset)` | Scroll pixels; smooth scrolling |
+| `jumpToHighlightRects(rects, type, align?, additionalOffset?)` | Replaces highlights and scrolls; `type` is `"pixels"` or `"percent"` |
+| `scrollToHighlightRects(rects, type, align?, additionalOffset?, behavior?)` | Scrolls without replacing highlights; returns whether an offset could be resolved |
+
+For rectangle navigation, `align` is `"start"` or `"center"` (default `"start"`), `additionalOffset` defaults to `0`, and scroll behavior defaults to `"smooth"`. Use [the coordinate contract](/docs/code/highlight#coordinate-contract) when supplying your own rectangles.
+
+## Search and selection
+
+| Export | Scope and result |
+| --- | --- |
+| `Search` | Under `Root`; indexes every page's text; accepts `children` and `loading` |
+| `useSearch()` | Under `Root`; returns `search`, `searchResults`, `textContent`, and `keywords` (currently an empty array) |
+| `calculateHighlightRects(pageProxy, textPosition)` | Async utility returning `HighlightRect[]` for a text match |
+| `SelectionTooltip` | Under `Root`; displays children for a selection; mount once per viewer |
+| `useSelectionDimensions()` | Under `Root`; `getDimension()` reads text and rectangles, `getAnnotationDimension()` also computes underlines |
+| `usePDFPageNumber()` | Under `Page`; current one-based page number |
+| `usePageRendered(pageNumber)` | Under `Root`; reads whether that page is marked rendered |
+
+Use `getDimension()` with an undefined check. The `getSelection()` alias has a stronger return type than its runtime guarantee, so it does not remove that need. See [search](/docs/code/search) for options, result allocation, and indexing cost, and [selection](/docs/code/select) for a complete action.
+
+## Annotation and link integrations
+
+The package also exports `AnnotationsStoreProvider`, `useAnnotations`, `AnnotationTooltip`, and the `Annotation` and `AnnotationTooltipContentProps` types for application-owned annotations. These use a separate annotation store; `Root` does not install that provider for you. Wrap each independent annotation session in `AnnotationsStoreProvider`; without it, `useAnnotations` uses a shared fallback store. The docs site's [annotation demo source](https://github.com/anaralabs/lector/tree/main/packages/docs/app/(home)/_components) shows their composition.
+
+`LinkService`, `PDFLinkServiceContext`, `useCreatePDFLinkService`, and `usePDFLinkService` expose the PDF link integration. `Root` installs the service; `AnnotationLayer` connects destination changes to scrolling. Use [PDF links](/docs/code/links) for the normal integration.
+
+## Public types and color utilities
+
+`HighlightRect`, `ColoredHighlight`, `SearchResult`, and `SearchResults` describe overlay and search data. `ColorScheme`, `DarkModeColors`, and `RenderColorMap` describe color configuration. `DEFAULT_DARK_MODE_COLORS` and `createDarkModeColorMap` let your overlays use the same palette as the page. See [dark mode](/docs/dark-mode).
+
+Component props are inferred from the components rather than all being exported as named interfaces. For a wrapper, derive them with `React.ComponentProps<typeof Root>` (or the component you wrap).

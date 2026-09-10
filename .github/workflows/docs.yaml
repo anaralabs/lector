@@ -1,0 +1,57 @@
+name: Documentation
+
+on:
+  pull_request:
+    paths:
+      - "packages/docs/**"
+      - "packages/lector/**"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - ".github/workflows/docs.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/docs/**"
+      - "packages/lector/**"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - ".github/workflows/docs.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agent-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter docs lint
+      - run: pnpm --filter docs test:agents
+      - run: pnpm --filter @anaralabs/lector build
+      - run: pnpm --filter docs build
+      - name: Check every guide and both MCP client generations over HTTP
+        shell: bash
+        run: |
+          pnpm --filter docs start > /tmp/lector-docs.log 2>&1 &
+          docs_pid=$!
+          trap 'kill "$docs_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://localhost:3000/llms.json > /dev/null; then
+              pnpm --filter docs test:agents:integration
+              exit $?
+            fi
+            if ! kill -0 "$docs_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          cat /tmp/lector-docs.log
+          exit 1

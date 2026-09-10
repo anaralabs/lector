@@ -1,0 +1,86 @@
+---
+title: Troubleshooting
+description: Diagnose worker errors, blank pages, misplaced layers, reload loops, and missing search results.
+---
+
+Start with the [basic example](/docs/code/basic), a local PDF, and the browser's Console and Network tabs. Fix the first failed request or exception before adding optional layers back.
+
+## The viewer is blank
+
+Check these in order:
+
+1. Open the PDF's URL directly. It must return PDF bytes, not a login page, a 404, or your app's HTML shell.
+2. Inspect `Root` and the parent of `Pages`. They need a nonzero, bounded height. With a toolbar, use [the flex layout](/docs/basic-usage#give-the-pages-room-to-scroll).
+3. Confirm `Pages` contains one `Page` template with a `CanvasLayer`.
+4. Check the worker request and any failed `.wasm`, character-map, or font requests.
+5. Add [`onError`](/docs/document-loading#show-errors-and-retry) so a load failure is not hidden behind the loader.
+
+If ordinary PDFs work but scans are blank, check image-decoder requests. Lector's default decoders come from jsDelivr; blocked CDN requests can prevent JPEG2000 or JBIG2 image content from rendering. [Self-host the auxiliary assets](/docs/document-loading#self-host-pdfjs-assets) if needed.
+
+## No workerSrc, fake-worker, or version-mismatch errors
+
+Configure `GlobalWorkerOptions` from `pdfjs-dist/legacy/build/pdf.mjs`, the same build Lector imports. Configure it before `Root` mounts.
+
+| Symptom | Check |
+| --- | --- |
+| Worker URL returns 404 | Public path, deployment prefix, and copied filename |
+| Worker URL returns HTML | SPA fallback or route interception |
+| Browser refuses the worker | Response MIME type and the browser's CSP error |
+| API version differs from worker version | Recopy the worker from the installed package; invalidate stale deployment caches |
+| Multiple PDF.js versions installed | Inspect `pnpm why pdfjs-dist` or `npm ls pdfjs-dist` |
+
+Keep the worker and auxiliary assets in sync when upgrading. See [worker setup](/docs/installation#configure-the-worker).
+
+## DOMMatrix, window, or document is not defined
+
+PDF.js or viewer code is being evaluated on the server. In Next.js, use the [client wrapper with `ssr: false`](/docs/installation#nextjs-keep-the-viewer-out-of-server-rendering), and keep `pdf-setup` inside the dynamically imported module. `"use client"` alone does not disable prerendering.
+
+## The document keeps reloading
+
+Check whether `source` is a new object on every render:
+
+```tsx
+// A new source reference on every render:
+<Root source={{ url: "/sample.pdf" }} />
+
+// A stable string for a public URL:
+<Root source="/sample.pdf" />
+```
+
+Memoize objects containing headers or other loading parameters. Keep binary data in state or a stable reference. Avoid changing the viewer's React `key` unless you intend to reset its state.
+
+## Text, links, or highlights are misplaced
+
+Import `pdfjs-dist/web/pdf_viewer.css`. Check that your CSS does not override PDF.js text positioning, page dimensions, or scale variables. Remove application-level transforms on `Pages`, `Page`, and the layers.
+
+For custom highlights, distinguish scale-1 page pixels, percentages, screen coordinates, and raw PDF coordinates. A percent rectangle needs `type: "percent"` on the rectangle itself. See [highlight coordinates](/docs/code/highlight#coordinate-contract).
+
+## Hooks throw or controls do nothing
+
+Viewer hooks must run in descendants of `Root`. Page-specific hooks and layers need a `Page` ancestor too. A hook called before returning `<Root>` is outside the provider.
+
+Page navigation requires a mounted `Pages` container. Page numbers start at 1. `NextPage` and `PreviousPage` are placeholders; use [custom controls](/docs/code/page-navigation). `setCurrentPage` changes state without scrolling; use `jumpToPage` instead.
+
+## Search has no results or fewer results than expected
+
+Mount `Search` under `Root` to populate the text index before using `useSearch`. Check whether the PDF has embedded text; image-only scans require OCR outside Lector. Visually adjacent words may be extracted with unexpected spacing or order.
+
+The result limit is split between exact and fuzzy groups, so it is not an exact-match count. See [search limits](/docs/code/search#search-options-and-results) before building pagination. Search runs across the whole text index, so it can take time on long PDFs even with a small result limit.
+
+## Form values disappear from a DOM export
+
+Offscreen pages are virtualized and their form controls may be unmounted. `FormData` only sees mounted HTML controls. Use the PDF.js document's [saveDocument()](/docs/code/pdf-form) for an edited PDF and annotation storage for document-level form state.
+
+## Scrolling or zooming is slow
+
+Reproduce with a representative PDF on the target device. Compare canvas-only rendering with text, annotation, search, and thumbnail features added one at a time. Keep `virtualizerOptions.overscan` small; more pages mean more rendering work. Search extraction visits every page independently of page virtualization.
+
+Use narrow `usePdf` selectors so unrelated state changes do not rerender a whole toolbar or sidebar. Avoid rebuilding the source object during interactions. Confirm the problem occurs in a production build as well as development before reporting performance measurements.
+
+## Report an actionable issue
+
+Include the installed Lector, React, and PDF.js versions; browser and framework versions; a minimal reproduction; the exact error and failed request status; and expected versus actual behavior. Note whether it happens in development, production, or both.
+
+Attach a shareable PDF or a reduced document that reproduces the problem. Remove private content and request credentials. A page count alone cannot describe the fonts, images, annotations, or structure that trigger PDF rendering bugs.
+
+[Open an issue](https://github.com/anaralabs/lector/issues/new).
