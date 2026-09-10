@@ -103,3 +103,26 @@ export default WithThumbnails;
 - Implement smooth transitions
 - Add hover effects for interaction feedback
 - Optimize thumbnail rendering
+
+## Virtual thumbnails for long documents
+
+For hundreds or thousands of pages, opt into a bounded list. Give `Thumbnails`
+a bounded height and specify the fixed height of each row, including spacing:
+
+```tsx
+<Thumbnails
+  style={{ height: 450, width: 140 }}
+  virtualize={{ itemHeight: 150, overscan: 2 }}
+>
+  <Thumbnail style={{ height: 130, width: "auto" }} />
+</Thumbnails>
+```
+
+The container owns scrolling and mounts only nearby rows. Ensure each child's
+content fits `itemHeight`; margins, padding and spacing belong inside that row.
+The default layout remains available by omitting `virtualize`.
+
+With a thumbnail focused, Arrow Up/Down moves between pages, and Home/End moves
+to the first/last page, mounting the target before focusing it. Enter opens the
+focused page. Consumer keyboard handlers can call `preventDefault()` to override
+the virtual list's navigation keys.

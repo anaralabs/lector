@@ -11,13 +11,19 @@ test("two Search consumers share extraction with bounded PDF.js concurrency", as
 		calls = 0;
 	const pages = Array.from({ length: 100 }, (_, i) => ({
 		pageNumber: i + 1,
-		getTextContent: vi.fn(async () => {
-			calls++;
-			peak = Math.max(peak, ++active);
-			await new Promise((resolve) => setTimeout(resolve, 1));
-			active--;
-			return { items: [{ str: `page ${i + 1}` }] };
-		}),
+		streamTextContent: vi.fn(
+			() =>
+				new ReadableStream({
+					async start(controller) {
+						calls++;
+						peak = Math.max(peak, ++active);
+						await new Promise((resolve) => setTimeout(resolve, 1));
+						active--;
+						controller.enqueue({ items: [{ str: `page ${i + 1}` }] });
+						controller.close();
+					},
+				}),
+		),
 	})) as unknown as PDFPageProxy[];
 	const view = render(
 		<>

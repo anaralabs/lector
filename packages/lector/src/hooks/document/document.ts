@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { InitialPDFState, ZoomOptions } from "../../internal";
 import type { ColorScheme, DarkModeColors } from "../../lib/dark-mode";
+import { mapConcurrent } from "../../lib/map-concurrent";
 import { getDefaultPdfJsAssetUrls, loadPdfJs } from "../../lib/pdfjs";
 import {
 	createRecolorCanvasFactory,
@@ -182,8 +183,10 @@ export const usePDFDocumentContext = ({
 		let isDisposed = false;
 		const generateViewports = async (pdf: PDFDocumentProxy) => {
 			const pageProxies: Array<PDFPageProxy> = [];
-			const viewports = await Promise.all(
-				Array.from({ length: pdf.numPages }, async (_, index) => {
+			const viewports = await mapConcurrent(
+				Array.from({ length: pdf.numPages }, (_, index) => index),
+				16,
+				async (index) => {
 					const page = await pdf.getPage(index + 1);
 					// sometimes there is information about the default rotation of the document
 					// stored in page.rotate. we need to always add that additional rotaton offset
@@ -194,7 +197,8 @@ export const usePDFDocumentContext = ({
 					});
 					pageProxies[index] = page;
 					return viewport;
-				}),
+				},
+				() => isDisposed,
 			);
 
 			if (isDisposed) return;

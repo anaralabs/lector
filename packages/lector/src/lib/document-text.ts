@@ -1,4 +1,5 @@
 import type { PDFPageProxy } from "pdfjs-dist";
+import type { TextContent } from "pdfjs-dist/types/src/display/api";
 
 type PageText = { pageNumber: number; text: string };
 type Job = {
@@ -23,14 +24,37 @@ export function acquireDocumentText(pages: PDFPageProxy[]) {
 				signal.throwIfAborted();
 				const index = next++;
 				const page = pages[index]!;
-				const content = await page.getTextContent();
-				signal.throwIfAborted();
-				result[index] = {
-					pageNumber: page.pageNumber,
-					text: content.items
-						.map((item) => ("str" in item ? item.str : ""))
-						.join(""),
-				};
+				// Explicit reads work in WebKit without ReadableStream async iteration.
+				// Retain strings only, instead of the whole page's position objects.
+				const reader: ReadableStreamDefaultReader<TextContent> = page
+					.streamTextContent()
+					.getReader();
+				const chunks: string[] = [];
+				let complete = false;
+				try {
+					while (true) {
+						const { value, done } = await reader.read();
+						signal.throwIfAborted();
+						if (done) {
+							complete = true;
+							break;
+						}
+						chunks.push(
+							value.items
+								.map((item) => ("str" in item ? item.str : ""))
+								.join(""),
+						);
+					}
+				} finally {
+					// PDF.js requires an Error reason; worker acknowledgements must
+					// not delay cancellation of the library's indexing job.
+					if (!complete)
+						void reader
+							.cancel(new Error("Text indexing stopped"))
+							.catch(() => {});
+					reader.releaseLock();
+				}
+				result[index] = { pageNumber: page.pageNumber, text: chunks.join("") };
 			}
 		};
 		const created: Job = {

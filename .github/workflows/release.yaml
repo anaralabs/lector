@@ -43,8 +43,14 @@ jobs:
         run: pnpm lint
 
   test:
-    name: Library tests and performance regressions
+    name: Library tests (${{ matrix.browser }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      LECTOR_TEST_BROWSER: ${{ matrix.browser }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -54,7 +60,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Install test browser
-        run: pnpm --filter @anaralabs/lector exec playwright install --with-deps chromium
+        run: pnpm --filter @anaralabs/lector exec playwright install --with-deps ${{ matrix.browser }}
       - name: Build library
         run: pnpm --filter @anaralabs/lector build
       - name: Check types, unit tests, browser regressions and bundle size

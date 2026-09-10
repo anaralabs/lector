@@ -78,11 +78,13 @@ function insertMatch(
 	if (matches.length > limit) matches.pop();
 }
 
-export function searchDocument(
+function* runSearch(
 	pages: SearchPage[],
 	searchText: string,
 	options: SearchOptions = {},
-): SearchResults {
+	cooperative = false,
+	budget = 8,
+): Generator<void, SearchResults> {
 	const empty = { exactMatches: [], fuzzyMatches: [], hasMoreResults: false };
 	if (!searchText.trim()) return empty;
 	const threshold = Math.max(0, Math.min(1, options.threshold ?? 0.7));
@@ -98,6 +100,8 @@ export function searchDocument(
 	const fuzzyMatches: SearchResult[] = [];
 	let exactCount = 0;
 	let fuzzyCount = 0;
+	let steps = 0;
+	let deadline = cooperative ? performance.now() + budget : 0;
 
 	for (const page of pages) {
 		const lower = normalize(page);
@@ -106,6 +110,14 @@ export function searchDocument(
 		const exactStarts: number[] = [];
 		let index = 0;
 		while (true) {
+			if (
+				cooperative &&
+				(++steps & 127) === 0 &&
+				performance.now() >= deadline
+			) {
+				yield;
+				deadline = performance.now() + budget;
+			}
 			const matchIndex = lower.indexOf(query, index);
 			if (matchIndex === -1) break;
 			exactCount++;
@@ -127,6 +139,14 @@ export function searchDocument(
 		index = 0;
 		let exactIndex = 0;
 		while (index < lower.length) {
+			if (
+				cooperative &&
+				(++steps & 127) === 0 &&
+				performance.now() >= deadline
+			) {
+				yield;
+				deadline = performance.now() + budget;
+			}
 			while (
 				exactIndex < exactStarts.length &&
 				exactStarts[exactIndex]! + searchText.length <= index
@@ -173,4 +193,39 @@ export function searchDocument(
 		fuzzyMatches: fuzzyMatches.slice(0, limit - exactLimit),
 		hasMoreResults: exactCount + fuzzyCount > limit,
 	};
+}
+
+export function searchDocument(
+	pages: SearchPage[],
+	searchText: string,
+	options: SearchOptions = {},
+): SearchResults {
+	// The synchronous iterator never yields; both APIs use identical ranking.
+	return runSearch(pages, searchText, options).next().value as SearchResults;
+}
+
+export interface AsyncSearchOptions extends SearchOptions {
+	/** Cancelling rejects with AbortError and never publishes partial results. */
+	signal?: AbortSignal;
+	/** Approximate work budget between yields; defaults to 8 ms. */
+	timeSliceMs?: number;
+}
+
+export async function searchDocumentAsync(
+	pages: SearchPage[],
+	searchText: string,
+	options: AsyncSearchOptions = {},
+): Promise<SearchResults> {
+	const budget = Number.isFinite(options.timeSliceMs)
+		? Math.max(1, options.timeSliceMs!)
+		: 8;
+	const iterator = runSearch(pages, searchText, options, true, budget);
+	while (true) {
+		if (options.signal?.aborted)
+			throw new DOMException("Search aborted", "AbortError");
+		const result = iterator.next();
+		if (result.done) return result.value;
+		// A real task boundary lets input, rendering and cancellation proceed.
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+	}
 }

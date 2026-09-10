@@ -16,7 +16,8 @@
 		}
 	},
 	"files": [
-		"dist"
+		"dist",
+		"esm-only.cjs"
 	],
 	"publishConfig": {
 		"access": "public"
@@ -34,7 +35,10 @@
 		"prepack": "./scripts/prepack.sh",
 		"prepare": "tsup",
 		"test:browser": "vitest run",
+		"test:package": "node scripts/check-package.mjs",
 		"test:types": "tsc --noEmit",
+		"bench:corpus": "vitest run --config vitest.bench.config.ts",
+		"bench:second-pass": "vitest run tests/annotations.browser.test.tsx tests/thumbnails.browser.test.tsx tests/long-document.browser.test.tsx tests/search-async.browser.test.tsx tests/highlight-stream.browser.test.tsx",
 		"bench:performance": "vitest run tests/performance.browser.test.tsx tests/observers.browser.test.tsx tests/extraction.browser.test.tsx tests/document.browser.test.tsx tests/pages.browser.test.tsx"
 	},
 	"devDependencies": {

@@ -229,3 +229,29 @@ export default function CustomSearchExample() {
 - Include proper page navigation
 - Handle empty states gracefully
 - Optimize search performance
+
+## Responsive search in long documents
+
+`useSearch()` also exposes `searchAsync`, `cancelSearch`, and `isSearching`.
+`searchAsync` returns the same ranked results as `search`, but yields between
+batches so the browser can process input. It defaults to an approximate 8 ms work
+budget. Scheduling can increase total search time; the benefit is responsiveness.
+
+```tsx
+const { searchAsync, cancelSearch, searchResults, isSearching } = useSearch();
+const [searchError, setSearchError] = useState<Error | null>(null);
+
+useEffect(() => {
+  setSearchError(null);
+  void searchAsync(debouncedSearchText, { limit: 10 }).catch((error) => {
+    if (error.name !== "AbortError") setSearchError(error);
+  });
+  return cancelSearch;
+}, [debouncedSearchText, searchAsync, cancelSearch]);
+```
+
+A newer call to either search method cancels pending async work from that hook.
+Unmounting or replacing document text also cancels it. Cancelled calls reject
+with `AbortError` and never publish partial results. You can pass an external
+`AbortSignal` through `{ signal }` or adjust `{ timeSliceMs }` when needed.
+Keep the component inside `<Root>` and use `<Search>` to index the document.

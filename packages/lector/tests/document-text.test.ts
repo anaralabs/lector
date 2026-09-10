@@ -5,7 +5,17 @@ import { acquireDocumentText } from "../src/lib/document-text";
 function pagesWith(getTextContent: () => Promise<unknown>, count = 10) {
 	return Array.from({ length: count }, (_, i) => ({
 		pageNumber: i + 1,
-		getTextContent,
+		streamTextContent: () =>
+			new ReadableStream({
+				async start(controller) {
+					try {
+						controller.enqueue(await getTextContent());
+						controller.close();
+					} catch (error) {
+						controller.error(error);
+					}
+				},
+			}),
 	})) as unknown as PDFPageProxy[];
 }
 
