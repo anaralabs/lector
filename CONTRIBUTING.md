@@ -58,6 +58,7 @@ Run commands from the repository root:
 | --- | --- |
 | Library implementation | `pnpm --filter @anaralabs/lector build` and the relevant unit/browser tests |
 | Docs pages or examples | `pnpm --filter docs build` after building the library |
+| Agent exports or MCP | `pnpm --filter docs test:agents`, then `test:agents:integration` against a production docs server |
 | Formatting and lint | `pnpm lint` (the current CI check); for docs specifically, also run `pnpm --filter docs lint` directly |
 | Package size | `pnpm --filter @anaralabs/lector test:size` after building |
 | Full library test scripts | `pnpm --filter @anaralabs/lector test` |

@@ -66,3 +66,48 @@ The loader inserts a no-op reference so webpack's scope analysis can rename the 
 When upgrading Next.js, verify the bundled webpack includes the fix and test the PDF demos in development before removing the loader and config rule together. A successful production build alone does not exercise this development-only workaround.
 
 For the broader local workflow and PR conventions, see [CONTRIBUTING.md](../../CONTRIBUTING.md).
+
+## Agent documentation and MCP
+
+The MDX build runs `lib/remark-agent-markdown.ts` before compiling components. It exports `agentMarkdown` alongside each page's rendered body. `lib/agent-docs/source.ts` consumes those exports to build a single catalog used by all machine-facing routes:
+
+- `/llms.txt`: discovery index linking every guide.
+- `/llms-full.txt`: the complete Markdown corpus.
+- `/llms.json`: catalog metadata, resource URIs, page hashes, and a corpus revision.
+- `/docs/<slug>.md`: an individual guide, served through a Next.js rewrite to `/api/docs/<slug>`. The overview is `/docs/index.md`.
+- `/mcp`: public, read-only search, retrieval, resources, and an integration prompt over Streamable HTTP.
+
+New MDX pages enter the catalog automatically. Add them to the sidebar as usual. Never maintain a second copy of guide content for agents. The export preserves Markdown and code fences, unwraps prose in components, and replaces known live examples with a pointer to the HTML page. When adding an interactive demo, add its component name to `interactiveExamples` in the export plugin. Unsupported MDX expressions or empty components fail the build: provide equivalent prose or implement an explicit export mapping so useful information is not silently discarded.
+
+The content hashes identify the exported Markdown, including its source URL; they are not npm versions or Git commit IDs. The docs track the deployed source. Do not claim that the catalog describes every historical release.
+
+### Deployment configuration
+
+Set these environment variables **before building** and keep the same values at runtime:
+
+| Variable | Default / purpose |
+| --- | --- |
+| `DOCS_SITE_URL` | `https://lector-weld.vercel.app`; set to your site's origin for canonical links in Markdown and the catalog. Use `http://localhost:3000` for a fully local export. Subpath hosting is not configured by this variable. |
+| `MCP_ALLOWED_ORIGINS` | Optional comma-separated origins of trusted browser-based MCP clients, for example `https://assistant.example`. No wildcard; each origin includes scheme and port if nonstandard. |
+
+MCP requests with an `Origin` header must match the docs origin, Vercel deployment origin (`VERCEL_URL`), an explicitly configured client origin, or localhost port 3000 in development. Native clients may omit `Origin`. Direct Markdown/catalog endpoints allow cross-origin reads. No authentication or application secrets are needed for these public docs.
+
+The MCP handler creates a server per request, so it does not require sticky sessions or shared session storage. It uses the official MCP server SDK and accepts both current per-request traffic and the 2025 initialization handshake. GET and DELETE return 405; there is no persistent event subscription or old `/sse` endpoint. POST bodies are limited to 64 KiB. The tool schema limits search input and result count; retrieval can only read known catalog slugs. Put deployment-level rate limits in front of the endpoint if traffic requires them.
+
+### Validate exports and protocol behavior
+
+```bash
+pnpm --filter docs test:agents
+pnpm --filter docs build
+pnpm --filter docs start
+```
+
+With that production server running, use another terminal:
+
+```bash
+DOCS_URL=http://localhost:3000 pnpm --filter docs test:agents:integration
+```
+
+The unit suite checks export handling, keyword ranking, content revisions, input errors, origin checks, request-size limits, and tool/resource/prompt behavior using official current and legacy MCP clients. The HTTP suite compares the complete MDX inventory with the catalog, verifies every code fence and Markdown discovery link, and reads every guide through both clients' tools and resources. `.github/workflows/docs.yaml` runs these checks against a production build on pull requests and main.
+
+When upgrading Fumadocs or MCP dependencies, run both suites: compile-time MDX exports and transport behavior are compatibility boundaries. See the public [agent guide](content/docs/agents.mdx) for client setup and usage.

@@ -66,6 +66,12 @@ For **Next.js**, load the viewer through a Client Component using `dynamic(..., 
 
 Lector is a toolkit rather than a finished toolbar or a PDF editor. Your app supplies accessible controls, error UI, and storage for user annotations. Search requires embedded text; it does not perform OCR. Custom highlight overlays do not automatically modify the PDF file. See [troubleshooting](https://lector-weld.vercel.app/docs/troubleshooting) for worker errors, blank pages, and layout issues.
 
+## Use with a coding assistant
+
+Connect an MCP client to `https://lector-weld.vercel.app/mcp` using Streamable HTTP, with no API key. It can search and read every guide through tools and resources. See [AI agents and MCP](https://lector-weld.vercel.app/docs/agents) for setup and example requests.
+
+For direct fetching, start with [llms.txt](https://lector-weld.vercel.app/llms.txt), read [individual Markdown guides](https://lector-weld.vercel.app/docs/installation.md), or use the [complete documentation](https://lector-weld.vercel.app/llms-full.txt). These exports are generated from the same source as the website.
+
 ## Work on Lector
 
 From the repository root, with Node.js 22.13+ and pnpm 9.5.0:
