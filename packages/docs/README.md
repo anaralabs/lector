@@ -23,6 +23,7 @@ Open [localhost:3000/docs](http://localhost:3000/docs). For library changes, als
 | `content/docs/code/meta.json` | Feature recipe order |
 | `content/docs/**/*.mdx` | Guide content; filename determines the URL |
 | `components/` | Live feature demos imported by MDX pages |
+| `components/example-root.tsx` | Shared live-example theme, fit-width defaults, and viewer styling |
 | `public/pdf/` | Shareable PDFs used by demos |
 | `lib/setup.ts` | PDF.js worker and stylesheet setup for this site |
 | `app/docs/[[...slug]]/page.tsx` | Rendering, table of contents, and page metadata |
@@ -43,6 +44,18 @@ pnpm --filter docs lint
 The build validates MDX, imports, routes, and the application's TypeScript. It does not type-check fenced TypeScript examples. Validate changed complete examples against the built library separately, then inspect the page in the browser, including the sidebar, headings, code blocks, tables, and live demo. Check a narrow viewport and follow new links.
 
 Fumadocs generates `.source/`; Next.js generates `.next/`. Neither should be committed. Use the root workspace lockfile for dependency changes, even though this directory contains a historical lockfile.
+
+## Live-example regression check
+
+All live examples use `ExampleRoot`, which follows the docs theme and starts in fit-width mode. Use theme tokens for controls and panels as well as passing the document color scheme. Keep example-specific sidebars shrinkable or stack them at narrow widths.
+
+With the docs server running, run this from the repository root:
+
+```bash
+DOCS_URL=http://localhost:3000 pnpm --filter @anaralabs/lector exec node scripts/check-docs-examples.mjs
+```
+
+The script uses the library's Playwright dependency. Install its Chromium browser with `pnpm --filter @anaralabs/lector exec playwright install chromium`, or set `PLAYWRIGHT_EXECUTABLE_PATH` to an existing Chromium executable. It checks all nine recipe routes at desktop and phone widths for centered pages, horizontal clipping, and actual canvas pixel changes through dark → light → dark theme switches. Set `DOCS_SCREENSHOTS` to an output directory to capture the rendered pages.
 
 ## PDF.js webpack compatibility loader
 
