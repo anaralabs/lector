@@ -1,44 +1,41 @@
-<p align="center">
-  <p align="center">
-    <i>Simple primitives to compose powerful PDF viewing experiences.<br>powered by <code><a href="https://mozilla.github.io/pdf.js/">PDF.js</a></code> and <code><a href="https://reactjs.org/">React</a></code></i>
-  </p>
-</p>
+# Lector
 
-# `lector`
+**A headless PDF viewer for React.** Compose pages, text selection, search, and annotations into your own reading experience. Lector handles PDF.js rendering and page virtualization; you control the layout and UI.
 
-A composable, headless PDF viewer toolkit for React applications, powered by `PDF.js`. Build feature-rich PDF viewing experiences with full control over the UI and functionality.
+[Documentation](https://lector-weld.vercel.app/docs) · [Live demo](https://lector-weld.vercel.app) · [npm](https://www.npmjs.com/package/@anaralabs/lector) · [Contributing](https://github.com/anaralabs/lector/blob/main/CONTRIBUTING.md)
 
-[![npm version](https://badge.fury.io/js/@anaralabs%2Flector.svg)](https://www.npmjs.com/package/@anaralabs/lector)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+## Get a PDF on screen
 
-## Installation
+Use React 19+. The current source expects `pdfjs-dist` `^5.5.207`. These docs track `main`; check the [releases](https://github.com/anaralabs/lector/releases) against your installed package version.
 
 ```bash
-npm install @anaralabs/lector pdfjs-dist
-
-# or with yarn
-yarn add @anaralabs/lector pdfjs-dist
-
-# or with pnpm
-pnpm add @anaralabs/lector pdfjs-dist
+npm install @anaralabs/lector pdfjs-dist@^5.5.207
 ```
 
-## Basic Usage
+Copy the PDF.js worker from your app's installed dependency to its public assets. Recopy it whenever you update PDF.js so the runtime and worker versions match.
 
-Here's a simple example of how to create a basic PDF viewer:
+```bash
+mkdir -p public/pdfjs
+cp node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs public/pdfjs/
+```
+
+Put a PDF at `public/sample.pdf`, then add this browser-rendered component:
 
 ```tsx
 import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
+import { GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
 import "pdfjs-dist/web/pdf_viewer.css";
+
+GlobalWorkerOptions.workerSrc = "/pdfjs/pdf.worker.min.mjs";
 
 export default function PDFViewer() {
   return (
     <Root
       source="/sample.pdf"
-      className="w-full h-[500px] border overflow-hidden rounded-lg"
-      loader={<div className="p-4">Loading...</div>}
+      style={{ height: 600 }}
+      loader={<p role="status">Loading PDF…</p>}
     >
-      <Pages className="p-4">
+      <Pages>
         <Page>
           <CanvasLayer />
           <TextLayer />
@@ -49,68 +46,42 @@ export default function PDFViewer() {
 }
 ```
 
-## Local Development using PNPM and Yalc
+For **Next.js**, load the viewer through a Client Component using `dynamic(..., { ssr: false })`; keep PDF.js setup inside the dynamically loaded module. See [installation](https://lector-weld.vercel.app/docs/installation) for the full wrapper, Vite worker setup, and deployments below a path prefix.
 
-When you are using "pnpm link", you are bound to use pnpm on your consumer project when you are developing locally.
-With yalc, we are decoupling the need for pnpm and now the package can be tested with any package managers. Any
-changes should be automatically published to yalc on save, forcing a rebuilt and updating the consumer project.
+`Root` loads the document and provides its state. `Pages` owns scrolling and clones one `Page` template for visible pages. `CanvasLayer` paints the PDF; `TextLayer` adds selectable text. Give the viewer a definite height and import the PDF.js stylesheet so its layers align.
 
-Install yalc globally:
+## Build the reader your app needs
 
-```
-pnpm i yalc -g
-```
+| Feature | Start here |
+| --- | --- |
+| Toolbar, page input, and layout | [Your first viewer](https://lector-weld.vercel.app/docs/basic-usage) |
+| Authenticated URLs, local files, errors, and self-hosted assets | [Loading documents](https://lector-weld.vercel.app/docs/document-loading) |
+| Page navigation and fit width | [Navigation](https://lector-weld.vercel.app/docs/code/page-navigation), [zoom](https://lector-weld.vercel.app/docs/code/zoom-control) |
+| Page previews | [Thumbnails](https://lector-weld.vercel.app/docs/code/thumbnails) |
+| Text search and highlighted results | [Search](https://lector-weld.vercel.app/docs/code/search) |
+| Selection and citation regions | [Selection](https://lector-weld.vercel.app/docs/code/select), [highlights](https://lector-weld.vercel.app/docs/code/highlight) |
+| PDF links and editable form fields | [Links](https://lector-weld.vercel.app/docs/code/links), [forms](https://lector-weld.vercel.app/docs/code/pdf-form) |
+| Dark page rendering | [Dark mode](https://lector-weld.vercel.app/docs/dark-mode) |
+| Props, hooks, and defaults | [API reference](https://lector-weld.vercel.app/docs/api) |
 
-From lector:
+Lector is a toolkit rather than a finished toolbar or a PDF editor. Your app supplies accessible controls, error UI, and storage for user annotations. Search requires embedded text; it does not perform OCR. Custom highlight overlays do not automatically modify the PDF file. See [troubleshooting](https://lector-weld.vercel.app/docs/troubleshooting) for worker errors, blank pages, and layout issues.
 
-```bash
-# navigate to lector package folder and install dependencies
-pnpm i
-# when you first start development, make sure you publish the package locally
-yalc publish
-# and run the project in development mode to start a watcher that rebuilds the project and pushes the changes locally on save
-pnpm dev
-```
+## Work on Lector
 
-From consumer project:
-(It doesn't really matter what package manager you are using)
+From the repository root, with Node.js 22.13+ and pnpm 9.5.0:
 
 ```bash
-# add local package to your package.json of the consumer project using yalc
-yalc add @anaralabs/lector
-# or if you don't want to add the yalc package in your package.json
-yalc link @anaralabs/lector
+pnpm install --frozen-lockfile
+pnpm --filter @anaralabs/lector build
+pnpm --filter docs dev
 ```
 
-## Features
+Open [localhost:3000/docs](http://localhost:3000/docs). The docs app uses the local workspace package. For watch mode, validation commands, and testing in another application, read [CONTRIBUTING.md](https://github.com/anaralabs/lector/blob/main/CONTRIBUTING.md).
 
-- 📱 Responsive and mobile-friendly
-- 🎨 Fully customizable UI components
-- 🔍 Text selection and search functionality
-- 📑 Page thumbnails and outline navigation
-- 🌗 First-class dark mode support
-- 🖱️ Pan and zoom controls
-- 📝 Form filling support
-- 🔗 Internal and external link handling
+## Acknowledgements
 
-## Contributing
-
-We welcome contributions! Key areas we're focusing on:
-
-1. Performance optimizations
-2. Accessibility improvements
-3. Mobile/touch interactions
-4. Documentation and examples
-
-
-
-## Thanks
-
-Special thanks to these open-source projects that provided inspiration:
-
-- [react-pdf-headless](https://github.com/jkgenser/react-pdf-headless)
-- [pdfreader](https://github.com/OnedocLabs/pdfreader)
+Inspired by [react-pdf-headless](https://github.com/jkgenser/react-pdf-headless) and [pdfreader](https://github.com/OnedocLabs/pdfreader). Built on [PDF.js](https://mozilla.github.io/pdf.js/) and [React](https://react.dev/).
 
 ## License
 
-MIT © [Anara](https://anara.com)
+[MIT](https://github.com/anaralabs/lector/blob/main/LICENSE) © [Anara](https://anara.com)
