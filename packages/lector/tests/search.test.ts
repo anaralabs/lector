@@ -66,3 +66,28 @@ test("zero limits, thresholds, shorter tail windows and replaced text are safe",
 		searchDocument(pages, "document", { threshold: 1 }).exactMatches,
 	).toHaveLength(1);
 });
+
+test("Unicode case expansion preserves original offsets, snippets and match lengths", () => {
+	for (const [text, query, index, length] of [
+		["İ document", "document", 2, 8],
+		["İ documant", "document", 2, 8],
+		["İİ", "i\u0307", 0, 1],
+		["i\u0307!", "İ", 0, 2],
+		["😀 İ document", "document", 5, 8],
+	] as const) {
+		const results = searchDocument([{ pageNumber: 1, text }], query);
+		const match = [...results.exactMatches, ...results.fuzzyMatches][0]!;
+		expect(match.matchIndex).toBe(index);
+		expect(match.text).toBe(text.slice(index));
+		expect(match.matchLength ?? query.length).toBe(length);
+	}
+	const matches = searchDocument([{ pageNumber: 1, text: "İİ" }], "i\u0307", {
+		threshold: 1,
+	});
+	expect(matches.exactMatches.map((match) => match.matchIndex)).toEqual([0, 1]);
+	// Preserve whole-string lowercasing, including context-sensitive Greek sigma.
+	expect(
+		searchDocument([{ pageNumber: 1, text: "İ ΟΣ" }], "ος", { threshold: 1 })
+			.exactMatches[0]?.matchIndex,
+	).toBe(2);
+});

@@ -8,6 +8,7 @@ interface TextPosition {
 	pageNumber: number;
 	text: string;
 	matchIndex: number;
+	matchLength?: number;
 	searchText?: string; // Optional parameter to specify the exact search text to highlight
 }
 
@@ -15,11 +16,14 @@ export async function calculateHighlightRects(
 	pageProxy: PDFPageProxy,
 	textMatch: TextPosition,
 ): Promise<HighlightRect[]> {
-	const matchLength = textMatch.searchText
-		? textMatch.searchText.length
-		: textMatch.text.length;
+	const matchLength =
+		textMatch.matchLength ??
+		(textMatch.searchText
+			? textMatch.searchText.length
+			: textMatch.text.length);
 	if (
-		matchLength === 0 ||
+		!Number.isFinite(matchLength) ||
+		matchLength <= 0 ||
 		!Number.isFinite(textMatch.matchIndex) ||
 		textMatch.matchIndex < 0
 	)
@@ -112,6 +116,7 @@ export async function processSearchResults(
 		pageNumber: result.pageNumber,
 		text: result.text,
 		matchIndex: result.matchIndex,
+		matchLength: result.matchLength,
 		searchText: searchTermToHighlight,
 	});
 

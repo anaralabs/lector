@@ -9,17 +9,64 @@ export interface SearchOptions {
 type SearchPage = { pageNumber: number; text: string };
 // Weak keys let replaced documents be collected; no duplicate normalized text
 // is created when multiple search hooks consume the same store.
-const normalizedPages = new WeakMap<
-	SearchPage,
-	{ text: string; lower: string }
->();
-function normalize(page: SearchPage) {
-	let cached = normalizedPages.get(page);
-	if (!cached || cached.text !== page.text) {
-		cached = { text: page.text, lower: page.text.toLowerCase() };
-		normalizedPages.set(page, cached);
+interface NormalizedPage {
+	text: string;
+	lower: string;
+	starts?: Uint32Array;
+	ends?: Uint32Array;
+}
+const normalizedPages = new WeakMap<SearchPage, NormalizedPage>();
+function normalize(page: SearchPage): NormalizedPage {
+	const cached = normalizedPages.get(page);
+	if (cached?.text === page.text) return cached;
+	// Lowercase the whole string to retain context-sensitive case mappings.
+	const lower = page.text.toLowerCase();
+	const result: NormalizedPage = { text: page.text, lower };
+	// Most text keeps its UTF-16 length. Only allocate an offset map when case
+	// conversion expands it (e.g. İ -> i + combining dot).
+	if (lower.length !== page.text.length) {
+		result.starts = new Uint32Array(lower.length);
+		result.ends = new Uint32Array(lower.length);
+		let original = 0;
+		let normalized = 0;
+		for (const character of page.text) {
+			const length = character.toLowerCase().length;
+			for (let i = 0; i < length; i++) {
+				result.starts[normalized + i] =
+					original + (length === character.length ? i : 0);
+				result.ends[normalized + i] =
+					original + (length === character.length ? i + 1 : character.length);
+			}
+			original += character.length;
+			normalized += length;
+		}
 	}
-	return cached.lower;
+	normalizedPages.set(page, result);
+	return result;
+}
+
+function createMatch(
+	page: SearchPage,
+	normalized: NormalizedPage,
+	start: number,
+	length: number,
+	searchText: string,
+	textSize: number,
+	score: number,
+): SearchResult {
+	const end = Math.min(normalized.lower.length, start + length);
+	const matchIndex = normalized.starts?.[start] ?? start;
+	const matchEnd = normalized.ends?.[end - 1] ?? end;
+	const matchLength = matchEnd - matchIndex;
+	return {
+		pageNumber: page.pageNumber,
+		text: page.text.slice(matchIndex, matchEnd + textSize),
+		score,
+		matchIndex,
+		isExactMatch: score === 1,
+		searchText,
+		...(matchLength !== searchText.length ? { matchLength } : {}),
+	};
 }
 
 /** Reuses two rows across candidate windows and only visits the edit band. */
@@ -104,7 +151,8 @@ function* runSearch(
 	let deadline = cooperative ? performance.now() + budget : 0;
 
 	for (const page of pages) {
-		const lower = normalize(page);
+		const normalized = normalize(page);
+		const lower = normalized.lower;
 		// Ranges belong to this page. Storing every covered character wastes
 		// memory and sharing offsets across pages hides legitimate matches.
 		const exactStarts: number[] = [];
@@ -123,16 +171,19 @@ function* runSearch(
 			exactCount++;
 			if (maxDistance > 0) exactStarts.push(matchIndex);
 			if (exactMatches.length < limit) {
-				exactMatches.push({
-					pageNumber: page.pageNumber,
-					text: page.text.substr(matchIndex, searchText.length + textSize),
-					score: 1,
-					matchIndex,
-					isExactMatch: true,
-					searchText,
-				});
+				exactMatches.push(
+					createMatch(
+						page,
+						normalized,
+						matchIndex,
+						query.length,
+						searchText,
+						textSize,
+						1,
+					),
+				);
 			}
-			index = matchIndex + searchText.length;
+			index = matchIndex + query.length;
 		}
 
 		if (!(maxDistance > 0)) continue;
@@ -149,12 +200,12 @@ function* runSearch(
 			}
 			while (
 				exactIndex < exactStarts.length &&
-				exactStarts[exactIndex]! + searchText.length <= index
+				exactStarts[exactIndex]! + query.length <= index
 			)
 				exactIndex++;
 			const exactStart = exactStarts[exactIndex];
 			if (exactStart !== undefined && index >= exactStart) {
-				index = exactStart + searchText.length;
+				index = exactStart + query.length;
 				continue;
 			}
 			const edits = distance!(lower, index);
@@ -167,14 +218,15 @@ function* runSearch(
 				) {
 					insertMatch(
 						fuzzyMatches,
-						{
-							pageNumber: page.pageNumber,
-							text: page.text.substr(index, query.length + textSize),
-							score,
-							matchIndex: index,
-							isExactMatch: false,
+						createMatch(
+							page,
+							normalized,
+							index,
+							query.length,
 							searchText,
-						},
+							textSize,
+							score,
+						),
 						limit,
 					);
 				}

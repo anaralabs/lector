@@ -1,8 +1,10 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
 	cloneElement,
+	type FocusEvent,
 	type HTMLProps,
 	type KeyboardEvent,
+	type MouseEvent,
 	type ReactElement,
 	useImperativeHandle,
 	useLayoutEffect,
@@ -24,31 +26,48 @@ export const Thumbnail = ({
 		isFirstPage: eager || pageNumber < 5,
 	});
 	const { jumpToPage } = usePdfJump();
+	const isCurrentPage = usePdf((state) => state.currentPage === pageNumber);
+	const spacePressed = useRef(false);
 
 	return (
 		<div ref={containerRef} style={{ minHeight: "150px", minWidth: "10px" }}>
 			{isVisible && (
 				<Primitive.canvas
+					aria-label={`Page ${pageNumber}`}
+					aria-current={isCurrentPage ? "page" : undefined}
 					{...props}
 					role="button"
 					tabIndex={0}
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					onClick={(e: any) => {
-						if (props.onClick) {
-							props.onClick(e);
-						}
-
-						jumpToPage(pageNumber, { behavior: "auto" });
+					onClick={(event: MouseEvent<HTMLCanvasElement>) => {
+						props.onClick?.(event);
+						if (!event.defaultPrevented)
+							jumpToPage(pageNumber, { behavior: "auto" });
 					}}
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					onKeyDown={(e: any) => {
-						if (props.onKeyDown) {
-							props.onKeyDown(e);
+					onKeyDown={(event: KeyboardEvent<HTMLCanvasElement>) => {
+						props.onKeyDown?.(event);
+						if (event.defaultPrevented) return;
+						if (event.key === "Enter") {
+							event.preventDefault();
+							jumpToPage(pageNumber, { behavior: "auto" });
+						} else if (event.key === " ") {
+							// Match a button: prevent scrolling on press, activate on release.
+							event.preventDefault();
+							spacePressed.current = true;
 						}
-
-						if (e.key === "Enter") {
+					}}
+					onKeyUp={(event: KeyboardEvent<HTMLCanvasElement>) => {
+						props.onKeyUp?.(event);
+						if (event.key !== " ") return;
+						const activate = spacePressed.current && !event.defaultPrevented;
+						spacePressed.current = false;
+						if (activate) {
+							event.preventDefault();
 							jumpToPage(pageNumber, { behavior: "auto" });
 						}
+					}}
+					onBlur={(event: FocusEvent<HTMLCanvasElement>) => {
+						spacePressed.current = false;
+						props.onBlur?.(event);
 					}}
 					ref={canvasRef}
 				/>

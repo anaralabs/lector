@@ -64,3 +64,15 @@ describe("calculateHighlightRects", () => {
 		expect(searches.map((rects) => rects[0]?.left)).toEqual([10, 70]);
 	});
 });
+
+it("highlights the original Unicode match span rather than the normalized query length", async () => {
+	const { page } = pageWithChunks([[item("İ!", 10)]]);
+	const rects = await calculateHighlightRects(page, {
+		pageNumber: 1,
+		text: "İ!",
+		matchIndex: 0,
+		searchText: "i\u0307",
+		matchLength: 1,
+	});
+	expect(rects[0]?.width).toBe(10);
+});

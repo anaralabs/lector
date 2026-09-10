@@ -10,3 +10,7 @@ records historical measurements from checkout `29f89b2`. That checkout predated
 upstream's adaptive bitmap budgets and Safari/base-canvas changes. The PR is based
 on `675ce1b`, preserves those upstream improvements, and does not claim them as
 changes introduced here.
+
+The follow-up after PR #159 is documented in [READER-QUALITY.md](READER-QUALITY.md),
+including incremental annotation measurements, Unicode search fixes, reader
+interaction checks and the next prioritized engineering investigations.
