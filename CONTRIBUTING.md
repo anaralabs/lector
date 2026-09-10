@@ -63,7 +63,7 @@ Run commands from the repository root:
 | Package size | `pnpm --filter @anaralabs/lector test:size` after building |
 | Full library test scripts | `pnpm --filter @anaralabs/lector test` |
 
-The current `test:unit` script runs Vitest in browser mode using Chrome and WebdriverIO, including files whose tests look like ordinary unit tests. Have Chrome available. To focus a run, use `pnpm --filter @anaralabs/lector exec vitest run src/lib/dark-mode.test.ts`, replacing the path with the relevant file.
+`test:unit` runs the Node tests. `test:browser` uses Playwright with installed Chrome locally; CI installs Chromium, Firefox and WebKit. To focus a browser run, use `pnpm --filter @anaralabs/lector exec vitest run src/lib/dark-mode.test.ts`, replacing the path with the relevant file. Set `LECTOR_TEST_BROWSER=firefox` or `LECTOR_TEST_BROWSER=webkit` to select another installed Playwright browser.
 
 A library build writes `packages/lector/size.json`. Review that diff rather than committing incidental size changes with docs edits. Report existing failures separately from failures caused by your change; do not describe a partial test run as a full pass.
 

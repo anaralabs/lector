@@ -1,5 +1,5 @@
 import type { PDFPageProxy } from "pdfjs-dist";
-import type { TextContent, TextItem } from "pdfjs-dist/types/src/display/api";
+import type { TextContent } from "pdfjs-dist/types/src/display/api";
 
 import type { HighlightRect } from "../../internal";
 import type { SearchResult } from "./useSearch";
@@ -15,88 +15,56 @@ export async function calculateHighlightRects(
 	pageProxy: PDFPageProxy,
 	textMatch: TextPosition,
 ): Promise<HighlightRect[]> {
-	const reader: ReadableStreamDefaultReader<TextContent> = pageProxy
-		.streamTextContent()
-		.getReader();
-	const items: TextItem[] = [];
-	try {
-		for (;;) {
-			const { value, done } = await reader.read();
-			if (done) break;
-			items.push(
-				...value.items.filter((item): item is TextItem => "str" in item),
-			);
-		}
-	} finally {
-		reader.releaseLock();
-	}
-
 	const matchLength = textMatch.searchText
 		? textMatch.searchText.length
 		: textMatch.text.length;
-
+	if (
+		matchLength === 0 ||
+		!Number.isFinite(textMatch.matchIndex) ||
+		textMatch.matchIndex < 0
+	)
+		return [];
+	const matchEnd = textMatch.matchIndex + matchLength;
+	const reader: ReadableStreamDefaultReader<TextContent> = pageProxy
+		.streamTextContent()
+		.getReader();
 	const matchRects: HighlightRect[] = [];
-	let currentIndex = 0;
-	let remainingMatchLength = matchLength;
-	let foundStart = false;
-
 	const viewport = pageProxy.getViewport({ scale: 1 });
-
-	for (let i = 0; i < items.length; i++) {
-		const item = items[i];
-
-		if (!item) continue;
-
-		const itemLength = item.str.length;
-
-		if (
-			!foundStart &&
-			currentIndex <= textMatch.matchIndex &&
-			textMatch.matchIndex < currentIndex + itemLength
-		) {
-			foundStart = true;
-			const matchStartInItem = textMatch.matchIndex - currentIndex;
-			const matchLengthInItem = Math.min(
-				itemLength - matchStartInItem,
-				remainingMatchLength,
-			);
-
-			const transform = item.transform;
-			const y = viewport.height - (transform[5] + item.height);
-
-			const rect: HighlightRect = {
-				pageNumber: textMatch.pageNumber,
-				left: transform[4] + matchStartInItem * (item.width / itemLength),
-				top: y,
-				width: matchLengthInItem * (item.width / itemLength),
-				height: item.height,
-			};
-
-			matchRects.push(rect);
-			remainingMatchLength -= matchLengthInItem;
-		} else if (foundStart && remainingMatchLength > 0) {
-			const matchLengthInItem = Math.min(itemLength, remainingMatchLength);
-
-			const transform = item.transform;
-			const y = viewport.height - (transform[5] + item.height);
-
-			const rect: HighlightRect = {
-				pageNumber: textMatch.pageNumber,
-				left: transform[4],
-				top: y,
-				width: matchLengthInItem * (item.width / itemLength),
-				height: item.height,
-			};
-
-			matchRects.push(rect);
-			remainingMatchLength -= matchLengthInItem;
+	let offset = 0;
+	let foundEnd = false;
+	try {
+		read: while (true) {
+			const { value, done } = await reader.read();
+			if (done) break;
+			for (const item of value.items) {
+				if (!("str" in item) || item.str.length === 0) continue;
+				const length = item.str.length;
+				const start = Math.max(0, textMatch.matchIndex - offset);
+				const end = Math.min(length, matchEnd - offset);
+				if (end > start) {
+					matchRects.push({
+						pageNumber: textMatch.pageNumber,
+						left: item.transform[4] + start * (item.width / length),
+						top: viewport.height - (item.transform[5] + item.height),
+						width: (end - start) * (item.width / length),
+						height: item.height,
+					});
+				}
+				offset += length;
+				if (offset >= matchEnd) {
+					foundEnd = true;
+					break read;
+				}
+			}
 		}
-
-		if (remainingMatchLength <= 0 && foundStart) {
-			break;
-		}
-
-		currentIndex += itemLength;
+	} finally {
+		// Each call owns an independent stream. Cancel only its remaining
+		// work, leaving other searches and the selectable text layer alone.
+		// PDF.js closes locally immediately; its worker acknowledgement can wait
+		// on extraction, so do not block delivering an already-complete match.
+		if (foundEnd)
+			void reader.cancel(new Error("Highlight range found")).catch(() => {});
+		reader.releaseLock();
 	}
 
 	return mergeAdjacentRects(matchRects);

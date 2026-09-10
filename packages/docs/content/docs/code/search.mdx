@@ -122,3 +122,51 @@ Image-only scans need an OCR text layer before they can be searched. PDF text ex
 import SearchDemo from "@/components/search-control";
 
 <SearchDemo />
+
+## Responsive search in long documents
+
+`useSearch()` also exposes `searchAsync`, `cancelSearch`, and `isSearching`.
+`searchAsync` returns the same ranked results as `search`, but yields between
+batches so the browser can process input. It defaults to an approximate 8 ms work
+budget. Scheduling can increase total search time; the benefit is responsiveness.
+
+```tsx
+const { searchAsync, cancelSearch, searchResults, isSearching } = useSearch();
+const [searchError, setSearchError] = useState<Error | null>(null);
+
+useEffect(() => {
+  setSearchError(null);
+  void searchAsync(debouncedSearchText, { limit: 10 }).catch((error) => {
+    if (error.name !== "AbortError") setSearchError(error);
+  });
+  return cancelSearch;
+}, [debouncedSearchText, searchAsync, cancelSearch]);
+```
+
+A newer call to either search method cancels pending async work from that hook.
+Unmounting or replacing document text also cancels it. Cancelled calls reject
+with `AbortError` and never publish partial results. You can pass an external
+`AbortSignal` through `{ signal }` or adjust `{ timeSliceMs }` when needed.
+Keep the component inside `<Root>` and use `<Search>` to index the document.
+
+## Indexing failures and retry
+
+If text extraction fails, `Search` keeps its children unmounted and shows an error
+with a Retry button. Retry starts a new indexing attempt without reloading the
+viewer. To match your application's error presentation, provide a fallback:
+
+```tsx
+<Search
+  errorFallback={({ retry }) => (
+    <p role="alert">
+      Search is unavailable. <button onClick={retry}>Try again</button>
+    </p>
+  )}
+>
+  <SearchPanel />
+</Search>
+```
+
+This fragment replaces the existing `Search` wrapper in the example above.
+The fallback also receives the original `error`. It handles indexing failures;
+`Root.onError` handles document loading failures.

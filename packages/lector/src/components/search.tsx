@@ -1,45 +1,69 @@
 import type { PDFPageProxy } from "pdfjs-dist";
-import type { TextItem } from "pdfjs-dist/types/src/display/api";
 import { useCallback, useEffect, useState } from "react";
-
 import { usePdf } from "../internal";
+import { acquireDocumentText } from "../lib/document-text";
 
 interface SearchProps {
 	children: React.ReactNode;
 	loading?: React.ReactNode;
+	/** Replace the default indexing-error message and retry button. */
+	errorFallback?: (state: {
+		error: unknown;
+		retry: () => void;
+	}) => React.ReactNode;
 }
 
-export const Search = ({ children, loading = "Loading..." }: SearchProps) => {
-	const [isLoading, setIsLoading] = useState(false);
+type IndexingResult =
+	| { pages: PDFPageProxy[]; status: "ready" }
+	| { pages: PDFPageProxy[]; status: "error"; error: unknown };
 
+export const Search = ({
+	children,
+	loading = "Loading...",
+	errorFallback,
+}: SearchProps) => {
+	const [result, setResult] = useState<IndexingResult | null>(null);
+	const [attempt, setAttempt] = useState(0);
 	const proxies = usePdf((state) => state.pageProxies);
 	const setTextContent = usePdf((state) => state.setTextContent);
+	const retry = useCallback(() => {
+		setResult(null);
+		setAttempt((value) => value + 1);
+	}, []);
 
-	const getTextContent = useCallback(
-		async (pages: PDFPageProxy[]) => {
-			setIsLoading(true);
-			const promises = pages.map(async (proxy) => {
-				const content = await proxy.getTextContent();
-				const text = content.items
-					.map((item) => (item as TextItem)?.str || "")
-					.join("");
-
-				return Promise.resolve({
-					pageNumber: proxy.pageNumber,
-					text,
-				});
-			});
-			const text = await Promise.all(promises);
-
-			setIsLoading(false);
-			setTextContent(text);
-		},
-		[setTextContent],
-	);
-
+	// biome-ignore lint/correctness/useExhaustiveDependencies: explicit retries reacquire an evicted failed job
 	useEffect(() => {
-		getTextContent(proxies);
-	}, [proxies, getTextContent]);
+		let disposed = false;
+		setResult(null);
+		const task = acquireDocumentText(proxies);
+		void task.promise
+			.then((text) => {
+				if (disposed) return;
+				setTextContent(text);
+				setResult({ pages: proxies, status: "ready" });
+			})
+			.catch((error) => {
+				if (disposed) return;
+				console.error("Error extracting PDF text", error);
+				setResult({ pages: proxies, status: "error", error });
+			});
+		return () => {
+			disposed = true;
+			task.release();
+		};
+	}, [proxies, setTextContent, attempt]);
 
-	return isLoading ? loading : children;
+	if (!result || result.pages !== proxies) return loading;
+	if (result.status === "error") {
+		if (errorFallback) return errorFallback({ error: result.error, retry });
+		return (
+			<div role="alert">
+				Unable to index this document for search.{" "}
+				<button type="button" onClick={retry}>
+					Retry
+				</button>
+			</div>
+		);
+	}
+	return children;
 };

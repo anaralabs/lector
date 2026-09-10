@@ -16,7 +16,8 @@
 		}
 	},
 	"files": [
-		"dist"
+		"dist",
+		"esm-only.cjs"
 	],
 	"publishConfig": {
 		"access": "public"
@@ -29,10 +30,16 @@
 		"format": "biome format --write .",
 		"postbuild": "size-limit --json > size.json",
 		"test": "pnpm run '/^test:/'",
-		"test:unit": "vitest run",
+		"test:unit": "vitest run --config vitest.unit.config.ts",
 		"test:size": "size-limit",
 		"prepack": "./scripts/prepack.sh",
-		"prepare": "tsup"
+		"prepare": "tsup",
+		"test:browser": "vitest run",
+		"test:package": "node scripts/check-package.mjs",
+		"test:types": "tsc --noEmit",
+		"bench:corpus": "vitest run --config vitest.bench.config.ts",
+		"bench:second-pass": "vitest run tests/annotations.browser.test.tsx tests/thumbnails.browser.test.tsx tests/long-document.browser.test.tsx tests/search-async.browser.test.tsx tests/highlight-stream.browser.test.tsx",
+		"bench:performance": "vitest run tests/performance.browser.test.tsx tests/observers.browser.test.tsx tests/extraction.browser.test.tsx tests/document.browser.test.tsx tests/pages.browser.test.tsx"
 	},
 	"devDependencies": {
 		"@microsoft/api-extractor": "^7.48.1",

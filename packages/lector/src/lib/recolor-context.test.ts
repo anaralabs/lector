@@ -77,7 +77,13 @@ describe("applyContextRecolor", () => {
 		gradient.addColorStop(1, "#ffffff");
 		ctx.fillStyle = gradient;
 		ctx.fillRect(0, 0, 8, 8);
-		expect(pixel(ctx)).toBe(DARK);
+		const native = makeCtx();
+		const nativeGradient = native.createLinearGradient(0, 0, 8, 0);
+		nativeGradient.addColorStop(0, DARK);
+		nativeGradient.addColorStop(1, DARK);
+		native.fillStyle = nativeGradient;
+		native.fillRect(0, 0, 8, 8);
+		expect(pixel(ctx)).toBe(pixel(native));
 	});
 
 	it("does not touch drawImage pixels", () => {

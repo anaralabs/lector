@@ -119,8 +119,8 @@ For rectangle navigation, `align` is `"start"` or `"center"` (default `"start"`)
 
 | Export | Scope and result |
 | --- | --- |
-| `Search` | Under `Root`; indexes every page's text; accepts `children` and `loading` |
-| `useSearch()` | Under `Root`; returns `search`, `searchResults`, `textContent`, and `keywords` (currently an empty array) |
+| `Search` | Under `Root`; indexes every page's text; accepts `children`, `loading`, and `errorFallback({ error, retry })` |
+| `useSearch()` | Under `Root`; returns `search`, `searchAsync`, `cancelSearch`, `isSearching`, `searchResults`, `textContent`, and `keywords` (currently an empty array) |
 | `calculateHighlightRects(pageProxy, textPosition)` | Async utility returning `HighlightRect[]` for a text match |
 | `SelectionTooltip` | Under `Root`; displays children for a selection; mount once per viewer |
 | `useSelectionDimensions()` | Under `Root`; `getDimension()` reads text and rectangles, `getAnnotationDimension()` also computes underlines |
