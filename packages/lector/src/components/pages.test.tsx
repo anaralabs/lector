@@ -1,11 +1,15 @@
 import { cleanup, render, waitFor } from "@testing-library/react";
+import { page as browserPage } from "@vitest/browser/context";
 import type { PageViewport, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { PDFStore } from "../internal";
 import { Page } from "./page";
 import { Pages } from "./pages";
 
 afterEach(cleanup);
+const viewportSize = { width: window.innerWidth, height: window.innerHeight };
+beforeAll(() => browserPage.viewport(1100, 700));
+afterAll(() => browserPage.viewport(viewportSize.width, viewportSize.height));
 
 function viewer(zoom: number, width = 900) {
 	const viewports = [{ width: 600, height: 800 }] as PageViewport[];
@@ -37,14 +41,17 @@ describe("page alignment", () => {
 		async (zoom) => {
 			const view = viewer(zoom);
 			await waitFor(() => {
-				const page = view.getByTestId("page").getBoundingClientRect();
+				const page = view.getByTestId("page");
 				const viewport = view.getByTestId("viewport").getBoundingClientRect();
-				expect(page.width).toBeCloseTo(600 * zoom, 0);
-				expect(
-					Math.abs(
-						(page.left + page.right - viewport.left - viewport.right) / 2,
-					),
-				).toBeLessThan(1);
+				const left = viewport.left + (viewport.width - 600 * zoom) / 2;
+				const right = left + 600 * zoom;
+				// Older WebKit reports unzoomed getBoundingClientRect values for
+				// CSS zoom. Hit-test both physical edges instead: this still catches
+				// incorrect width or centering, in either zoom implementation.
+				const hits = [left - 1, left + 1, right - 1, right + 1].map((x) =>
+					page.contains(document.elementFromPoint(x, viewport.top + 10)),
+				);
+				expect(hits).toEqual([false, true, true, false]);
 			});
 		},
 	);

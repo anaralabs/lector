@@ -197,3 +197,9 @@ indexing, recovery without remounting, and repeated failure through a custom
 fallback. The combined suite has 141 browser tests and 8 Node tests. Its rebuilt
 Size Limit output is 49,815 bytes. Timing tables above remain measurements of the
 original performance pass rather than new measurements of this follow-up.
+
+The imported page-alignment test assumed scaled `getBoundingClientRect()` values,
+which older WebKit does not provide for CSS zoom. Physical hit tests confirm the
+page is correctly sized and centered. The test now checks both physical edges in
+a viewport large enough to contain them; reverting the original centering fix
+makes this test fail. All 141 WebKit browser tests pass locally with this check.
