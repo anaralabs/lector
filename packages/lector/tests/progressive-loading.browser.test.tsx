@@ -19,6 +19,14 @@ beforeAll(async () => {
 	).href;
 });
 afterEach(cleanup);
+
+// These are readiness checks, not startup benchmarks. A cold PDF.js worker can
+// take more than Testing Library's default 1 s on shared CI runners. The page
+// gates below still prove loading order independently of machine speed.
+function waitForPdf(callback: () => void) {
+	return waitFor(callback, { timeout: 10_000 });
+}
+
 function deferred() {
 	let resolve!: () => void;
 	const promise = new Promise<void>((res) => {
@@ -60,9 +68,9 @@ for (const progressive of [false, true]) {
 			</Root>,
 		);
 		try {
-			await waitFor(() => expect(requested).toBeGreaterThan(1));
+			await waitForPdf(() => expect(requested).toBeGreaterThan(1));
 			if (progressive) {
-				await waitFor(() =>
+				await waitForPdf(() =>
 					expect(store?.getState().renderedPages[1]).toBe(true),
 				);
 				expect(store!.getState().pagesLoaded).toBe(false);
@@ -77,7 +85,7 @@ for (const progressive of [false, true]) {
 		} finally {
 			gate.resolve();
 		}
-		await waitFor(() => expect(store?.getState().pagesLoaded).toBe(true));
+		await waitForPdf(() => expect(store?.getState().pagesLoaded).toBe(true));
 		expect(
 			store!.getState().pageProxies.map((page) => page.pageNumber),
 		).toEqual(Array.from({ length: 24 }, (_, i) => i + 1));
@@ -137,18 +145,18 @@ for (const scenario of [
 			</Root>,
 		);
 		try {
-			await waitFor(() =>
+			await waitForPdf(() =>
 				expect(store?.getState().renderedPages[10]).toBe(true),
 			);
 			expect(requests[0]).toBe(10);
 			const viewport = view.getByTestId("viewport");
 			const effectiveZoom = "fit" in scenario ? 800 / 612 : zoom;
-			await waitFor(() =>
+			await waitForPdf(() =>
 				expect(Math.abs(store.getState().zoom - effectiveZoom)).toBeLessThan(
 					0.001,
 				),
 			);
-			await waitFor(() =>
+			await waitForPdf(() =>
 				expect(
 					Math.abs(viewport.scrollTop - 9 * 802 * effectiveZoom),
 				).toBeLessThan(3),
@@ -161,8 +169,8 @@ for (const scenario of [
 			const beforeTop = markerTop();
 			if ("pinch" in scenario) act(() => store.getState().setIsPinching(true));
 			gate.resolve();
-			await waitFor(() => expect(store.getState().pagesLoaded).toBe(true));
-			await waitFor(() =>
+			await waitForPdf(() => expect(store.getState().pagesLoaded).toBe(true));
+			await waitForPdf(() =>
 				expect(store.getState().viewports[1]?.height).toBe(900),
 			);
 			if ("pinch" in scenario) {
@@ -171,12 +179,12 @@ for (const scenario of [
 				// No stale frozen page positions may paint after the gesture ends.
 				expect(Math.abs(markerTop() - beforeTop)).toBeLessThan(3);
 			}
-			await waitFor(() =>
+			await waitForPdf(() =>
 				expect(
 					Math.abs(viewport.scrollTop - before - 108 * effectiveZoom),
 				).toBeLessThan(3),
 			);
-			await waitFor(() => expect(store.getState().currentPage).toBe(10));
+			await waitForPdf(() => expect(store.getState().currentPage).toBe(10));
 		} finally {
 			gate.resolve();
 		}
@@ -223,13 +231,13 @@ test("page and search errors remain retryable, and direct thumbnails wait for re
 		</Root>,
 	);
 	try {
-		await waitFor(() =>
+		await waitForPdf(() =>
 			expect(view.getByLabelText("Loading page 3")).toBeTruthy(),
 		);
 		expect(view.getByText("Indexing pages")).toBeTruthy();
 		expect(store.getState().textContent).toEqual([]);
 		await act(async () => gate.resolve());
-		await waitFor(() => expect(view.getAllByRole("alert")).toHaveLength(2));
+		await waitForPdf(() => expect(view.getAllByRole("alert")).toHaveLength(2));
 		expect(onError).toHaveBeenCalledWith(
 			expect.objectContaining({ phase: "viewport-generation" }),
 		);
@@ -238,8 +246,10 @@ test("page and search errors remain retryable, and direct thumbnails wait for re
 			for (const retry of view.getAllByRole("button", { name: "Retry" }))
 				retry.click();
 		});
-		await waitFor(() => expect(view.getByText("Indexed 3 pages")).toBeTruthy());
-		await waitFor(() =>
+		await waitForPdf(() =>
+			expect(view.getByText("Indexed 3 pages")).toBeTruthy(),
+		);
+		await waitForPdf(() =>
 			expect(view.getByRole("button", { name: "Page 3" })).toBeTruthy(),
 		);
 		expect(store.getState().pageProxies).toHaveLength(3);
@@ -286,7 +296,9 @@ test("replacing a progressive document ignores late resources from the disposed 
 		</Root>,
 	);
 	try {
-		await waitFor(() => expect(store?.getState().renderedPages[1]).toBe(true));
+		await waitForPdf(() =>
+			expect(store?.getState().renderedPages[1]).toBe(true),
+		);
 		view.rerender(
 			<Root
 				source={second}
@@ -297,10 +309,10 @@ test("replacing a progressive document ignores late resources from the disposed 
 				{children}
 			</Root>,
 		);
-		await waitFor(() =>
+		await waitForPdf(() =>
 			expect(store?.getState().pdfDocumentProxy.numPages).toBe(3),
 		);
-		await waitFor(() => expect(store?.getState().pagesLoaded).toBe(true));
+		await waitForPdf(() => expect(store?.getState().pagesLoaded).toBe(true));
 		await act(async () => {
 			gate.resolve();
 			await new Promise((resolve) => setTimeout(resolve, 50));
