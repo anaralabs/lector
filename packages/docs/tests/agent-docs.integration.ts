@@ -12,9 +12,12 @@ import type { DocCatalog } from "../lib/agent-docs/catalog";
 
 const origin = process.env.DOCS_URL ?? "http://localhost:3000";
 async function get(path: string) {
-	const response = await fetch(new URL(path, origin), {
-		signal: AbortSignal.timeout(15000),
-	});
+	const response = await fetch(
+		new URL(path.startsWith("/lector/") ? path : `/lector${path}`, origin),
+		{
+			signal: AbortSignal.timeout(15000),
+		},
+	);
 	assert.equal(response.status, 200, `${path}: HTTP ${response.status}`);
 	return response;
 }
@@ -88,7 +91,7 @@ test(
 			});
 		}
 		assert.equal(
-			(await fetch(new URL("/docs/does-not-exist.md", origin))).status,
+			(await fetch(new URL("/lector/docs/does-not-exist.md", origin))).status,
 			404,
 		);
 	},
@@ -108,8 +111,8 @@ for (const mode of ["modern", "legacy"] as const) {
 					: new LegacyClient({ name: "integration-test", version: "1" });
 			const transport =
 				mode === "modern"
-					? new StreamableHTTPClientTransport(new URL("/mcp", origin))
-					: new LegacyTransport(new URL("/mcp", origin));
+					? new StreamableHTTPClientTransport(new URL("/lector/mcp", origin))
+					: new LegacyTransport(new URL("/lector/mcp", origin));
 			try {
 				await client.connect(transport);
 				if (client instanceof Client)
@@ -164,3 +167,25 @@ for (const mode of ["modern", "legacy"] as const) {
 		},
 	);
 }
+
+test("preview root redirects to the base path while prefixed routes remain accessible", async () => {
+	const response = await fetch(new URL("/?ref=preview", origin), {
+		redirect: "manual",
+	});
+	assert.equal(response.status, 307);
+	assert.equal(response.headers.get("location"), "/lector?ref=preview");
+	for (const path of [
+		"/lector",
+		"/lector/docs/installation",
+		"/lector/llms.json",
+		"/lector/pdf/pathways.pdf",
+		"/lector/api/search?query=worker",
+	]) {
+		const response = await fetch(new URL(path, origin), { redirect: "manual" });
+		assert.equal(response.status, 200, path);
+	}
+	const missing = await fetch(new URL("/lector/docs/does-not-exist", origin), {
+		redirect: "manual",
+	});
+	assert.equal(missing.status, 404);
+});

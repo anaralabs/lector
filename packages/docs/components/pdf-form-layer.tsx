@@ -9,7 +9,7 @@ import {
 import { type FormEvent, useState } from "react";
 import { ExampleRoot } from "./example-root";
 
-const fileUrl = "/pdf/form.pdf";
+const fileUrl = "/lector/pdf/form.pdf";
 
 type FormValues = {
 	[key: string]: FormDataEntryValue;

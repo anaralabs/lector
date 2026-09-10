@@ -22,13 +22,14 @@ export function markdownPath(slug: string) {
 }
 
 export function createCatalog(inputs: DocInput[], origin: string) {
+	const siteUrl = (path: string) =>
+		new URL(path.replace(/^\//, ""), `${origin.replace(/\/$/, "")}/`);
 	const docs: AgentDoc[] = inputs
 		.map((doc) => {
-			const url = new URL(
+			const url = siteUrl(
 				doc.slug === "index" ? "/docs" : `/docs/${doc.slug}`,
-				origin,
 			).href;
-			const markdownUrl = new URL(markdownPath(doc.slug), origin).href;
+			const markdownUrl = siteUrl(markdownPath(doc.slug)).href;
 			const markdown = `# ${doc.title}\n\n${doc.description}\n\nSource: ${url}\n\n${versionNotice}\n\n${doc.body}`;
 			return {
 				...doc,
@@ -57,10 +58,10 @@ export function createCatalog(inputs: DocInput[], origin: string) {
 		schemaVersion: 1,
 		revision,
 		versionNotice,
-		mcpUrl: new URL("/mcp", origin).href,
+		mcpUrl: siteUrl("/mcp").href,
 		pages,
 	};
-	const llms = `# Lector\n\n> A headless PDF viewer for React, built on PDF.js.\n\n${versionNotice}\n\nStart with installation, then your first viewer. Read the relevant recipe and API reference before writing an integration. All guides below are complete Markdown exports; live demos run on the linked HTML page.\n\n## Guides and reference\n\n${docs.map((doc) => `- [${doc.title}](${doc.markdownUrl}): ${doc.description}`).join("\n")}\n\n## Optional\n\n- [Complete documentation](${new URL("/llms-full.txt", origin)}): All guides in one response; prefer individual pages for focused tasks.\n- [Machine-readable catalog](${new URL("/llms.json", origin)}): Page URLs, resource URIs, and content hashes.\n`;
+	const llms = `# Lector\n\n> A headless PDF viewer for React, built on PDF.js.\n\n${versionNotice}\n\nStart with installation, then your first viewer. Read the relevant recipe and API reference before writing an integration. All guides below are complete Markdown exports; live demos run on the linked HTML page.\n\n## Guides and reference\n\n${docs.map((doc) => `- [${doc.title}](${doc.markdownUrl}): ${doc.description}`).join("\n")}\n\n## Optional\n\n- [Complete documentation](${siteUrl("/llms-full.txt")}): All guides in one response; prefer individual pages for focused tasks.\n- [Machine-readable catalog](${siteUrl("/llms.json")}): Page URLs, resource URIs, and content hashes.\n`;
 	return {
 		docs,
 		manifest,

@@ -15,6 +15,7 @@ export default defineConfig({
 
 	optimizeDeps: {
 		include: [
+			"react/jsx-dev-runtime",
 			"pdfjs-dist/legacy/build/pdf.mjs",
 			"clsx",
 			"@tanstack/react-virtual",
@@ -35,6 +36,10 @@ export default defineConfig({
 			enabled: true,
 			provider: playwright({
 				launchOptions: {
+					executablePath:
+						browser === "chromium"
+							? process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+							: undefined,
 					channel:
 						browser === "chromium"
 							? (process.env.LECTOR_BROWSER_CHANNEL ??

@@ -2,7 +2,7 @@
 
 **A headless PDF viewer for React.** Compose pages, text selection, search, and annotations into your own reading experience. Lector handles PDF.js rendering and page virtualization; you control the layout and UI.
 
-[Documentation](https://lector-weld.vercel.app/docs) · [Live demo](https://lector-weld.vercel.app) · [npm](https://www.npmjs.com/package/@anaralabs/lector) · [Contributing](https://github.com/anaralabs/lector/blob/main/CONTRIBUTING.md)
+[Documentation](https://anara.com/lector/docs) · [Live demo](https://anara.com/lector) · [npm](https://www.npmjs.com/package/@anaralabs/lector) · [Contributing](https://github.com/anaralabs/lector/blob/main/CONTRIBUTING.md)
 
 ## Get a PDF on screen
 
@@ -46,7 +46,7 @@ export default function PDFViewer() {
 }
 ```
 
-For **Next.js**, load the viewer through a Client Component using `dynamic(..., { ssr: false })`; keep PDF.js setup inside the dynamically loaded module. See [installation](https://lector-weld.vercel.app/docs/installation) for the full wrapper, Vite worker setup, and deployments below a path prefix.
+For **Next.js**, load the viewer through a Client Component using `dynamic(..., { ssr: false })`; keep PDF.js setup inside the dynamically loaded module. See [installation](https://anara.com/lector/docs/installation) for the full wrapper, Vite worker setup, and deployments below a path prefix.
 
 `Root` loads the document and provides its state. `Pages` owns scrolling and clones one `Page` template for visible pages. `CanvasLayer` paints the PDF; `TextLayer` adds selectable text. Give the viewer a definite height and import the PDF.js stylesheet so its layers align.
 
@@ -54,23 +54,23 @@ For **Next.js**, load the viewer through a Client Component using `dynamic(..., 
 
 | Feature | Start here |
 | --- | --- |
-| Toolbar, page input, and layout | [Your first viewer](https://lector-weld.vercel.app/docs/basic-usage) |
-| Authenticated URLs, local files, errors, and self-hosted assets | [Loading documents](https://lector-weld.vercel.app/docs/document-loading) |
-| Page navigation and fit width | [Navigation](https://lector-weld.vercel.app/docs/code/page-navigation), [zoom](https://lector-weld.vercel.app/docs/code/zoom-control) |
-| Page previews | [Thumbnails](https://lector-weld.vercel.app/docs/code/thumbnails) |
-| Text search and highlighted results | [Search](https://lector-weld.vercel.app/docs/code/search) |
-| Selection and citation regions | [Selection](https://lector-weld.vercel.app/docs/code/select), [highlights](https://lector-weld.vercel.app/docs/code/highlight) |
-| PDF links and editable form fields | [Links](https://lector-weld.vercel.app/docs/code/links), [forms](https://lector-weld.vercel.app/docs/code/pdf-form) |
-| Dark page rendering | [Dark mode](https://lector-weld.vercel.app/docs/dark-mode) |
-| Props, hooks, and defaults | [API reference](https://lector-weld.vercel.app/docs/api) |
+| Toolbar, page input, and layout | [Your first viewer](https://anara.com/lector/docs/basic-usage) |
+| Authenticated URLs, local files, errors, and self-hosted assets | [Loading documents](https://anara.com/lector/docs/document-loading) |
+| Page navigation and fit width | [Navigation](https://anara.com/lector/docs/code/page-navigation), [zoom](https://anara.com/lector/docs/code/zoom-control) |
+| Page previews | [Thumbnails](https://anara.com/lector/docs/code/thumbnails) |
+| Text search and highlighted results | [Search](https://anara.com/lector/docs/code/search) |
+| Selection and citation regions | [Selection](https://anara.com/lector/docs/code/select), [highlights](https://anara.com/lector/docs/code/highlight) |
+| PDF links and editable form fields | [Links](https://anara.com/lector/docs/code/links), [forms](https://anara.com/lector/docs/code/pdf-form) |
+| Dark page rendering | [Dark mode](https://anara.com/lector/docs/dark-mode) |
+| Props, hooks, and defaults | [API reference](https://anara.com/lector/docs/api) |
 
-Lector is a toolkit rather than a finished toolbar or a PDF editor. Your app supplies accessible controls, error UI, and storage for user annotations. Search requires embedded text; it does not perform OCR. Custom highlight overlays do not automatically modify the PDF file. See [troubleshooting](https://lector-weld.vercel.app/docs/troubleshooting) for worker errors, blank pages, and layout issues.
+Lector is a toolkit rather than a finished toolbar or a PDF editor. Your app supplies accessible controls, error UI, and storage for user annotations. Search requires embedded text; it does not perform OCR. Custom highlight overlays do not automatically modify the PDF file. See [troubleshooting](https://anara.com/lector/docs/troubleshooting) for worker errors, blank pages, and layout issues.
 
 ## Use with a coding assistant
 
-Connect an MCP client to `https://lector-weld.vercel.app/mcp` using Streamable HTTP, with no API key. It can search and read every guide through tools and resources. See [AI agents and MCP](https://lector-weld.vercel.app/docs/agents) for setup and example requests.
+Connect an MCP client to `https://anara.com/lector/mcp` using Streamable HTTP, with no API key. It can search and read every guide through tools and resources. See [AI agents and MCP](https://anara.com/lector/docs/agents) for setup and example requests.
 
-For direct fetching, start with [llms.txt](https://lector-weld.vercel.app/llms.txt), read [individual Markdown guides](https://lector-weld.vercel.app/docs/installation.md), or use the [complete documentation](https://lector-weld.vercel.app/llms-full.txt). These exports are generated from the same source as the website.
+For direct fetching, start with [llms.txt](https://anara.com/lector/llms.txt), read [individual Markdown guides](https://anara.com/lector/docs/installation.md), or use the [complete documentation](https://anara.com/lector/llms-full.txt). These exports are generated from the same source as the website.
 
 ## Work on Lector
 

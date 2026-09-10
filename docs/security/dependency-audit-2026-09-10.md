@@ -44,10 +44,10 @@ Removed unused `webdriverio`, which eliminated extract-zip, deepmerge-ts, tar-fs
 ## Verification
 
 - Frozen lockfile installation.
-- Eight unit tests, 141 Chromium browser tests and library typecheck passed.
+- After merging main at `922db12`: eight unit tests, 156 Chromium browser tests and library typecheck passed. Browser tests exercised the custom Chromium executable path through the Vitest 4 Playwright provider.
 - Library bundle/types and Next.js documentation production build.
 - Packed ESM exports, CommonJS diagnostic and server-rendering checks.
-- Documentation agent tests.
+- Six documentation agent tests passed.
 - Analytics coverage: dependency/build/test-only changes; no new event needed.
 
 GitHub returned no code-scanning analysis and secret scanning is disabled. This inventory covers dependency advisories rather than arbitrary application or container vulnerabilities.
