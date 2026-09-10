@@ -1,9 +1,9 @@
 import { source } from "@/lib/source";
 import { createCatalog } from "./catalog";
 
-export const docsOrigin = new URL(
-	process.env.DOCS_SITE_URL ?? "https://lector-weld.vercel.app",
-).origin;
+export const docsSiteUrl =
+	process.env.DOCS_SITE_URL ?? "https://anara.com/lector";
+export const docsOrigin = new URL(docsSiteUrl).origin;
 
 export const catalog = createCatalog(
 	source.getPages().map((page) => {
@@ -18,5 +18,5 @@ export const catalog = createCatalog(
 			body,
 		};
 	}),
-	docsOrigin,
+	docsSiteUrl,
 );

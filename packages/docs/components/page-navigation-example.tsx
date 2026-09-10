@@ -4,7 +4,7 @@ import { CanvasLayer, Page, Pages, TextLayer } from "@anaralabs/lector";
 import { ExampleRoot } from "./example-root";
 import PageNavigationButtons from "./ui/page-navigation-buttons";
 
-const fileUrl = "/pdf/large.pdf";
+const fileUrl = "/lector/pdf/large.pdf";
 
 const PageNavigation = () => {
 	return (

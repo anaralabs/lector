@@ -44,7 +44,9 @@ export async function generateMetadata(props: {
 		title: page.data.title,
 		description: page.data.description,
 		alternates: {
-			types: { "text/markdown": markdownPath(page.slugs.join("/") || "index") },
+			types: {
+				"text/markdown": `/lector${markdownPath(page.slugs.join("/") || "index")}`,
+			},
 		},
 	};
 }

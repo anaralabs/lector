@@ -14,7 +14,7 @@ Add a remote server in your assistant's MCP settings:
 | Setting | Value |
 | --- | --- |
 | Name | `lector` |
-| Server URL | `https://lector-weld.vercel.app/mcp` |
+| Server URL | `https://anara.com/lector/mcp` |
 | Transport | Streamable HTTP |
 | Authentication | None; public, read-only documentation |
 
@@ -24,7 +24,7 @@ For clients that use an `mcpServers` configuration with a `url` field:
 {
   "mcpServers": {
     "lector": {
-      "url": "https://lector-weld.vercel.app/mcp"
+      "url": "https://anara.com/lector/mcp"
     }
   }
 }
@@ -74,8 +74,8 @@ An agent with HTTP access can read any of these directly:
 | [/llms-full.txt](/llms-full.txt) | Fetch every guide in one response for tools with enough context |
 
 ```bash
-curl -fsSL https://lector-weld.vercel.app/llms.txt
-curl -fsSL https://lector-weld.vercel.app/docs/code/search.md
+curl -fsSL https://anara.com/lector/llms.txt
+curl -fsSL https://anara.com/lector/docs/code/search.md
 ```
 
 Each HTML guide advertises its Markdown version through a `rel="alternate"` link. Markdown responses include a link to the discovery file. See the [llms.txt proposal](https://llmstxt.org/) for the discovery convention.
