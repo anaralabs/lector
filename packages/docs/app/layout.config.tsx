@@ -1,8 +1,6 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
 import Image from "next/image";
 
-import Logo from "@/public/logo.png";
-
 /**
  * Shared layout configurations
  */
@@ -13,10 +11,11 @@ export const baseOptions: BaseLayoutProps = {
 		title: (
 			<>
 				<Image
-					alt="Fumadocs"
-					src={Logo}
-					className="w-5 h-5"
-					aria-label="Fumadocs"
+					alt=""
+					src="/anara-mark.svg"
+					width={28}
+					height={14}
+					className="w-7 h-auto dark:invert"
 				/>
 				<span className="font-medium [.uwu_&]:hidden [header_&]:text-[15px]">
 					Lector
