@@ -3,7 +3,9 @@ import { getTextNodeClientRects } from "./selection-rects";
 type Rect = { left: number; top: number; width: number; height: number };
 
 // Compare the original text runs, so a growing bounding box cannot bridge
-// unrelated lines or columns. Small font-relative gaps cover spaces in PDFs.
+// unrelated lines or columns. PDF word/sentence spaces can exist only as gaps
+// between positioned runs. Allow up to half a text-run height to include those
+// spaces (including justified text), while leaving wider column gutters open.
 const connected = (a: Rect, b: Rect) => {
 	const overlap =
 		Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top);
@@ -11,7 +13,7 @@ const connected = (a: Rect, b: Rect) => {
 		Math.max(a.left, b.left) - Math.min(a.left + a.width, b.left + b.width);
 	return (
 		overlap >= Math.min(a.height, b.height) / 2 &&
-		gap <= Math.min(a.height, b.height) * 0.2
+		gap <= Math.min(a.height, b.height) * 0.5
 	);
 };
 

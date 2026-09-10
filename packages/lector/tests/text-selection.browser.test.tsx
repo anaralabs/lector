@@ -171,3 +171,43 @@ test("merges subscript and reordered text runs into the same line", () => {
 		layer.querySelector("path")!.getAttribute("d")!.match(/M/g),
 	).toHaveLength(1);
 });
+
+test.each([1, 1.75, 3])(
+	"fills word and sentence spacing between selected runs at %sx zoom",
+	(zoom) => {
+		const layer = fixture();
+		const spans = layer.querySelectorAll("span");
+		spans[0]!.textContent = "(z₁, …, zₙ).";
+		spans[1]!.textContent = "Given z,";
+		spans[2]!.textContent = "the decoder";
+		const gaps: number[] = [];
+		for (let i = 1; i < spans.length; i++) {
+			const previous = spans[i - 1]!;
+			const right =
+				previous.offsetLeft + previous.getBoundingClientRect().width;
+			// PDF spacing is often represented by positioning, with no space glyph.
+			spans[i]!.style.left = `${right + 18}px`;
+			gaps.push(right + 9);
+		}
+		layer.style.transformOrigin = "0 0";
+		layer.style.transform = `scale(${zoom})`;
+		select(layer);
+		const path = layer.querySelector("path")!;
+		for (const x of gaps) {
+			expect(path.isPointInFill(new DOMPoint(x, 40))).toBe(true);
+		}
+		expect(path.getAttribute("d")!.match(/M/g)).toHaveLength(1);
+	},
+);
+
+test("leaves a column gutter unpainted even when text shares a baseline", () => {
+	const layer = fixture();
+	const spans = layer.querySelectorAll("span");
+	const right = spans[0]!.offsetLeft + spans[0]!.getBoundingClientRect().width;
+	spans[1]!.style.left = `${right + 40}px`;
+	spans[2]!.style.left = `${right + 60}px`;
+	select(layer);
+	const path = layer.querySelector("path")!;
+	expect(path.isPointInFill(new DOMPoint(right + 20, 40))).toBe(false);
+	expect(path.getAttribute("d")!.match(/M/g)).toHaveLength(2);
+});
