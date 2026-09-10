@@ -25,6 +25,9 @@
 .landing button:disabled { opacity: .35; cursor: default; }
 .landing :focus-visible { outline: 2px solid #707070; outline-offset: 4px; border-radius: 4px; }
 .landing ::selection { background: #dedede; color: #171717; }
+/* Keep PDF selection glyphs invisible: the canvas already paints the text. */
+.landing .textLayer ::selection { background: rgb(0 0 255 / 25%); background: color-mix(in srgb, AccentColor, transparent 75%); color: transparent; }
+.landing .textLayer br::selection { background: transparent; }
 .site-header, .landing-main, .site-footer { max-width: 1168px; width: calc(100% - 96px); margin-inline: auto; }
 .site-header { display: flex; align-items: center; justify-content: space-between; height: 76px; }
 .wordmark { display: inline-flex; align-items: center; gap: 8px; font-size: 23px; letter-spacing: -1px; font-weight: 550; }
