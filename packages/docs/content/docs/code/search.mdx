@@ -1,234 +1,127 @@
 ---
-title: Custom Search
-description: Add powerful search capabilities to your PDF viewer with real-time highlighting
+title: Search
+description: Index document text, display matches, and jump to highlighted results.
 ---
 
-import CustomSearch from "@/components/search-control.tsx";
+Search has three parts: `Search` extracts the document's text, `useSearch` finds matches, and `HighlightLayer` draws a selected result. Mount `Search` once per viewer. Keep `Pages` outside it so indexing does not replace the document with a loading message.
 
-<CustomSearch />
+## A searchable viewer
 
-## Implementation
+This example searches on submit to avoid doing fuzzy matching on every keystroke. It uses the `pdf-setup.ts` from [installation](/docs/installation).
 
-This example demonstrates two different highlighting behaviors when searching in a PDF document.
-
-### Exact Term Highlighting
-
-```tsx
-// Highlight only the exact search term
-const ResultItem = ({ result, originalSearchText }) => {
-  const onClick = async () => {
-    const rects = await calculateHighlightRects(pageProxy, {
-      pageNumber: result.pageNumber,
-      text: result.text,
-      matchIndex: result.matchIndex,
-      searchText: originalSearchText, // Pass searchText to highlight only the exact term
-    });
-    jumpToHighlightRects(rects, "pixels");
-  };
-};
-```
-
-### Full Context Highlighting
-
-```tsx
-// Highlight the entire text chunk containing the search term
-const ResultItemFullHighlight = ({ result }) => {
-  const onClick = async () => {
-    const rects = await calculateHighlightRects(pageProxy, {
-      pageNumber: result.pageNumber,
-      text: result.text,
-      matchIndex: result.matchIndex,
-      // No searchText parameter = highlight full context
-    });
-    jumpToHighlightRects(rects, "pixels");
-  };
-};
-```
-
-### Complete Example
-
-```tsx
+```tsx title="searchable-viewer.tsx"
 "use client";
 
 import {
-  Root,
-  Pages,
-  Page,
-  CanvasLayer,
-  TextLayer,
-  HighlightLayer,
-  Search,
+  CanvasLayer, HighlightLayer, Page, Pages, Root, Search, TextLayer,
+  calculateHighlightRects, usePdf, usePdfJump, useSearch,
+  type SearchResult,
 } from "@anaralabs/lector";
-import { useDebounce } from "use-debounce";
-import {
-  calculateHighlightRects,
-  SearchResult,
-  usePdf,
-  usePdfJump,
-  useSearch,
-} from "@anaralabs/lector";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import "./pdf-setup";
 
-// Define the TextPosition interface
-interface TextPosition {
-  pageNumber: number;
-  text: string;
-  matchIndex: number;
-  searchText?: string;
-}
-
-interface ResultItemProps {
-  result: SearchResult;
-  originalSearchText: string;
-}
-
-// Exact term highlighting component
-const ResultItem = ({ result, originalSearchText }: ResultItemProps) => {
+function SearchPanel() {
+  const [query, setQuery] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { search, searchResults } = useSearch();
+  const getPage = usePdf((state) => state.getPdfPageProxy);
   const { jumpToHighlightRects } = usePdfJump();
-  const getPdfPageProxy = usePdf((state) => state.getPdfPageProxy);
+  const setHighlight = usePdf((state) => state.setHighlight);
+  const results = [...searchResults.exactMatches, ...searchResults.fuzzyMatches];
 
-  const onClick = async () => {
-    const pageProxy = getPdfPageProxy(result.pageNumber);
-    const rects = await calculateHighlightRects(pageProxy, {
-      pageNumber: result.pageNumber,
-      text: result.text,
-      matchIndex: result.matchIndex,
-      searchText: originalSearchText, // Pass searchText for exact term highlighting
-    });
-    jumpToHighlightRects(rects, "pixels");
-  };
-
-  return (
-    <div
-      className="flex py-2 hover:bg-gray-50 flex-col cursor-pointer"
-      onClick={onClick}
-    >
-      <div className="flex-1 min-w-0">
-        <p className="text-sm text-gray-900">{result.text}</p>
-      </div>
-      <div className="flex items-center gap-4 text-sm text-gray-500">
-        <span className="ml-auto">Page {result.pageNumber}</span>
-      </div>
-    </div>
-  );
-};
-
-// Search UI component
-function SearchUI() {
-  const [searchText, setSearchText] = useState("");
-  const [debouncedSearchText] = useDebounce(searchText, 500);
-  const [limit, setLimit] = useState(5);
-  const { searchResults: results, search } = useSearch();
-
-  useEffect(() => {
-    setLimit(5);
-    search(debouncedSearchText, { limit: 5 });
-  }, [debouncedSearchText]);
-
-  const handleLoadMore = async () => {
-    const newLimit = limit + 5;
-    await search(debouncedSearchText, { limit: newLimit });
-    setLimit(newLimit);
-  };
+  async function openResult(result: SearchResult) {
+    setError(null);
+    try {
+      const rects = await calculateHighlightRects(getPage(result.pageNumber), result);
+      jumpToHighlightRects(rects, "pixels", "center");
+    } catch {
+      setError("Couldn't locate this match on the page.");
+    }
+  }
 
   return (
-    <div className="flex flex-col w-80 h-full">
-      <div className="px-4 py-4 border-b border-gray-200 bg-white">
-        <input
-          type="text"
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          placeholder="Search in document..."
-          className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-        />
-      </div>
-      <div className="flex-1 overflow-y-auto px-4">
-        <div className="py-4">
-          {!searchText ? null : !results.exactMatches.length &&
-            !results.fuzzyMatches.length ? (
-            <div className="text-center py-4 text-gray-500">
-              No results found
-            </div>
-          ) : (
-            <div className="flex flex-col gap-4">
-              {results.exactMatches.length > 0 && (
-                <div className="space-y-2">
-                  <h3 className="text-sm font-medium text-gray-700">
-                    Exact Matches
-                  </h3>
-                  <div className="divide-y divide-gray-100">
-                    {results.exactMatches.map((result) => (
-                      <ResultItem
-                        key={`${result.pageNumber}-${result.matchIndex}`}
-                        result={result}
-                        originalSearchText={searchText}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {results.hasMoreResults && (
-                <button
-                  onClick={handleLoadMore}
-                  className="w-full py-2 px-4 text-sm text-white bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors"
-                >
-                  Load More Results
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+    <div>
+      <form onSubmit={(event) => {
+        event.preventDefault();
+        search(query, { limit: 20 });
+        setHighlight([]);
+        setSubmitted(true);
+        setError(null);
+      }}>
+        <label>
+          Find in document
+          <input value={query} onChange={(event) => setQuery(event.target.value)} />
+        </label>
+        <button type="submit">Search</button>
+      </form>
+      <p role="status">
+        {submitted ? `${results.length} results shown` : "Enter text to search."}
+      </p>
+      {error && <p role="alert">{error}</p>}
+      <ul>
+        {results.map((result) => (
+          <li key={`${result.pageNumber}-${result.matchIndex}-${result.isExactMatch}`}>
+            <button type="button" onClick={() => void openResult(result)}>
+              Page {result.pageNumber}: {result.text}
+              {!result.isExactMatch && " (similar match)"}
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
 
-// Main component
-export default function CustomSearchExample() {
+export default function SearchableViewer() {
   return (
-    <div className="flex flex-col gap-8">
-      <div className="flex flex-col">
-        <h3 className="text-lg font-semibold mb-2">
-          Exact Search Term Highlighting
-        </h3>
-        <Root
-          source="/pdf/pathways.pdf"
-          className="flex bg-gray-50 h-[500px]"
-          loader={<div className="p-4">Loading...</div>}
-        >
-          <Search>
-            <SearchUI />
-          </Search>
-          <Pages className="p-4 w-full">
-            <Page>
-              <CanvasLayer />
-              <TextLayer />
-              <HighlightLayer className="bg-yellow-200/70" />
-            </Page>
-          </Pages>
-        </Root>
+    <Root source="/sample.pdf" style={{ height: 600, display: "flex", flexDirection: "column" }}>
+      <div style={{ maxHeight: 200, overflow: "auto" }}>
+        <Search loading={<p role="status">Indexing document…</p>}>
+          <SearchPanel />
+        </Search>
       </div>
-    </div>
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Pages>
+          <Page>
+            <CanvasLayer />
+            <TextLayer />
+            <HighlightLayer style={{ background: "#ffdf6080" }} />
+          </Page>
+        </Pages>
+      </div>
+    </Root>
   );
 }
 ```
 
-## Features
+`calculateHighlightRects` uses the result's page number, match index, and `searchText` to locate the match. Passing the result itself keeps highlighting tied to the submitted query even if the user has since edited the input. It returns pixel rectangles in page coordinates.
 
-- Real-time search with debouncing
-- Configurable highlighting (exact term or full context)
-- Result highlighting
-- Page jumping to search results
-- Load more functionality
+## Search options and results
 
-## Best Practices
+`search(text, options)` is synchronous. It returns the results and also updates `searchResults` in that hook instance.
 
-- Use debouncing to prevent excessive searches
-- Choose appropriate highlighting mode for your use case
-- Include proper page navigation
-- Handle empty states gracefully
-- Optimize search performance
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `threshold` | `0.7` | Minimum fuzzy similarity; use a value from 0 to 1 |
+| `limit` | `10` | Result budget shared between exact and fuzzy groups |
+| `textSize` | `100` | Characters of trailing context to include after a match |
+
+Results contain `exactMatches`, `fuzzyMatches`, and `hasMoreResults`. Each match has `pageNumber`, `text`, `matchIndex`, `score`, `isExactMatch`, and optional `searchText`. Matching is case-insensitive. Searching an empty or whitespace-only query clears results.
+
+The current implementation allocates at most `ceil(limit / 2)` results to exact matches and the remaining budget to fuzzy matches. It can therefore return fewer than `limit` results even when more exact matches exist. `hasMoreResults` compares the total candidate count with `limit`; it is not a reliable count of everything omitted by the group allocation. If you build “show more,” rerun the submitted query with a higher limit rather than treating the result as paginated data.
+
+## Practical limits
+
+`Search` extracts text from all pages, even though `Pages` only renders a viewport's worth of pages. Mount the search panel on demand for large PDFs. For search-as-you-type, debounce the query and measure with representative documents; lowering the result limit does not stop the full-document matching pass.
+
+Image-only scans need an OCR text layer before they can be searched. PDF text extraction can also differ from visual reading order or spacing. Check the extracted text when a phrase looks present but is not found.
+
+## Live example
+
+import SearchDemo from "@/components/search-control";
+
+<SearchDemo />
 
 ## Responsive search in long documents
 
@@ -255,3 +148,25 @@ Unmounting or replacing document text also cancels it. Cancelled calls reject
 with `AbortError` and never publish partial results. You can pass an external
 `AbortSignal` through `{ signal }` or adjust `{ timeSliceMs }` when needed.
 Keep the component inside `<Root>` and use `<Search>` to index the document.
+
+## Indexing failures and retry
+
+If text extraction fails, `Search` keeps its children unmounted and shows an error
+with a Retry button. Retry starts a new indexing attempt without reloading the
+viewer. To match your application's error presentation, provide a fallback:
+
+```tsx
+<Search
+  errorFallback={({ retry }) => (
+    <p role="alert">
+      Search is unavailable. <button onClick={retry}>Try again</button>
+    </p>
+  )}
+>
+  <SearchPanel />
+</Search>
+```
+
+This fragment replaces the existing `Search` wrapper in the example above.
+The fallback also receives the original `error`. It handles indexing failures;
+`Root.onError` handles document loading failures.

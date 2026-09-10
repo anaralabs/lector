@@ -1,151 +1,85 @@
 ---
-title: Highlight
-description: Add interactive highlights to your PDFs with smooth navigation and clickable annotations
+title: Highlights
+description: Draw and navigate to rectangles in page coordinates.
 ---
 
-import HighlightDemo from "@/components/highlight-layer";
+`HighlightLayer` draws the rectangles in `usePdf((state) => state.highlights)`. Use it for search results, citation targets, or a selected region. It does not extract text, save data, or write annotations into the PDF.
 
-<HighlightDemo />
+## Show a region and scroll to it
 
-## Basic Usage
+Complete [installation](/docs/installation) first. The rectangle below is an illustrative region on page 1; replace it with coordinates from your document.
 
-At its core, the PDF Highlight Layer lets you highlight sections of a PDF and navigate between them:
-
-```tsx
+```tsx title="highlight-viewer.tsx"
 "use client";
 
 import {
-  Root,
-  Pages,
-  Page,
-  CanvasLayer,
-  TextLayer,
-  HighlightLayer,
+  CanvasLayer, HighlightLayer, Page, Pages, Root, TextLayer,
+  usePdf, usePdfJump, type HighlightRect,
 } from "@anaralabs/lector";
+import "./pdf-setup";
 
-export default function MyPdfViewer() {
+const region: HighlightRect[] = [
+  { pageNumber: 1, left: 10, top: 15, width: 70, height: 5, type: "percent" },
+];
+
+function HighlightControls() {
+  const { jumpToHighlightRects } = usePdfJump();
+  const setHighlight = usePdf((state) => state.setHighlight);
+
   return (
-    <Root source="/my-document.pdf">
-      <Pages>
-        <Page>
-          <CanvasLayer />
-          <TextLayer />
-          <HighlightLayer className="bg-yellow-200/70" />
-        </Page>
-      </Pages>
+    <div>
+      <button type="button" onClick={() => jumpToHighlightRects(region, "percent", "center")}>
+        Show region
+      </button>
+      <button type="button" onClick={() => setHighlight([])}>Clear highlight</button>
+    </div>
+  );
+}
+
+export default function HighlightViewer() {
+  return (
+    <Root source="/sample.pdf" style={{ height: 600, display: "flex", flexDirection: "column" }}>
+      <HighlightControls />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Pages>
+          <Page>
+            <CanvasLayer />
+            <TextLayer />
+            <HighlightLayer style={{ background: "#ffdf6080" }} />
+          </Page>
+        </Pages>
+      </div>
     </Root>
   );
 }
 ```
 
-## Adding Interactive Highlights
+To draw without scrolling, call `setHighlight(rects)`. It **replaces** the active rectangles. To scroll without replacing them, use `scrollToHighlightRects` from `usePdfJump`.
 
-To make highlights interactive, use the `usePdfJump` hook. Here's a complete example:
+## Coordinate contract
 
-```tsx
-"use client";
+| Field | Meaning |
+| --- | --- |
+| `pageNumber` | One-based page number |
+| `left`, `top` | Distance from the page's top-left corner |
+| `width`, `height` | Rectangle size in the same units |
+| `type` | `"pixels"` (also used when omitted) or `"percent"` |
+| `style` | Optional function from the rectangle to React CSS properties |
 
-const HighlightLayerContent = () => {
-  const { jumpToHighlightRects } = usePdfJump();
-  const [selectedExample, setSelectedExample] = useState<string | null>(null);
+Pixel coordinates use the page's scale-1 viewport, not screen pixels or raw PDF bottom-left coordinates. Selection and search helpers return this format. For percentage coordinates, `10` means 10%, not `0.1`.
 
-  const handleExampleClick = async (example: (typeof examples)[0]) => {
-    setSelectedExample(example.text);
-    jumpToHighlightRects(example.highlights, "pixels");
-  };
+Set `type: "percent"` on **each rectangle** and also pass `"percent"` to the jump helper. The rectangle controls drawing; the helper argument controls scrolling. Mixing the units makes the viewport and overlay disagree.
 
-  return (
-    <div className="flex">
-      <div className="flex-1">
-        <Pages className="p-4">
-          <Page>
-            <CanvasLayer />
-            <TextLayer />
-            <HighlightLayer className="bg-yellow-200/70" />
-          </Page>
-        </Pages>
-      </div>
-      <div className="w-80 p-4">
-        {examples.map((example) => (
-          <div
-            key={example.id}
-            onClick={() => handleExampleClick(example)}
-            className={`p-3 rounded ${
-              selectedExample === example.text
-                ? "bg-yellow-100"
-                : "hover:bg-gray-50"
-            }`}
-          >
-            <h3>{example.title}</h3>
-            <p>{example.text}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-```
+For coordinates from a backend PDF parser, account for the PDF crop box, rotation, and origin before drawing. You can obtain the page through `getPdfPageProxy(pageNumber)` and use PDF.js viewport conversion methods.
 
-## Highlight Format
+## Styling and persistence
 
-Highlights are defined using pixel coordinates:
+The layer supplies positioning and `pointer-events: none`; give it a background color or border so it is visible. Props and styles apply to every rectangle. Avoid opaque fills that hide the text.
 
-```tsx
-const highlight = {
-  pageNumber: 1,
-  left: 63.069,
-  top: 438.736,
-  width: 465.831,
-  height: 10.888,
-};
-```
+Save serializable rectangle data with a document ID and revision if it must survive a reload. A `style` callback is not serializable; reconstruct styling in your app. Changing the source or unmounting `Root` creates a new viewer state. See [selection](/docs/code/select) for capturing text and coordinates and [dark mode](/docs/dark-mode) for overlay colors.
 
-## Custom Styling
+## Live example
 
-The HighlightLayer component accepts className props for custom styling:
+import HighlightDemo from "@/components/highlight-layer";
 
-```tsx
-// Yellow highlight with 70% opacity
-<HighlightLayer className="bg-yellow-200/70" />
-
-// Custom color
-<HighlightLayer className="bg-blue-300/50" />
-
-// Multiple styles
-<HighlightLayer className="bg-purple-200/60 rounded-sm" />
-```
-
-## Loading States
-
-Add a loading state to improve user experience:
-
-```tsx
-<Root
-  source={fileUrl}
-  className="bg-gray-50"
-  loader={<div className="p-4">Loading PDF...</div>}
->
-  <HighlightLayerContent />
-</Root>
-```
-
-## TypeScript Support
-
-Full TypeScript support is included. Example type for highlight rectangles:
-
-```tsx
-type HighlightRect = {
-  pageNumber: number;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-};
-```
-
-## Best Practices
-
-- Always provide fallback content with the `loader` prop
-- Use relative units (pixels) for highlight coordinates
-- Handle errors when jumping to highlights
-- Keep highlight areas within document bounds
+<HighlightDemo />

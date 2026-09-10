@@ -1,20 +1,16 @@
 "use client";
 
-import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
-import { useTheme } from "next-themes";
-import "@/lib/setup";
+import { CanvasLayer, Page, Pages, TextLayer } from "@anaralabs/lector";
+import { ExampleRoot } from "./example-root";
 
 const fileUrl = "/pdf/pathways.pdf";
 
 const Basic = () => {
-	const { resolvedTheme } = useTheme();
-
 	return (
-		<Root
+		<ExampleRoot
 			source={fileUrl}
 			className="w-full h-[500px] border overflow-hidden rounded-lg"
 			loader={<div className="p-4">Loading...</div>}
-			colorScheme={resolvedTheme === "dark" ? "dark" : "light"}
 		>
 			<Pages>
 				<Page>
@@ -22,7 +18,7 @@ const Basic = () => {
 					<TextLayer />
 				</Page>
 			</Pages>
-		</Root>
+		</ExampleRoot>
 	);
 };
 

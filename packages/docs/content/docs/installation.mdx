@@ -1,134 +1,92 @@
 ---
 title: Installation
-description: Complete guide to installing and setting up Lector in your React application
+description: Install compatible dependencies, configure the worker, and prepare a browser-only viewer.
 ---
 
-## Prerequisites
+## Install the packages
 
-Before installing Lector, make sure you have:
-
-- Node.js 18.0 or later
-- React 19 or later
-- npm, yarn, pnpm, or bun package manager
-
-## Installing the Package
-
-1. Install the main package and its peer dependency:
+Use React 19 or later. The current Lector source expects `pdfjs-dist` `^5.5.207`; keep the PDF.js runtime and worker on the **same exact version**.
 
 ```bash
-# Using npm
-npm install @anaralabs/lector pdfjs-dist
-
-# Using yarn
-yarn add @anaralabs/lector pdfjs-dist
-
-# Using pnpm
-pnpm add @anaralabs/lector pdfjs-dist
-
-# Using bun
-bun add @anaralabs/lector pdfjs-dist
+npm install @anaralabs/lector pdfjs-dist@^5.5.207
 ```
 
-## Setting up PDF.js Worker
+With pnpm, use `pnpm add @anaralabs/lector pdfjs-dist@^5.5.207`. Lector is an ES module package. Import it with `import`, and render the viewer in the browser.
 
-2. Configure the PDF.js worker in your application:
+## Configure the worker
 
-### App Router (default)
+The worker parses PDFs off the main thread. Configure it **before mounting `Root`**, using the same legacy PDF.js build that Lector loads internally.
 
-In your PDF viewer component:
+The following setup works without a bundler-specific worker loader. From your application's directory, copy the worker into its public assets:
 
-```tsx
+```bash
+mkdir -p public/pdfjs
+cp node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs public/pdfjs/
+```
+
+Create `pdf-setup.ts` alongside your viewer:
+
+```ts title="pdf-setup.ts"
 import { GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
 import "pdfjs-dist/web/pdf_viewer.css";
 
-// Set up the worker
+GlobalWorkerOptions.workerSrc = "/pdfjs/pdf.worker.min.mjs";
+```
+
+Import `./pdf-setup` in your viewer module. Recopy the worker whenever you upgrade PDF.js, ideally as part of your app's build. If the app is served below a path prefix, include that prefix in `workerSrc`. Confirm that the worker URL returns JavaScript, not your app's HTML fallback.
+
+### Let your bundler emit the worker
+
+If your bundler supports package-relative asset URLs, you can replace the `workerSrc` assignment with:
+
+```ts
 GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/legacy/build/pdf.worker.mjs",
-  import.meta.url
+  import.meta.url,
 ).toString();
-
-export function PDFViewer() {
-  return (
-    <Root source='/sample.pdf'>
-      <Pages>
-        <Page>
-          <CanvasLayer />
-        </Page>
-      </Pages>
-    </Root>
-  );
-}
 ```
 
-### Pages Directory
+For Vite, an explicit asset import is another option:
 
-In your PDF viewer component:
+```ts
+import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 
-```tsx
-import { Root, Pages, Page, CanvasLayer } from "@anaralabs/lector";
-import "pdfjs-dist/legacy/build/pdf.worker.min.mjs";
-import "pdfjs-dist/web/pdf_viewer.css";
-
-export function PDFViewer() {
-  return (
-    <Root source='/sample.pdf'>
-      <Pages>
-        <Page>
-          <CanvasLayer />
-        </Page>
-      </Pages>
-    </Root>
-  );
-}
+GlobalWorkerOptions.workerSrc = workerUrl;
 ```
 
-## Required Styles
+Use one approach. The public-file approach is useful when your framework cannot resolve the package-relative URL. Check both development and production builds.
 
-3. Import the required CSS styles. You can do this in your main CSS file or component:
+## Next.js: keep the viewer out of server rendering
 
-```tsx
-// Import the default PDF viewer styles
-import "pdfjs-dist/web/pdf_viewer.css";
+A `"use client"` directive alone does not prevent a component from being prerendered on the server. Put your viewer and its `./pdf-setup` import in `pdf-viewer.tsx`, then load it from a separate Client Component:
+
+```tsx title="pdf-viewer-client.tsx"
+"use client";
+
+import dynamic from "next/dynamic";
+
+const PDFViewer = dynamic(() => import("./pdf-viewer"), {
+  ssr: false,
+  loading: () => <p role="status">Preparing PDF viewer…</p>,
+});
+
+export default PDFViewer;
 ```
 
-## Verifying Installation
+Your route can import `PDFViewer` from this wrapper. Keep the PDF.js setup import inside the dynamically loaded viewer, so it is not evaluated on the server. In the Pages Router, import the PDF.js global stylesheet from `pages/_app.tsx` instead of `pdf-setup.ts`.
 
-To verify that Lector is properly installed, create a basic PDF viewer component:
+Next.js requires `ssr: false` to live in a Client Component. See [Next.js lazy loading](https://nextjs.org/docs/app/guides/lazy-loading#skipping-ssr) for the framework's rules.
 
-```tsx
-import { Root, Pages, Page, CanvasLayer } from "@anaralabs/lector";
+## Styles and PDF assets
 
-function BasicPDFViewer() {
-  return (
-    <Root source='/sample.pdf'>
-      <Pages>
-        <Page>
-          <CanvasLayer />
-        </Page>
-      </Pages>
-    </Root>
-  );
-}
-```
+`pdfjs-dist/web/pdf_viewer.css` positions text and annotations over the canvas. Without it, text selection and links can be misplaced even when the PDF image looks correct.
 
-## Troubleshooting
+The examples use inline styles for their layout; they do not require an application UI kit. Some optional Lector components, including the colored-highlight tools, use Tailwind utility classes internally. If you use those components, include the library's distributed JavaScript in your Tailwind content sources, or supply equivalent styles.
 
-If you encounter any issues during installation:
+The worker is separate from PDF.js's fonts, character maps, image decoders, and color profiles. Lector defaults these auxiliary resources to versioned jsDelivr URLs. To serve all PDF assets from your own origin, follow [self-hosting PDF.js assets](/docs/document-loading#self-host-pdfjs-assets).
 
-1. Make sure all peer dependencies are installed
-2. Check that the PDF.js worker is properly configured
-3. Verify that the required CSS files are imported
-4. Ensure your React version is compatible
+## Verify the setup
 
-## Next Steps
+Put a PDF at `public/sample.pdf` and open `/sample.pdf` directly to check that it is served correctly. Then follow [your first viewer](/docs/basic-usage). You should see pages inside a scrollable container and be able to select text in a text-based PDF.
 
-Now that you have Lector installed, you can:
-
-<Cards>
-  <Card
-    title='Learn Basic Usage'
-    href='/docs/basic-usage'
-    description='Get started with core components'
-  />
-  <Card title='View Examples' href='/docs/code/basic' description='See Lector in action' />
-</Cards>
+If you see an empty viewer or a worker error, use the [troubleshooting guide](/docs/troubleshooting).

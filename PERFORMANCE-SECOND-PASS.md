@@ -182,3 +182,18 @@ source was changed for measurement.
 This is a broad measured pass over loading, indexing, searching, annotations,
 page/thumbnail rendering, subscriptions, browser compatibility and packaging.
 It is not proof that every workload or future optimization has been exhausted.
+
+## Pre-merge follow-up
+
+After the measured performance commits, main advanced to `41543e9` with rewritten
+guides, documentation endpoints and a page-width/selection fix. The merge keeps
+those changes and the PR's async-search and virtual-thumbnail documentation.
+
+Review identified a missing error state in `Search`: extraction rejection mounted
+children against an empty index. A component regression reproduced this behavior.
+`Search` now mounts children only after successful indexing, provides an explicit
+error with Retry, and accepts `errorFallback({ error, retry })`. Tests cover failed
+indexing, recovery without remounting, and repeated failure through a custom
+fallback. The combined suite has 141 browser tests and 8 Node tests. Its rebuilt
+Size Limit output is 49,815 bytes. Timing tables above remain measurements of the
+original performance pass rather than new measurements of this follow-up.
