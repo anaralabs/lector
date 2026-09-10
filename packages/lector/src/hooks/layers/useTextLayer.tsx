@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
-
 import { usePdf } from "../../internal";
+import { createSelectionBackground } from "../../lib/selection-background";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
 // Add custom property declarations
@@ -11,12 +11,14 @@ interface TextLayerDivElement extends HTMLDivElement {
 
 const createTextSelectionManager = () => {
 	const textLayers = new Map<HTMLDivElement, HTMLElement>();
+	const selectionBackground = createSelectionBackground();
 	let selectionChangeAbortController: AbortController | null = null;
 	let isPointerDown = false;
 	let prevRange: Range | null = null;
 	let isFirefox: boolean | undefined;
 
 	const removeGlobalSelectionListener = (textLayerDiv: HTMLDivElement) => {
+		selectionBackground.clear(textLayerDiv);
 		textLayers.delete(textLayerDiv);
 		if (textLayers.size === 0) {
 			selectionChangeAbortController?.abort();
@@ -81,6 +83,7 @@ const createTextSelectionManager = () => {
 			"selectionchange",
 			() => {
 				const selection = document.getSelection();
+				selectionBackground.update(selection, textLayers.keys());
 				if (!selection || selection.rangeCount === 0) {
 					textLayers.forEach(reset);
 					return;
@@ -183,7 +186,7 @@ const createTextSelectionManager = () => {
 	return bindMouseEvents;
 };
 
-const bindMouseEvents = createTextSelectionManager();
+export const bindMouseEvents = createTextSelectionManager();
 
 export const useTextLayer = () => {
 	const textContainerRef = useRef<TextLayerDivElement>(null);
