@@ -50,10 +50,9 @@
 		"@types/react-dom": "^19.0.2",
 		"@use-gesture/react": "^10.3.1",
 		"@vitejs/plugin-react": "^4.3.4",
-		"@vitest/browser": "^3.2.6",
 		"clsx": "^2.1.1",
 		"pdfjs-dist": "^5.5.207",
-		"playwright": "^1.45.3",
+		"playwright": "^1.55.1",
 		"react": "^19.1.1",
 		"size-limit": "^11.1.6",
 		"tsc-alias": "^1.8.10",
@@ -61,8 +60,8 @@
 		"tsup": "^8.3.5",
 		"typescript": "^5.5.3",
 		"vite": "^6.4.3",
-		"vitest": "^3.2.6",
-		"webdriverio": "^8.39.1"
+		"vitest": "4.1.11",
+		"@vitest/browser-playwright": "4.1.11"
 	},
 	"peerDependencies": {
 		"pdfjs-dist": "^5.5.207",

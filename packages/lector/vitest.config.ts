@@ -1,5 +1,5 @@
 import react from "@vitejs/plugin-react";
-import type {} from "@vitest/browser/providers/playwright";
+import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
 
 const browser =
@@ -33,7 +33,7 @@ export default defineConfig({
 		],
 		browser: {
 			enabled: true,
-			provider: "playwright",
+			provider: playwright(),
 			headless: true,
 			screenshotFailures: false,
 			instances: [
