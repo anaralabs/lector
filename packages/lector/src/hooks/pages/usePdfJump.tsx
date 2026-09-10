@@ -87,8 +87,9 @@ export const usePdfJump = () => {
 			let scrollOffset: number;
 
 			if (align === "center") {
-				// When centering in the viewport, we need the viewport height
-				const viewportHeight = virtualizer.scrollElement?.clientHeight || 0;
+				// The observed viewport is already normalized to PDF coordinates,
+				// matching pageStart and the highlight rect at every zoom level.
+				const viewportHeight = virtualizer.scrollRect?.height ?? 0;
 
 				// The target position is the rect's center minus half the viewport height
 				// This places the rect in the center of the viewport

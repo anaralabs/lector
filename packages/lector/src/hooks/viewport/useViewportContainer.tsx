@@ -58,6 +58,8 @@ export const useViewportContainer = ({
 
 	const zoomRafRef = useRef<number | null>(null);
 	const lastPushedZoomRef = useRef<number | null>(null);
+	const initializedZoomRef = useRef(false);
+	const appliedZoomRef = useRef(1);
 
 	const updateTransform = useCallback(
 		(zoomUpdate?: boolean) => {
@@ -100,14 +102,11 @@ export const useViewportContainer = ({
 			elementWrapperRef.current.style.height = `${naturalHeight * zoom}px`;
 			containerRef.current.scrollTop = translateY;
 			containerRef.current.scrollLeft = translateX;
+			appliedZoomRef.current = zoom;
 
-			if (zoomUpdate && zoomRafRef.current === null) {
-				zoomRafRef.current = requestAnimationFrame(() => {
-					zoomRafRef.current = null;
-					const z = transformations.current.zoom;
-					lastPushedZoomRef.current = z;
-					updateZoom(() => z);
-				});
+			if (zoomUpdate) {
+				lastPushedZoomRef.current = zoom;
+				updateZoom(() => zoom);
 			}
 		},
 		[containerRef, elementRef, elementWrapperRef, updateZoom, store],
@@ -127,6 +126,19 @@ export const useViewportContainer = ({
 	}, []);
 
 	useEffect(() => {
+		if (!initializedZoomRef.current && containerRef.current) {
+			initializedZoomRef.current = true;
+			// The virtualizer restores its offset during layout, already scaled
+			// by the initial store zoom. Apply geometry without scaling that
+			// physical scroll position a second time.
+			transformations.current = {
+				zoom,
+				translateX: containerRef.current.scrollLeft,
+				translateY: containerRef.current.scrollTop,
+			};
+			updateTransform();
+			return;
+		}
 		if (transformations.current.zoom === zoom || !containerRef.current) {
 			return;
 		}
@@ -142,7 +154,8 @@ export const useViewportContainer = ({
 		}
 		lastPushedZoomRef.current = null;
 
-		const prevZoom = transformations.current.zoom;
+		// A newer gesture value may still be queued for the next frame.
+		const prevZoom = appliedZoomRef.current;
 		if (!prevZoom || !Number.isFinite(prevZoom)) {
 			transformations.current = {
 				translateX: containerRef.current.scrollLeft,
@@ -324,12 +337,35 @@ export const useViewportContainer = ({
 				};
 
 				newMemo.lastZoom = newZoom;
-				updateTransform(true);
+				// Trackpads can deliver several events before the next paint.
+				// Keep their latest anchor/scale, then apply geometry and publish
+				// the matching store zoom together once per frame. Scroll writes
+				// after size changes force layout, so batching just the store is
+				// not enough to keep this path responsive.
+				if (zoomRafRef.current === null) {
+					zoomRafRef.current = requestAnimationFrame(() => {
+						zoomRafRef.current = null;
+						updateTransform(true);
+					});
+				}
 
 				return newMemo;
 			},
 			onPinchStart: () => setIsPinching(true),
-			onPinchEnd: () => setIsPinching(false),
+			onPinchEnd: () => {
+				const pendingFrame = zoomRafRef.current !== null;
+				if (zoomRafRef.current !== null) {
+					cancelAnimationFrame(zoomRafRef.current);
+					zoomRafRef.current = null;
+				}
+				setIsPinching(false);
+				// A gesture can end before its queued frame. Flush its final
+				// position now, restoring native CSS zoom on WebKit before paint.
+				// A pinch with no movement must preserve native scrolling.
+				if (pendingFrame || gestureTransformAppliedRef.current) {
+					updateTransform(pendingFrame);
+				}
+			},
 		},
 		{
 			target: containerRef,

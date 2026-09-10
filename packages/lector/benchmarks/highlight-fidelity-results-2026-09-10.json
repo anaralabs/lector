@@ -1,0 +1,45 @@
+{
+  "baselineCommit": "93c5bd6",
+  "fixture": "tests/fixtures/text-geometry.ts: deterministic Helvetica PDF, 600 by 800 points, text at (100,500), optional CropBox [50,100,550,700] and page rotation",
+  "verification": "tests/highlight-geometry.browser.test.tsx: compare highlights to actual PDF.js raster glyph bounds (1-pixel antialiasing tolerance); no mocked extraction in these ten cases",
+  "results": {
+    "cropAndRotation": {
+      "cases": 8,
+      "baselinePassed": 1,
+      "improvedPassed": 8,
+      "rotations": [
+        0,
+        90,
+        180,
+        270
+      ],
+      "crop": [
+        false,
+        true
+      ]
+    },
+    "columnGutter": {
+      "baseline": "Highlight crosses blank x=250 gutter between LEFT at x=100 and RIGHT at x=400",
+      "improved": "No returned rectangle crosses the gutter; whitespace still counts toward search offsets"
+    },
+    "proportionalGlyphWidths": {
+      "fixture": "iiiiWWWW, searching iiii, 20-point Helvetica",
+      "reference": "Independently extracted width of a second PDF containing only iiii",
+      "baselineAbsoluteErrorPdfPoints": 28.88,
+      "improvedAbsoluteErrorPdfPoints": {
+        "lessThan": 1
+      }
+    }
+  },
+  "browsers": [
+    "Chromium",
+    "Firefox",
+    "WebKit"
+  ],
+  "passedCasesPerBrowser": 10,
+  "limitations": [
+    "This fixes search highlight geometry; it does not alter PDF text extraction, search normalization, selection ordering, or hyphenation.",
+    "Partial glyph widths use PDF.js text-layer font-family measurement, scaled to the PDF run width. Fonts with unusual shaping or substitutions and mixed-direction runs still need dedicated fixtures; this is not a claim of exact glyph outlines in every PDF.",
+    "Vertical-writing direction and pure RTL geometry additionally have streamed-item regression coverage; the generated PDF fixture uses horizontal Helvetica."
+  ]
+}

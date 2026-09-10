@@ -9,7 +9,11 @@ test("stop reading once the highlight has been found, including marked/empty tex
 	let reads = 0;
 	const cancel = vi.fn();
 	const page = {
-		getViewport: () => ({ width: 600, height: 800 }),
+		getViewport: () => ({
+			width: 600,
+			height: 800,
+			convertToViewportPoint: (x: number, y: number) => [x, 800 - y],
+		}),
 		streamTextContent: () =>
 			new ReadableStream(
 				{
@@ -24,7 +28,7 @@ test("stop reading once the highlight has been found, including marked/empty tex
 								{ str: "", transform: [1, 0, 0, 1, 0, 0], width: 0, height: 0 },
 								{
 									str: "hello world",
-									transform: [1, 0, 0, 1, 10, 700],
+									transform: [12, 0, 0, 12, 10, 700],
 									width: 110,
 									height: 12,
 								},

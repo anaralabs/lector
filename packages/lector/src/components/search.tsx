@@ -1,4 +1,4 @@
-import type { PDFPageProxy } from "pdfjs-dist";
+import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import { useCallback, useEffect, useState } from "react";
 import { usePdf } from "../internal";
 import { acquireDocumentText } from "../lib/document-text";
@@ -14,8 +14,13 @@ interface SearchProps {
 }
 
 type IndexingResult =
-	| { pages: PDFPageProxy[]; status: "ready" }
-	| { pages: PDFPageProxy[]; status: "error"; error: unknown };
+	| { document: PDFDocumentProxy; pages: PDFPageProxy[]; status: "ready" }
+	| {
+			document: PDFDocumentProxy;
+			pages: PDFPageProxy[];
+			status: "error";
+			error: unknown;
+	  };
 
 export const Search = ({
 	children,
@@ -24,7 +29,10 @@ export const Search = ({
 }: SearchProps) => {
 	const [result, setResult] = useState<IndexingResult | null>(null);
 	const [attempt, setAttempt] = useState(0);
+	const document = usePdf((state) => state.pdfDocumentProxy);
 	const proxies = usePdf((state) => state.pageProxies);
+	const pagesLoaded = usePdf((state) => state.pagesLoaded);
+	const loadPages = usePdf((state) => state.loadPdfPageProxies);
 	const setTextContent = usePdf((state) => state.setTextContent);
 	const retry = useCallback(() => {
 		setResult(null);
@@ -35,25 +43,33 @@ export const Search = ({
 	useEffect(() => {
 		let disposed = false;
 		setResult(null);
-		const task = acquireDocumentText(proxies);
-		void task.promise
+		let task: ReturnType<typeof acquireDocumentText> | undefined;
+		void loadPages()
+			.then((pages) => {
+				// Wait for the complete proxy snapshot to reach the store before
+				// indexing, avoiding an abort/restart when its empty array is replaced.
+				if (disposed || !pagesLoaded) return;
+				task = acquireDocumentText(pages);
+				return task.promise;
+			})
 			.then((text) => {
-				if (disposed) return;
+				if (disposed || !text) return;
 				setTextContent(text);
-				setResult({ pages: proxies, status: "ready" });
+				setResult({ document, pages: proxies, status: "ready" });
 			})
 			.catch((error) => {
 				if (disposed) return;
 				console.error("Error extracting PDF text", error);
-				setResult({ pages: proxies, status: "error", error });
+				setResult({ document, pages: proxies, status: "error", error });
 			});
 		return () => {
 			disposed = true;
-			task.release();
+			task?.release();
 		};
-	}, [proxies, setTextContent, attempt]);
+	}, [document, proxies, pagesLoaded, loadPages, setTextContent, attempt]);
 
-	if (!result || result.pages !== proxies) return loading;
+	if (!result || result.document !== document || result.pages !== proxies)
+		return loading;
 	if (result.status === "error") {
 		if (errorFallback) return errorFallback({ error: result.error, retry });
 		return (

@@ -1,4 +1,9 @@
-import { debounce, type Virtualizer } from "@tanstack/react-virtual";
+import {
+	debounce,
+	observeElementRect as observePhysicalElementRect,
+	type Rect,
+	type Virtualizer,
+} from "@tanstack/react-virtual";
 
 import { PDFStore } from "../../internal";
 
@@ -13,6 +18,34 @@ const addEventListenerOptions = {
 
 export const useObserveElement = () => {
 	const store = PDFStore.useContext();
+
+	// Item measurements and scroll offsets use scale-1 PDF coordinates. Keep
+	// the viewport in that same space, including zoom changes without a resize.
+	const observeElementRect = <T extends Element>(
+		instance: Virtualizer<T, Element>,
+		cb: (rect: Rect) => void,
+	) => {
+		let physicalRect: Rect | undefined;
+		const publish = () => {
+			if (!physicalRect) return;
+			const zoom = store.getState().zoom;
+			cb({
+				width: physicalRect.width / zoom,
+				height: physicalRect.height / zoom,
+			});
+		};
+		const stopObserving = observePhysicalElementRect(instance, (rect) => {
+			physicalRect = rect;
+			publish();
+		});
+		const unsubscribe = store.subscribe((state, previous) => {
+			if (state.zoom !== previous.zoom) publish();
+		});
+		return () => {
+			stopObserving?.();
+			unsubscribe();
+		};
+	};
 
 	const observeElementOffset = <T extends Element>(
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -65,6 +98,7 @@ export const useObserveElement = () => {
 		};
 	};
 	return {
+		observeElementRect,
 		observeElementOffset,
 	};
 };

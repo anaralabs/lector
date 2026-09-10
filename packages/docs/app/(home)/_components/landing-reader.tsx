@@ -189,6 +189,7 @@ export default function LandingReader() {
 		<Root
 			key={attempt}
 			source={source}
+			progressive
 			className="landing-reader"
 			isZoomFitWidth
 			zoomOptions={{ minZoom: 0.25, maxZoom: 3 }}

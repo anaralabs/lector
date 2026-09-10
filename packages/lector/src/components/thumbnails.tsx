@@ -15,9 +15,10 @@ import {
 import { usePdfJump } from "../hooks/pages/usePdfJump";
 import { useThumbnail } from "../hooks/useThumbnail";
 import { usePdf } from "../internal";
+import { PageLoadingBoundary } from "./page-loading-boundary";
 import { Primitive } from "./primitive";
 
-export const Thumbnail = ({
+const LoadedThumbnail = ({
 	pageNumber = 1,
 	eager = false,
 	...props
@@ -76,6 +77,27 @@ export const Thumbnail = ({
 	);
 };
 
+/** An unresolved page occupies a stable row while its resource is acquired. */
+export const Thumbnail = (
+	props: HTMLProps<HTMLCanvasElement> & {
+		pageNumber?: number;
+		eager?: boolean;
+	},
+) => (
+	<PageLoadingBoundary
+		pageNumber={props.pageNumber ?? 1}
+		fallback={
+			<div
+				aria-label={`Loading page ${props.pageNumber ?? 1}`}
+				aria-busy="true"
+				style={{ minHeight: 150 }}
+			/>
+		}
+	>
+		<LoadedThumbnail {...props} />
+	</PageLoadingBoundary>
+);
+
 interface ThumbnailVirtualization {
 	/** Fixed row height in CSS pixels, including any desired space between items. */
 	itemHeight: number;
@@ -99,6 +121,9 @@ function VirtualizedThumbnails({
 	const containerRef = useRef<HTMLDivElement>(null);
 	useImperativeHandle(ref, () => containerRef.current!);
 	const [focusPage, setFocusPage] = useState<number | null>(null);
+	const focusPageLoaded = usePdf((state) =>
+		focusPage === null ? false : state.isPageLoaded(focusPage),
+	);
 	const itemHeight = Number.isFinite(virtualize.itemHeight)
 		? Math.max(1, virtualize.itemHeight)
 		: 150;
@@ -119,7 +144,7 @@ function VirtualizedThumbnails({
 			canvas.focus({ preventScroll: true });
 			setFocusPage(null);
 		}
-	}, [focusPage, items]);
+	}, [focusPage, focusPageLoaded, items]);
 	return (
 		<Primitive.div
 			{...props}

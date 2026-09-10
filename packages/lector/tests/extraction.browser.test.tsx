@@ -1,8 +1,14 @@
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+	act,
+	cleanup,
+	fireEvent,
+	render,
+	waitFor,
+} from "@testing-library/react";
 import type { PDFPageProxy } from "pdfjs-dist";
 import { afterEach, expect, test, vi } from "vitest";
 import { Search } from "../src/components/search";
-import { usePdf } from "../src/internal";
+import { PDFStore, usePdf } from "../src/internal";
 import { wrapperFor } from "./helpers";
 
 afterEach(() => {
@@ -151,4 +157,39 @@ test("custom error fallback receives the cause and can retry persistent failures
 	await view.findByRole("button", { name: "Try indexing again" });
 	expect(fallback.mock.calls.at(-1)?.[0].error).toBe(error);
 	expect(view.queryByText("Search ready")).toBeNull();
+});
+
+test("replacing page proxies reindexes within the same document", async () => {
+	const pagesFor = (text: string) =>
+		[
+			{
+				pageNumber: 1,
+				streamTextContent: () =>
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue({ items: [{ str: text }] });
+							controller.close();
+						},
+					}),
+			},
+		] as unknown as PDFPageProxy[];
+	let store!: ReturnType<typeof PDFStore.useContext>;
+	function Probe() {
+		store = PDFStore.useContext();
+		return null;
+	}
+	const view = render(
+		<>
+			<Probe />
+			<Search>
+				<IndexedText />
+			</Search>
+		</>,
+		{ wrapper: wrapperFor(pagesFor("Before")) },
+	);
+	await view.findByText("Indexed: Before");
+	const document = store.getState().pdfDocumentProxy;
+	act(() => store.setState({ pageProxies: pagesFor("After") }));
+	await view.findByText("Indexed: After");
+	expect(store.getState().pdfDocumentProxy).toBe(document);
 });

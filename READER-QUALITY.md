@@ -1,6 +1,6 @@
 # Reader quality pass — September 10, 2026
 
-This follow-up starts from `67c0823`, after performance PR #159 merged. It preserves the existing reader design and public APIs, with an additive optional search-result field.
+This first follow-up was measured at `93c5bd6`, starting from `67c0823` after performance PR #159 merged. The subsequent parallel pass is documented in [INTERACTION-PERFORMANCE.md](INTERACTION-PERFORMANCE.md) and [PROGRESSIVE-LOADING.md](PROGRESSIVE-LOADING.md). It preserves the existing reader design and public APIs, with an additive optional search-result field.
 
 ## Measured changes
 
@@ -49,9 +49,9 @@ LECTOR_READER_URL=http://localhost:3018 node packages/lector/scripts/check-reade
 # Set LECTOR_SCREENSHOTS to save the viewport captures.
 ```
 
-## The next improvements that matter most
+## Investigations identified before the parallel pass
 
-These are prioritized engineering investigations, not measured gains from this PR.
+This historical list motivated the subsequent parallel pass. Progressive loading, several highlight geometry defects, zoom continuity, and emulated-device stress coverage are now addressed in the linked reports. The remaining gaps include complex text shaping/copy fidelity, total search cost, physical-device endurance, and broader reading workflows.
 
 1. **Make the first requested page usable before acquiring every page.** `usePDFDocumentContext` still awaits every proxy/viewport before mounting the viewer. The previous audit measured roughly 77 ms in the post-document startup phase on a generated 1,000-page local PDF; network-delayed page resources need a separate baseline. Introduce a page-resource boundary with priority for the initial/deep-linked page, bounded background acquisition, cancellation and explicit failure states. Preserve the synchronous `getPdfPageProxy` contract for existing consumers. Mixed page dimensions, rotations, fit-width and scroll-anchor corrections must be proven before enabling progressive resources by default.
 2. **Make text fidelity a release gate.** Add real PDFs containing ligatures, combining marks, RTL runs, vertical text, rotated pages, columns, and hyphenated line breaks. Search extraction currently concatenates text items, and highlight geometry estimates character width from an item's total width. Establish expected search offsets, copied text and highlight geometry for each fixture before replacing these assumptions. This is central to reading quality, not a cosmetic detail.

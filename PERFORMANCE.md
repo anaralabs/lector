@@ -14,3 +14,7 @@ changes introduced here.
 The follow-up after PR #159 is documented in [READER-QUALITY.md](READER-QUALITY.md),
 including incremental annotation measurements, Unicode search fixes, reader
 interaction checks and the next prioritized engineering investigations.
+
+The parallel follow-up adds [progressive loading](PROGRESSIVE-LOADING.md),
+[scroll/zoom profiling, text fidelity and lifecycle stress tests](INTERACTION-PERFORMANCE.md).
+Each report distinguishes measured workloads from unresolved performance targets.
