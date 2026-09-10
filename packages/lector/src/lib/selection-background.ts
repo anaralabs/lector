@@ -1,45 +1,4 @@
-import { getTextNodeClientRects } from "./selection-rects";
-
-type Rect = { left: number; top: number; width: number; height: number };
-
-// Compare the original text runs, so a growing bounding box cannot bridge
-// unrelated lines or columns. PDF word/sentence spaces can exist only as gaps
-// between positioned runs. Allow up to half a text-run height to include those
-// spaces (including justified text), while leaving wider column gutters open.
-const connected = (a: Rect, b: Rect) => {
-	const overlap =
-		Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top);
-	const gap =
-		Math.max(a.left, b.left) - Math.min(a.left + a.width, b.left + b.width);
-	return (
-		overlap >= Math.min(a.height, b.height) / 2 &&
-		gap <= Math.min(a.height, b.height) * 0.5
-	);
-};
-
-const mergeTextRuns = (rects: Rect[]): Rect[] => {
-	const groups: Rect[][] = [];
-	for (const rect of rects) {
-		const group = [rect];
-		for (let i = groups.length - 1; i >= 0; i--) {
-			if (groups[i]!.some((member) => connected(member, rect))) {
-				group.push(...groups[i]!);
-				groups.splice(i, 1);
-			}
-		}
-		groups.push(group);
-	}
-	return groups.map((group) => {
-		const left = Math.min(...group.map((rect) => rect.left));
-		const top = Math.min(...group.map((rect) => rect.top));
-		return {
-			left,
-			top,
-			width: Math.max(...group.map((rect) => rect.left + rect.width)) - left,
-			height: Math.max(...group.map((rect) => rect.top + rect.height)) - top,
-		};
-	});
-};
+import { getTextNodeClientRects, mergeTextRuns } from "./selection-rects";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 

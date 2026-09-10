@@ -1,10 +1,14 @@
 import "pdfjs-dist/web/pdf_viewer.css";
+import { cleanup, renderHook } from "@testing-library/react";
 import { page } from "@vitest/browser/context";
 import { afterEach, expect, test } from "vitest";
 import { bindMouseEvents } from "../src/hooks/layers/useTextLayer";
+import { useSelectionDimensions } from "../src/hooks/useSelectionDimensions";
+import { wrapperFor } from "./helpers";
 
 const layers: (HTMLDivElement & { _cleanupTextSelection?: () => void })[] = [];
 afterEach(() => {
+	cleanup();
 	document.getSelection()?.removeAllRanges();
 	for (const layer of layers.splice(0)) {
 		layer._cleanupTextSelection?.();
@@ -211,3 +215,46 @@ test("leaves a column gutter unpainted even when text shares a baseline", () => 
 	expect(path.isPointInFill(new DOMPoint(right + 20, 40))).toBe(false);
 	expect(path.getAttribute("d")!.match(/M/g)).toHaveLength(2);
 });
+
+test.each(["getDimension", "getSelection", "getAnnotationDimension"] as const)(
+	"preserves partial first and last lines when saving with %s",
+	(method) => {
+		const layer = fixture();
+		const spans = layer.querySelectorAll("span");
+		for (let i = 0; i < spans.length; i++) {
+			spans[i]!.style.left = "10px";
+			spans[i]!.style.top = `${20 + i * 40}px`;
+			spans[i]!.textContent = "Most competitive neural models";
+		}
+		const range = document.createRange();
+		range.setStart(spans[0]!.firstChild!, 4);
+		range.setEnd(spans[2]!.firstChild!, 4);
+		document.getSelection()!.addRange(range);
+		document.dispatchEvent(new Event("selectionchange"));
+		const selectedText = document.getSelection()!.toString().trim();
+		const { result } = renderHook(useSelectionDimensions, {
+			wrapper: wrapperFor(),
+		});
+		const saved = result.current[method]()!;
+		const path = layer.querySelector("path")!;
+		const contains = (x: number, y: number) =>
+			saved.highlights.some(
+				(rect) =>
+					x > rect.left &&
+					x < rect.left + rect.width &&
+					y > rect.top &&
+					y < rect.top + rect.height,
+			);
+		// Neither the unselected prefix nor the rest of the final line may be painted.
+		for (const [x, y] of [
+			[12, 40],
+			[200, 120],
+		]) {
+			expect(path.isPointInFill(new DOMPoint(x, y))).toBe(false);
+			expect(contains(x!, y!)).toBe(false);
+		}
+		expect(contains(200, 80)).toBe(true);
+		expect(saved.highlights).toHaveLength(3);
+		expect(saved.text).toBe(selectedText);
+	},
+);
