@@ -5,19 +5,18 @@ import {
 	CanvasLayer,
 	Page,
 	Pages,
-	Root,
 	TextLayer,
 } from "@anaralabs/lector";
-import "@/lib/setup";
 import DocumentMenu from "../app/(home)/_components/document-menu";
 import { PageNavigation } from "../app/(home)/_components/page-navigation";
 import ZoomMenu from "../app/(home)/_components/zoom-menu";
+import { ExampleRoot } from "./example-root";
 
 const fileUrl = "/pdf/links.pdf";
 
 const LinkDemo = () => {
 	return (
-		<Root
+		<ExampleRoot
 			source={fileUrl}
 			className="border not-prose overflow-hidden flex flex-col w-full h-[600px] rounded-lg"
 			isZoomFitWidth={true}
@@ -28,7 +27,7 @@ const LinkDemo = () => {
 				<PageNavigation />
 				<DocumentMenu documentUrl={fileUrl} />
 			</div>
-			<Pages className="dark:invert-[94%] dark:hue-rotate-180 dark:brightness-[80%] dark:contrast-[228%] dark:bg-gray-100">
+			<Pages className="min-h-0 flex-1" style={{ height: "auto" }}>
 				<Page>
 					<CanvasLayer />
 					<TextLayer />
@@ -41,7 +40,7 @@ const LinkDemo = () => {
 					/>
 				</Page>
 			</Pages>
-		</Root>
+		</ExampleRoot>
 	);
 };
 

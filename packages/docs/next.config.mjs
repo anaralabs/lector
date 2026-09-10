@@ -8,6 +8,13 @@ const withMDX = createMDX();
 /** @type {import('next').NextConfig} */
 const config = {
 	reactStrictMode: true,
+	async rewrites() {
+		return {
+			beforeFiles: [
+				{ source: "/docs/:slug*.md", destination: "/api/docs/:slug*" },
+			],
+		};
+	},
 	serverExternalPackages: ["pdfjs-dist"],
 	webpack: (config, { dev }) => {
 		if (dev) {

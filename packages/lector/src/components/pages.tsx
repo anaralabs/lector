@@ -6,6 +6,7 @@ import {
 	type ReactElement,
 	useCallback,
 	useEffect,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
@@ -16,11 +17,8 @@ import { useScrollFn } from "../hooks/pages/useScrollFn";
 import { useVisiblePage } from "../hooks/pages/useVisiblePage";
 import { useViewportContainer } from "../hooks/viewport/useViewportContainer";
 import { usePdf } from "../internal";
+import { USE_LAYOUT_ZOOM } from "../lib/zoom";
 import { Primitive } from "./primitive";
-
-const selectLargestPageWidth = (state: {
-	viewports: Array<{ width: number }>;
-}) => state.viewports.reduce((max, vp) => Math.max(max, vp.width), 0);
 
 const DEFAULT_HEIGHT = 600;
 const EXTRA_HEIGHT = 0;
@@ -125,6 +123,12 @@ export const Pages = ({
 		scrollToFn,
 		gap,
 		initialOffset: initialOffset,
+		// Never trust scrollend alone to reset isScrolling: a single missed
+		// event (a documented browser flake — TanStack flipped this default to
+		// false in later 3.x) would pin isScrolling=true forever, and every
+		// consumer gated on it (text layer, detail canvas) would stop painting.
+		// false keeps the isScrollingResetDelay debounce active as a fallback.
+		useScrollendEvent: false,
 	});
 
 	useEffect(() => {
@@ -161,10 +165,17 @@ export const Pages = ({
 
 	useVisiblePage({
 		items,
+		// Pass through nullish (pre-measure) rather than coercing to 0, so the
+		// hook doesn't publish a top-of-document page before the real offset
+		// (incl. a restored/deep-linked one) arrives.
+		scrollOffset: virtualizer.scrollOffset ?? null,
 	});
 
 	useFitWidth({ viewportRef: containerRef });
-	const largestPageWidth = usePdf(selectLargestPageWidth);
+	const largestPageWidth = useMemo(
+		() => viewports.reduce((max, viewport) => Math.max(max, viewport.width), 0),
+		[viewports],
+	);
 
 	useEffect(() => {
 		virtualizer.getOffsetForAlignment = (
@@ -212,7 +223,6 @@ export const Pages = ({
 			{...props}
 			style={{
 				display: "flex",
-				justifyContent: "center",
 				height: "100%",
 				position: "relative",
 				overflow: "auto",
@@ -222,7 +232,12 @@ export const Pages = ({
 			<div
 				ref={elementWrapperRef}
 				style={{
-					width: "max-content",
+					// The absolute page list contributes no intrinsic width. Reserve
+					// its width before any zoom effect runs (including zoom === 1).
+					width: largestPageWidth,
+					marginLeft: "auto",
+					marginRight: "auto",
+					flexShrink: 0,
 				}}
 			>
 				<div
@@ -234,8 +249,7 @@ export const Pages = ({
 						alignItems: "center",
 						flexDirection: "column",
 						transformOrigin: "0 0",
-						willChange: "transform",
-						// width: "max-content",
+						willChange: USE_LAYOUT_ZOOM ? "auto" : "transform",
 						width: largestPageWidth,
 						margin: "0 auto",
 					}}

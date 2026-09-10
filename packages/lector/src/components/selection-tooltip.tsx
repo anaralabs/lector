@@ -1,5 +1,6 @@
 import {
 	autoUpdate,
+	flip,
 	offset,
 	shift,
 	useDismiss,
@@ -18,6 +19,7 @@ interface SelectionTooltipProps {
 export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
 	const [isOpen, setIsOpen] = useState(false);
 	const lastSelectionRef = useRef<Range | null>(null);
+	const isPointerDownRef = useRef(false);
 	const viewportRef = usePdf((state) => state.viewportRef);
 
 	const { refs, floatingStyles, context } = useFloating({
@@ -25,14 +27,17 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
 		open: isOpen,
 		onOpenChange: setIsOpen,
 		whileElementsMounted: autoUpdate,
-		middleware: [offset(10), shift({ padding: 8 })],
+		middleware: [offset(10), flip({ padding: 8 }), shift({ padding: 8 })],
 	});
 
 	const dismiss = useDismiss(context);
 	const { getFloatingProps } = useInteractions([dismiss]);
 
-	// Function to update tooltip position based on selection
 	const updateTooltipPosition = useCallback(() => {
+		if (isPointerDownRef.current) {
+			setIsOpen(false);
+			return;
+		}
 		const selection = document.getSelection();
 
 		if (!selection || selection.isCollapsed) {
@@ -45,19 +50,20 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
 		if (!range) return;
 
 		const rects = range.getClientRects();
+		const firstRect = rects[0];
 		const lastRect = rects[rects.length - 1];
 
 		lastSelectionRef.current = range;
-		if (lastRect) {
+		if (firstRect && lastRect) {
 			refs.setReference({
 				getBoundingClientRect: () => ({
 					width: lastRect.width,
-					height: lastRect.height,
+					height: lastRect.bottom - firstRect.top,
 					x: lastRect.left,
-					y: lastRect.bottom, // Position below the last line of selection
-					top: lastRect.bottom,
+					y: firstRect.top,
+					top: firstRect.top,
 					right: lastRect.right,
-					bottom: lastRect.bottom + lastRect.height,
+					bottom: lastRect.bottom,
 					left: lastRect.left,
 				}),
 				getClientRects: () => [lastRect],
@@ -69,12 +75,40 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
 	}, [refs]);
 
 	useEffect(() => {
+		const handlePointerDown = (event: PointerEvent) => {
+			if (
+				event.button === 0 &&
+				viewportRef.current?.contains(event.target as Node) &&
+				!refs.floating.current?.contains(event.target as Node)
+			) {
+				isPointerDownRef.current = true;
+			}
+		};
+		const handlePointerUp = () => {
+			if (!isPointerDownRef.current) return;
+			isPointerDownRef.current = false;
+			requestAnimationFrame(updateTooltipPosition);
+		};
+		const handleBlur = () => {
+			isPointerDownRef.current = false;
+		};
+		window.addEventListener("blur", handleBlur);
+		document.addEventListener("pointerdown", handlePointerDown, true);
+		document.addEventListener("pointerup", handlePointerUp, true);
+		document.addEventListener("pointercancel", handlePointerUp, true);
+		return () => {
+			window.removeEventListener("blur", handleBlur);
+			document.removeEventListener("pointerdown", handlePointerDown, true);
+			document.removeEventListener("pointerup", handlePointerUp, true);
+			document.removeEventListener("pointercancel", handlePointerUp, true);
+		};
+	}, [updateTooltipPosition, viewportRef, refs.floating]);
+
+	useEffect(() => {
 		const handleSelectionChange = () => {
 			const selection = document.getSelection();
 
-			// Check if selection is within the viewport and not within a tooltip
 			if (selection && viewportRef.current?.contains(selection.anchorNode)) {
-				// Check if the selection is within a tooltip
 				const anchorNode = selection.anchorNode;
 				const focusNode = selection.focusNode;
 
@@ -87,12 +121,10 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
 							: node.parentElement;
 
 					while (element) {
-						// Check for our custom tooltip attributes
 						if (element.getAttribute("data-annotation-tooltip")) {
 							return true;
 						}
 
-						// Check for floating UI portal
 						if (element.hasAttribute("data-floating-ui-portal")) {
 							return true;
 						}
@@ -102,7 +134,6 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
 					return false;
 				};
 
-				// Only show selection tooltip if selection is not in an unselectable area
 				if (
 					!isInUnselectableArea(anchorNode) &&
 					!isInUnselectableArea(focusNode)
@@ -121,7 +152,6 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
 			requestAnimationFrame(updateTooltipPosition);
 		};
 
-		// Add selection change listener to document (since it can't be added directly to elements)
 		document.addEventListener("selectionchange", handleSelectionChange);
 
 		if (viewportRef.current) {
@@ -133,13 +163,11 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
 		return () => {
 			document.removeEventListener("selectionchange", handleSelectionChange);
 			if (viewportRef.current) {
-				// eslint-disable-next-line react-hooks/exhaustive-deps
 				viewportRef.current.removeEventListener("scroll", handleScroll);
 			}
 		};
 	}, [isOpen, viewportRef, updateTooltipPosition]);
 
-	// Handle clicks on the floating tooltip
 	useEffect(() => {
 		const handleFloatingClick = (e: MouseEvent) => {
 			if (refs.floating.current?.contains(e.target as Node)) {

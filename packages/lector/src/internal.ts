@@ -5,6 +5,13 @@ import { createRef } from "react";
 import { createStore, useStore } from "zustand";
 
 import { clamp } from "./lib/clamp";
+import {
+	type ColorScheme,
+	createDarkModeColorMap,
+	type DarkModeColors,
+	DEFAULT_DARK_MODE_COLORS,
+} from "./lib/dark-mode";
+import type { RenderColorMapRef } from "./lib/recolor-canvas-factory";
 import { getFitWidthZoom } from "./lib/zoom";
 import { createZustandContext } from "./lib/zustand";
 
@@ -51,6 +58,9 @@ interface PDFState {
 	isPinching: boolean;
 	setIsPinching: (isPinching: boolean) => void;
 
+	isResizing: boolean;
+	setIsResizing: (isResizing: boolean) => void;
+
 	currentPage: number;
 	setCurrentPage: (pageNumber: number) => void;
 
@@ -82,6 +92,15 @@ interface PDFState {
 	renderedPages: Record<number, true>;
 	markPageRendered: (pageNumber: number) => void;
 	unmarkPageRendered: (pageNumber: number) => void;
+
+	colorScheme: ColorScheme;
+	darkModeColors: Required<DarkModeColors>;
+	setColorScheme: (colorScheme: ColorScheme, colors?: DarkModeColors) => void;
+	/**
+	 * Shared with the document's pdf.js CanvasFactory so internal scratch
+	 * canvases (transparency groups, soft masks, patterns) follow the scheme.
+	 */
+	renderColorMapRef: RenderColorMapRef;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -94,10 +113,26 @@ export interface InitialPDFState {
 	zoom: number;
 	isZoomFitWidth?: boolean;
 	zoomOptions?: ZoomOptions;
+	colorScheme?: ColorScheme;
+	darkModeColors?: DarkModeColors;
+	renderColorMapRef?: RenderColorMapRef;
 }
 
 export const PDFStore = createZustandContext(
 	(initialState: InitialPDFState) => {
+		const initialColorScheme = initialState.colorScheme ?? "light";
+		const initialDarkModeColors = {
+			...DEFAULT_DARK_MODE_COLORS,
+			...initialState.darkModeColors,
+		};
+		const renderColorMapRef = initialState.renderColorMapRef ?? {
+			current: null,
+		};
+		renderColorMapRef.current =
+			initialColorScheme === "dark"
+				? createDarkModeColorMap(initialDarkModeColors)
+				: null;
+
 		return createStore<PDFState>((set, get) => ({
 			pdfDocumentProxy: initialState.pdfDocumentProxy,
 			zoom: initialState.zoom,
@@ -114,12 +149,15 @@ export const PDFStore = createZustandContext(
 				const { minZoom, maxZoom } = get().zoomOptions;
 
 				set((state) => {
-					if (typeof zoom === "function") {
-						const newZoom = clamp(zoom(state.zoom), minZoom, maxZoom);
-						return { zoom: newZoom, isZoomFitWidth };
-					}
-					const newZoom = clamp(zoom, minZoom, maxZoom);
-					return { zoom: newZoom, isZoomFitWidth };
+					const newZoom = clamp(
+						typeof zoom === "function" ? zoom(state.zoom) : zoom,
+						minZoom,
+						maxZoom,
+					);
+					return newZoom === state.zoom &&
+						isZoomFitWidth === state.isZoomFitWidth
+						? state
+						: { zoom: newZoom, isZoomFitWidth };
 				});
 			},
 
@@ -134,33 +172,37 @@ export const PDFStore = createZustandContext(
 					zoomOptions,
 				);
 
-				set({
-					zoom: clampedZoom,
-					isZoomFitWidth: true,
-				});
+				get().updateZoom(clampedZoom, true);
 
 				return clampedZoom;
 			},
 
 			currentPage: 1,
 			setCurrentPage: (val) => {
-				set({
-					currentPage: val,
-				});
+				set((state) =>
+					state.currentPage === val ? state : { currentPage: val },
+				);
 			},
 
 			isPinching: false,
 			setIsPinching: (val) => {
+				set((state) =>
+					state.isPinching === val ? state : { isPinching: val },
+				);
+			},
+
+			isResizing: false,
+			setIsResizing: (val) => {
 				set({
-					isPinching: val,
+					isResizing: val,
 				});
 			},
 
 			virtualizer: null,
 			setVirtualizer: (val) => {
-				set({
-					virtualizer: val,
-				});
+				set((state) =>
+					state.virtualizer === val ? state : { virtualizer: val },
+				);
 			},
 
 			pageProxies: initialState.pageProxies,
@@ -174,22 +216,24 @@ export const PDFStore = createZustandContext(
 
 			textContent: [],
 			setTextContent: (val) => {
-				set({
-					textContent: val,
-				});
+				set((state) =>
+					state.textContent === val ? state : { textContent: val },
+				);
 			},
 			highlights: [],
 			setHighlight: (val) => {
-				set({
-					highlights: val,
-				});
+				set((state) =>
+					state.highlights === val ? state : { highlights: val },
+				);
 			},
 
 			customSelectionRects: [],
 			setCustomSelectionRects: (val) => {
-				set({
-					customSelectionRects: val,
-				});
+				set((state) =>
+					state.customSelectionRects === val
+						? state
+						: { customSelectionRects: val },
+				);
 			},
 
 			coloredHighlights: [],
@@ -203,6 +247,29 @@ export const PDFStore = createZustandContext(
 						(rect) => rect.uuid !== uuid,
 					),
 				})),
+
+			colorScheme: initialColorScheme,
+			darkModeColors: initialDarkModeColors,
+			renderColorMapRef,
+			setColorScheme: (colorScheme, colors) => {
+				const prev = get();
+				const darkModeColors = {
+					background: colors?.background ?? prev.darkModeColors.background,
+					foreground: colors?.foreground ?? prev.darkModeColors.foreground,
+				};
+				if (
+					prev.colorScheme === colorScheme &&
+					prev.darkModeColors.background === darkModeColors.background &&
+					prev.darkModeColors.foreground === darkModeColors.foreground
+				) {
+					return;
+				}
+				prev.renderColorMapRef.current =
+					colorScheme === "dark"
+						? createDarkModeColorMap(darkModeColors)
+						: null;
+				set({ colorScheme, darkModeColors });
+			},
 
 			renderedPages: {},
 			markPageRendered: (pageNumber: number) => {

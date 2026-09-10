@@ -1,21 +1,58 @@
 import react from "@vitejs/plugin-react";
+import type {} from "@vitest/browser/providers/playwright";
 import { defineConfig } from "vitest/config";
+
+const browser =
+	process.env.LECTOR_TEST_BROWSER === "webkit"
+		? "webkit"
+		: process.env.LECTOR_TEST_BROWSER === "firefox"
+			? "firefox"
+			: "chromium";
 
 export default defineConfig({
 	plugins: [react()],
-	optimizeDeps: { include: ["react/jsx-dev-runtime"] },
+	resolve: { dedupe: ["react", "react-dom"] },
 
+	optimizeDeps: {
+		include: [
+			"react/jsx-dev-runtime",
+			"pdfjs-dist/legacy/build/pdf.mjs",
+			"clsx",
+			"@tanstack/react-virtual",
+			"use-debounce",
+			"@use-gesture/react",
+			"@floating-ui/react",
+			"zustand/react/shallow",
+		],
+	},
 	test: {
+		fileParallelism: false,
+		include: [
+			"tests/**/*.browser.test.tsx",
+			"src/**/*.test.ts",
+			"src/**/*.test.tsx",
+		],
 		browser: {
 			enabled: true,
-			name: "chromium",
 			provider: "playwright",
 			headless: true,
-			providerOptions: {
-				launch: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
-					? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
-					: {},
-			},
+			screenshotFailures: false,
+			instances: [
+				{
+					browser,
+					launch: {
+						executablePath:
+							browser === "chromium"
+								? process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+								: undefined,
+						channel:
+							browser === "chromium"
+								? (process.env.LECTOR_BROWSER_CHANNEL ??
+									(process.env.CI ? undefined : "chrome"))
+								: undefined,
+					},
+				},
+			],
 		},
 	},
 });

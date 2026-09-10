@@ -7,6 +7,7 @@ import {
 
 import { PDFPageNumberContext } from "../hooks/usePdfPageNumber";
 import { usePdf } from "../internal";
+import { createDarkModeColorMap } from "../lib/dark-mode";
 import { Primitive } from "./primitive";
 
 export const Page = memo(
@@ -21,6 +22,15 @@ export const Page = memo(
 	}) => {
 		const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 		const viewport = usePdf((state) => state.viewports[pageNumber - 1]);
+		const colorScheme = usePdf((state) => state.colorScheme);
+		const darkModeColors = usePdf((state) => state.darkModeColors);
+
+		// Match the canvas pixels: white maps exactly onto the dark palette's
+		// background, so pages never flash light while (re)rendering.
+		const pageBackground =
+			colorScheme === "dark"
+				? createDarkModeColorMap(darkModeColors)("#ffffff")
+				: "white";
 
 		const width =
 			viewport?.width ??
@@ -41,7 +51,7 @@ export const Page = memo(
 							{
 								"--scale-factor": 1,
 								"--total-scale-factor": 1,
-								backgroundColor: "white",
+								backgroundColor: pageBackground,
 								position: "relative",
 								width,
 								height,

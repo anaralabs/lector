@@ -1,171 +1,99 @@
 ---
-title: Basic Usage
-description: Learn how to use Lector's core components and features
+title: Your first viewer
+description: A complete viewer with selectable text, page and zoom controls, and explicit layout.
 ---
 
-Lector provides a set of composable components that you can use to build a custom PDF viewer. This guide will walk you through the core concepts and basic usage.
+Complete the [installation](/docs/installation) first. This example imports the `pdf-setup.ts` you created there and loads `public/sample.pdf`. In Next.js, render it through the browser-only wrapper from that guide.
 
-## Core Concepts
+## A viewer you can build on
 
-Lector follows a component-based architecture with three main layers:
+```tsx title="pdf-viewer.tsx"
+"use client";
 
-1. **Root Container**: Manages the PDF document state and context
-2. **Pages Container**: Handles page layout and virtualization
-3. **Layer Components**: Render different aspects of each page (canvas, text, annotations)
+import {
+  CanvasLayer,
+  CurrentPage,
+  CurrentZoom,
+  Page,
+  Pages,
+  Root,
+  TextLayer,
+  TotalPages,
+  ZoomIn,
+  ZoomOut,
+} from "@anaralabs/lector";
+import "./pdf-setup";
 
-## Basic Setup
-
-First, set up the PDF.js worker:
-
-```tsx
-import { GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
-import "pdfjs-dist/web/pdf_viewer.css";
-
-// Set up the worker
-GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/legacy/build/pdf.worker.mjs",
-  import.meta.url
-).toString();
-```
-
-## Creating a Basic Viewer
-
-Here's a minimal example of a PDF viewer:
-
-```tsx
-import { Root, Pages, Page, CanvasLayer, TextLayer } from "@anaralabs/lector";
-
-function PDFViewer() {
+export default function PDFViewer() {
   return (
-    <Root source='/sample.pdf' className='w-full h-[600px] border rounded-lg overflow-hidden'>
-      <Pages className='p-4'>
-        <Page>
-          <CanvasLayer />
-          <TextLayer />
-        </Page>
-      </Pages>
-    </Root>
-  );
-}
-```
-
-## Core Components
-
-### Root Component
-
-The `Root` component is the main container that manages the PDF document state:
-
-```tsx
-<Root
-  source='/path/to/pdf' // URL or path to PDF file
-  className='...' // Container styling
-  loader={<Loading />} // Custom loading component
-  onLoad={handleLoad} // Called when PDF is loaded
-  onError={handleError} // Called on load error
->
-  {/* Child components */}
-</Root>
-```
-
-### Pages Component
-
-The `Pages` component handles page layout and virtualization:
-
-```tsx
-<Pages
-  className='...' // Container styling
->
-  {/* Page component */}
-</Pages>
-```
-
-### Page Layers
-
-Each page can have multiple layers for different functionality:
-
-```tsx
-<Page>
-  <CanvasLayer /> {/* Renders the PDF content */}
-  <TextLayer /> {/* Enables text selection */}
-  <AnnotationLayer /> {/* Renders annotations and links */}
-  <HighlightLayer /> {/* Custom highlight overlay */}
-</Page>
-```
-
-## Common Features
-
-### Adding Zoom Controls
-
-```tsx
-import { ZoomIn, ZoomOut, CurrentZoom } from "@anaralabs/lector";
-
-function PDFViewerWithZoom() {
-  return (
-    <Root source='/sample.pdf'>
-      <div className='flex gap-2 p-2'>
-        <ZoomOut />
-        <CurrentZoom />
-        <ZoomIn />
+    <Root
+      source="/sample.pdf"
+      isZoomFitWidth
+      style={{ height: 600, display: "flex", flexDirection: "column" }}
+      loader={<p role="status">Loading PDF…</p>}
+    >
+      <div
+        role="group"
+        aria-label="PDF controls"
+        style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: 8 }}
+      >
+        <label>
+          Page <CurrentPage style={{ width: 56 }} />
+        </label>
+        <span>of</span>
+        <TotalPages />
+        <ZoomOut type="button" aria-label="Zoom out">−</ZoomOut>
+        <label>
+          Zoom <CurrentZoom style={{ width: 56 }} /> %
+        </label>
+        <ZoomIn type="button" aria-label="Zoom in">+</ZoomIn>
       </div>
-      <Pages>
-        <Page>
-          <CanvasLayer />
-          <TextLayer />
-        </Page>
-      </Pages>
-    </Root>
-  );
-}
-```
-
-### Adding Page Navigation
-
-```tsx
-import { CurrentPage, TotalPages } from "@anaralabs/lector";
-
-function PDFViewerWithNavigation() {
-  return (
-    <Root source='/sample.pdf'>
-      <div className='flex items-center gap-2 p-2'>
-        <CurrentPage /> of <TotalPages />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Pages>
+          <Page>
+            <CanvasLayer />
+            <TextLayer />
+          </Page>
+        </Pages>
       </div>
-      <Pages>
-        <Page>
-          <CanvasLayer />
-          <TextLayer />
-        </Page>
-      </Pages>
     </Root>
   );
 }
 ```
 
-## Supported Features
+`CurrentPage` and `CurrentZoom` are editable inputs, so they need labels. The zoom buttons have no default text; supply their children. `CurrentPage` commits when the input loses focus or you press Enter.
 
-Lector includes support for:
+## How the pieces fit
 
-- 📱 Responsive layout with automatic page scaling
-- 🖱️ Pan and zoom with mouse/touch controls
-- ✨ Text selection and copying
-- 🔗 Internal and external link handling
-- 📑 Page thumbnails and outline navigation
-- 🎨 Custom rendering and annotations
-- 🌗 Dark mode support
+```text
+Root                     Loads one document and provides its store
+├── Your toolbar         Reads and changes that document's state
+└── Pages                Owns the scroll container and virtualizes pages
+    └── Page             A template cloned for each visible page
+        ├── CanvasLayer  Paints the page
+        └── TextLayer    Adds selectable text over the canvas
+```
 
-## Next Steps
+Pass **one `Page` template** to `Pages`. It supplies the page number; you do not map over the document yourself. Page numbers in Lector's public navigation APIs start at **1**.
 
-Check out these guides to learn more:
+`Root` only mounts its children after the document and page viewports are ready. Components using `usePdf`, `usePdfJump`, or other viewer hooks must be descendants of `Root`. Page-specific layers and `usePDFPageNumber` also need a `Page` ancestor. A hook in the same component that *returns* `Root` is still outside that provider.
 
-<Cards>
-  <Card
-    title='Advanced Features'
-    href='/docs/code/thumbnails'
-    description='Learn about thumbnails, search, and more'
-  />
-  <Card
-    title='Customization'
-    href='/docs/code/basic'
-    description='Style and customize your PDF viewer'
-  />
-  <Card title='Examples' href='/docs/code' description='View more interactive examples' />
-</Cards>
+## Give the pages room to scroll
+
+`Pages` defaults to `height: 100%` and owns its scrolling. Give its parent a definite height. With a toolbar, use a flex column and put `Pages` in a `flex: 1; min-height: 0` wrapper, as above. In a sidebar layout, also set `min-width: 0` on the viewer column.
+
+Avoid overriding `Page` dimensions or applying your own scale transform: Lector uses its viewports to align canvas, text, and highlights.
+
+## Choose your layers
+
+| Layer | Adds | Guide |
+| --- | --- | --- |
+| `CanvasLayer` | Visible PDF content | [Basic example](/docs/code/basic) |
+| `TextLayer` | Selection and copying when the PDF contains text | [Text selection](/docs/code/select) |
+| `AnnotationLayer` | Existing PDF links and form widgets | [Links](/docs/code/links), [forms](/docs/code/pdf-form) |
+| `HighlightLayer` | Rectangles from the viewer's `highlights` state | [Highlights](/docs/code/highlight) |
+| `ColoredHighlightLayer` | Selection color tools and colored highlights | [Text selection](/docs/code/select#saving-highlights) |
+
+Place canvas first, then text, then the interaction or highlight layers you need. Loading failures need application UI outside `Root`; see [loading and errors](/docs/document-loading#show-errors-and-retry).
+
+Next, add [page navigation](/docs/code/page-navigation), [search](/docs/code/search), or [dark mode](/docs/dark-mode).

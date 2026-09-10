@@ -1,24 +1,62 @@
-import { HomeLayout } from "fumadocs-ui/layouts/home";
+import { ArrowUpRight, Github } from "lucide-react";
+import Image from "next/image";
+import Link from "next/link";
 import type { ReactNode } from "react";
-import { baseOptions } from "@/app/layout.config";
-import { Footer } from "./_components/footer";
+import { ThemeToggle } from "./_components/landing-controls";
+import "./landing.css";
 
-export default function Layout({
-	children,
-}: {
-	children: ReactNode;
-}): React.ReactElement {
+export default function Layout({ children }: { children: ReactNode }) {
 	return (
-		<div className="flex flex-col ">
-			<HomeLayout
-				className="relative bg-background text-foreground min-h-screen"
-				{...baseOptions}
-			>
-				<div className="absolute inset-0 bg-gradient-to-br from-background via-background to-[#ff7a00]/10" />
-				<div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,122,0,0.05),transparent_50%)]" />
-				<div className="relative">{children}</div>
-			</HomeLayout>
-			<Footer />
+		<div className="landing">
+			<a className="skip-link" href="#main">
+				Skip to content
+			</a>
+			<header className="site-header">
+				<Link href="/" className="wordmark" aria-label="Lector home">
+					<Image
+						src="/anara-mark.svg"
+						width={32}
+						height={16}
+						alt=""
+						className="anara-mark"
+					/>
+					Lector
+				</Link>
+				<nav aria-label="Main navigation">
+					<Link href="/docs/code/basic" className="nav-examples">
+						Examples
+					</Link>
+					<Link href="/docs/basic-usage">Documentation</Link>
+					<a href="https://github.com/anaralabs/lector" className="nav-github">
+						<Github size={15} aria-hidden="true" />
+						<span>GitHub</span>
+						<ArrowUpRight size={12} aria-hidden="true" />
+					</a>
+					<ThemeToggle />
+				</nav>
+			</header>
+			{children}
+			<footer className="site-footer">
+				<div>
+					<Link href="/" className="footer-name">
+						Lector
+					</Link>
+					<span>
+						Made by{" "}
+						<a href="https://anara.com">
+							Anara <ArrowUpRight size={12} aria-hidden="true" />
+						</a>
+					</span>
+				</div>
+				<div>
+					<a href="https://github.com/anaralabs/lector/blob/main/LICENSE">
+						MIT licensed
+					</a>
+					<a href="https://github.com/anaralabs/lector">
+						View source <ArrowUpRight size={12} aria-hidden="true" />
+					</a>
+				</div>
+			</footer>
 		</div>
 	);
 }

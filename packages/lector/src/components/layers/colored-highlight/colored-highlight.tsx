@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 import { usePDFPageNumber } from "../../../hooks/usePdfPageNumber";
 import { type ColoredHighlight, usePdf } from "../../../internal";
+import { createDarkModeColorMap } from "../../../lib/dark-mode";
 import {
 	getEndOfHighlight,
 	getMidHeightOfHighlightLine,
@@ -17,8 +18,17 @@ export const ColoredHighlightComponent = ({
 	const deleteColoredHighlight = usePdf(
 		(state) => state.deleteColoredHighlight,
 	);
+	const colorScheme = usePdf((state) => state.colorScheme);
+	const darkModeColors = usePdf((state) => state.darkModeColors);
 	const [showButton, setShowButton] = useState(false);
 	const pageNumber = usePDFPageNumber();
+
+	// Run the highlight color through the same map as the page so it reads
+	// as a tint against the dark paper instead of a light-mode block.
+	const highlightColor =
+		colorScheme === "dark"
+			? createDarkModeColorMap(darkModeColors)(selection.color)
+			: selection.color;
 
 	const pageRectangles = useMemo(
 		() => selection.rectangles.filter((r) => r.pageNumber === pageNumber),
@@ -47,10 +57,10 @@ export const ColoredHighlightComponent = ({
 						width: rect.width,
 						cursor: "pointer",
 						zIndex: 30,
-						backgroundColor: selection.color,
-						// mixBlendMode: "lighten", // changes the color of the text
-						mixBlendMode: "darken", // best results
-						// mixBlendMode: "multiply", // works but coloring has some inconsistencies
+						backgroundColor: highlightColor,
+						// "darken" keeps dark text legible on a light page; on a dark
+						// page the equivalent is "lighten" (keeps light text legible).
+						mixBlendMode: colorScheme === "dark" ? "lighten" : "darken",
 						borderRadius: "0.2rem",
 					}}
 				/>

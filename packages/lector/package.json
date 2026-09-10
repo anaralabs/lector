@@ -16,7 +16,8 @@
 		}
 	},
 	"files": [
-		"dist"
+		"dist",
+		"esm-only.cjs"
 	],
 	"publishConfig": {
 		"access": "public"
@@ -29,9 +30,16 @@
 		"format": "biome format --write .",
 		"postbuild": "size-limit --json > size.json",
 		"test": "pnpm run '/^test:/'",
-		"test:unit": "vitest run",
+		"test:unit": "vitest run --config vitest.unit.config.ts",
 		"test:size": "size-limit",
-		"prepack": "./scripts/prepack.sh"
+		"prepack": "./scripts/prepack.sh",
+		"prepare": "tsup",
+		"test:browser": "vitest run",
+		"test:package": "node scripts/check-package.mjs",
+		"test:types": "tsc --noEmit",
+		"bench:corpus": "vitest run --config vitest.bench.config.ts",
+		"bench:second-pass": "vitest run tests/annotations.browser.test.tsx tests/thumbnails.browser.test.tsx tests/long-document.browser.test.tsx tests/search-async.browser.test.tsx tests/highlight-stream.browser.test.tsx",
+		"bench:performance": "vitest run tests/performance.browser.test.tsx tests/observers.browser.test.tsx tests/extraction.browser.test.tsx tests/document.browser.test.tsx tests/pages.browser.test.tsx"
 	},
 	"devDependencies": {
 		"@microsoft/api-extractor": "^7.48.1",
@@ -42,7 +50,7 @@
 		"@types/react-dom": "^19.0.2",
 		"@use-gesture/react": "^10.3.1",
 		"@vitejs/plugin-react": "^4.3.4",
-		"@vitest/browser": "^2.0.4",
+		"@vitest/browser": "^3.2.6",
 		"clsx": "^2.1.1",
 		"pdfjs-dist": "^5.5.207",
 		"playwright": "^1.45.3",
@@ -52,8 +60,8 @@
 		"tslib": "^2.6.3",
 		"tsup": "^8.3.5",
 		"typescript": "^5.5.3",
-		"vite": "^5.3.3",
-		"vitest": "^2.0.4",
+		"vite": "^6.4.3",
+		"vitest": "^3.2.6",
 		"webdriverio": "^8.39.1"
 	},
 	"peerDependencies": {
@@ -66,7 +74,7 @@
 		"@tanstack/react-virtual": "^3.10.9",
 		"react-dom": "^19.1.1",
 		"use-debounce": "^10.0.4",
-		"uuid": "^11.1.0",
+		"uuid": "^11.1.1",
 		"zustand": "^5.0.2"
 	},
 	"optionalDependencies": {

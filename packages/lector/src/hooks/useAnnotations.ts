@@ -1,5 +1,6 @@
 import React from "react";
 import { createStore, type StoreApi, useStore } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 
 import { createZustandContext } from "../lib/zustand";
 
@@ -85,7 +86,48 @@ export const AnnotationsStoreProvider = ({
 		children,
 	);
 
-export const useAnnotations = (): AnnotationState => {
+const identity = (state: AnnotationState) => state;
+export function useAnnotations<T>(selector: (state: AnnotationState) => T): T;
+export function useAnnotations(): AnnotationState;
+export function useAnnotations<T>(selector?: (state: AnnotationState) => T) {
 	const ctx = AnnotationsStore.useContext();
-	return useStore(ctx ?? getFallbackStore());
-};
+	return useStore(
+		ctx ?? getFallbackStore(),
+		(selector ?? identity) as (state: AnnotationState) => T | AnnotationState,
+	);
+}
+
+const emptyAnnotations: Annotation[] = [];
+const indexes = new WeakMap<Annotation[], Map<number, Annotation[]>>();
+function annotationsByPage(annotations: Annotation[]) {
+	let index = indexes.get(annotations);
+	if (index) return index;
+	index = new Map();
+	for (const annotation of annotations) {
+		const pages = new Set([annotation.pageNumber]);
+		for (const rect of annotation.highlights) pages.add(rect.pageNumber);
+		for (const rect of annotation.underlines ?? []) pages.add(rect.pageNumber);
+		for (const page of pages) {
+			let values = index.get(page);
+			if (!values) {
+				values = [];
+				index.set(page, values);
+			}
+			values.push(annotation);
+		}
+	}
+	indexes.set(annotations, index);
+	return index;
+}
+
+// One index per immutable annotation array, and stable results for pages whose
+// annotation objects have not changed. Cross-page highlights/underlines count.
+export function usePageAnnotations(pageNumber: number) {
+	return useAnnotations(
+		useShallow(
+			(state) =>
+				annotationsByPage(state.annotations).get(pageNumber) ??
+				emptyAnnotations,
+		),
+	);
+}

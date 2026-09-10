@@ -1,0 +1,125 @@
+{
+  "date": "2026-09-10",
+  "baselineRevision": "29f89b2ba30530ae3e7507e3c4fc5dd07bf61ed1",
+  "environment": {
+    "architecture": "arm64",
+    "os": "macOS 26.5.2",
+    "node": "22.22.3",
+    "browser": "Google Chrome 153.0.8005.0 canary",
+    "vitest": "2.1.8",
+    "pdfjs": "5.5.207"
+  },
+  "method": "Real useSearch hook in headless Chrome; 20 pages x 5000 characters; one warmup then five samples; isolated baseline and candidate runs; no concurrent build.",
+  "search": {
+    "exact-only": {
+      "before": {
+        "medianMs": 27.5,
+        "samplesMs": [
+          27.4,
+          27.4,
+          27.5,
+          27.7,
+          28.3
+        ]
+      },
+      "after": {
+        "medianMs": 0.0,
+        "samplesMs": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.1
+        ]
+      }
+    },
+    "fuzzy-short": {
+      "before": {
+        "medianMs": 26.6,
+        "samplesMs": [
+          26.3,
+          26.6,
+          26.6,
+          26.7,
+          26.7
+        ]
+      },
+      "after": {
+        "medianMs": 3.6,
+        "samplesMs": [
+          3.5,
+          3.6,
+          3.6,
+          3.7,
+          6.2
+        ]
+      }
+    },
+    "fuzzy-phrase": {
+      "before": {
+        "medianMs": 174.6,
+        "samplesMs": [
+          173.9,
+          174.1,
+          174.6,
+          179.5,
+          179.8
+        ]
+      },
+      "after": {
+        "medianMs": 21.4,
+        "samplesMs": [
+          19.4,
+          20.0,
+          21.4,
+          24.1,
+          25.4
+        ]
+      }
+    }
+  },
+  "counts": {
+    "redundantStoreNotifications": {
+      "before": 3000,
+      "after": 0
+    },
+    "mediaQueriesFor100Consumers": {
+      "before": 100,
+      "after": 1
+    },
+    "intersectionObserversFor100Consumers": {
+      "before": 100,
+      "after": 1
+    },
+    "extractionCallsForTwo100PageConsumers": {
+      "before": 200,
+      "after": 100
+    },
+    "peakExtractionConcurrency": {
+      "before": 200,
+      "after": 4
+    },
+    "rendersFor50DownloadProgressEvents": {
+      "before": 50,
+      "after": 0
+    },
+    "baseCanvasBlitsForZoom1To2To3": {
+      "before": 2,
+      "after": 0
+    },
+    "widthReadsFor100UpdatesOn1000Pages": {
+      "before": 99000,
+      "after": 0
+    }
+  },
+  "bitmapCache": {
+    "fixture": "60 synthetic 2048x2048 bitmap objects; pixel accounting, not browser RSS or GPU measurement",
+    "beforeCountLimitPixelBytes": 1006632960,
+    "afterMaxPixelBytes": 67108864
+  },
+  "bundleSizeLimitBytes": {
+    "before": 40259,
+    "after": 40774
+  },
+  "countMethod": "Component-level probes before and after each fix. The width probe retains the already-fixed no-op store guard, so 99 of its 100 writes change state."
+}
