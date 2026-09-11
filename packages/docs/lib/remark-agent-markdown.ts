@@ -15,8 +15,6 @@ const interactiveExamples = new Set([
 	"ViewerZoomControl",
 ]);
 
-// Run before MDX compilation: preserve fenced examples, omit executable imports,
-// and keep prose nested in components. Unsupported expressions fail the build.
 export const remarkAgentMarkdown: Plugin<[], Root> = () => (tree, file) => {
 	const clean = (node: Record<string, unknown>): Record<string, unknown>[] => {
 		if (node.type === "mdxjsEsm") return [];
@@ -60,8 +58,8 @@ export const remarkAgentMarkdown: Plugin<[], Root> = () => (tree, file) => {
 		const url =
 			typeof node.url === "string" && node.url.startsWith("/")
 				? new URL(
-						node.url,
-						process.env.DOCS_SITE_URL ?? "https://lector-weld.vercel.app",
+						node.url.replace(/^\//, ""),
+						`${(process.env.DOCS_SITE_URL ?? "https://anara.com/lector").replace(/\/$/, "")}/`,
 					).href
 				: undefined;
 		return [

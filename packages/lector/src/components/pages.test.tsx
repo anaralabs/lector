@@ -1,7 +1,7 @@
 import { cleanup, render, waitFor } from "@testing-library/react";
-import { page as browserPage } from "@vitest/browser/context";
 import type { PageViewport, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { page as browserPage } from "vitest/browser";
 import { PDFStore } from "../internal";
 import { Page } from "./page";
 import { Pages } from "./pages";

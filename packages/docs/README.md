@@ -87,7 +87,7 @@ Set these environment variables **before building** and keep the same values at 
 
 | Variable | Default / purpose |
 | --- | --- |
-| `DOCS_SITE_URL` | `https://lector-weld.vercel.app`; set to your site's origin for canonical links in Markdown and the catalog. Use `http://localhost:3000` for a fully local export. Subpath hosting is not configured by this variable. |
+| `DOCS_SITE_URL` | `https://anara.com/lector`; set to your site's full base URL for canonical links in Markdown and the catalog. Use `http://localhost:3000/lector` for a fully local export. The app is built with the fixed `/lector` base path. |
 | `MCP_ALLOWED_ORIGINS` | Optional comma-separated origins of trusted browser-based MCP clients, for example `https://assistant.example`. No wildcard; each origin includes scheme and port if nonstandard. |
 
 MCP requests with an `Origin` header must match the docs origin, Vercel deployment origin (`VERCEL_URL`), an explicitly configured client origin, or localhost port 3000 in development. Native clients may omit `Origin`. Direct Markdown/catalog endpoints allow cross-origin reads. No authentication or application secrets are needed for these public docs.

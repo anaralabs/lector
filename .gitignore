@@ -58,3 +58,6 @@ bun.lockb
 
 # Cursor
 .cursorrules
+
+# Browser test artifacts
+packages/lector/tests/__screenshots__/

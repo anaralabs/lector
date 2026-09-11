@@ -15,9 +15,10 @@ test("100 thumbnail consumers share visibility and DPR observers", () => {
 	const OriginalObserver = window.IntersectionObserver;
 	const intersection = vi
 		.spyOn(window, "IntersectionObserver")
-		.mockImplementation(
-			(callback, options) => new OriginalObserver(callback, options),
-		);
+		.mockImplementation(function (callback, options) {
+			if (!new.target) throw new TypeError("IntersectionObserver requires new");
+			return new OriginalObserver(callback, options);
+		});
 	function Consumer() {
 		const ref = useRef<HTMLDivElement>(null);
 		useDpr();
@@ -78,14 +79,22 @@ test("visibility subscribers on the same element share updates and clean up inde
 	const observe = vi.fn(),
 		unobserve = vi.fn(),
 		disconnect = vi.fn();
-	vi.spyOn(window, "IntersectionObserver").mockImplementation((cb) => {
-		callback = cb;
-		return {
-			observe,
-			unobserve,
-			disconnect,
-		} as unknown as IntersectionObserver;
-	});
+	vi.spyOn(window, "IntersectionObserver").mockImplementation(
+		class implements IntersectionObserver {
+			root = null;
+			rootMargin = "0px";
+			thresholds = [0];
+			observe = observe;
+			unobserve = unobserve;
+			disconnect = disconnect;
+			constructor(cb: IntersectionObserverCallback) {
+				callback = cb;
+			}
+			takeRecords(): IntersectionObserverEntry[] {
+				return [];
+			}
+		},
+	);
 	const elementRef = { current: document.createElement("div") };
 	const first = renderHook(() => useVisibility({ elementRef }));
 	act(() =>

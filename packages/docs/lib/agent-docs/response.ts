@@ -8,7 +8,7 @@ export function documentationResponse(
 			"Cache-Control": "public, max-age=0, must-revalidate",
 			"Access-Control-Allow-Origin": "*",
 			"X-Content-Type-Options": "nosniff",
-			Link: '</llms.txt>; rel="describedby"',
+			Link: '</lector/llms.txt>; rel="describedby"',
 		},
 	});
 }
