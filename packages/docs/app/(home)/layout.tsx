@@ -14,7 +14,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 			<header className="site-header">
 				<Link href="/" className="wordmark" aria-label="Lector home">
 					<Image
-						src="/anara-mark.svg"
+						src="/lector/anara-mark.svg"
 						width={32}
 						height={16}
 						alt=""

@@ -1,6 +1,6 @@
 # Search and copied-text fidelity
 
-This change builds on reader-quality PR #163 (`8f4031b`). It improves equivalent-text matching and preserves line boundaries when reading a selection. It does not implement full PDF reading-order reconstruction.
+This change builds on reader-quality PR #163, now merged into main (`3d59edc`). It improves equivalent-text matching and preserves line boundaries when reading a selection. It does not implement full PDF reading-order reconstruction.
 
 ## Reproduced failures
 
@@ -23,11 +23,11 @@ Copy reads the text-layer DOM in PDF.js order, clips both endpoints, preserves `
 ## Validation
 
 - 32 Node tests pass, including 18 new text-fidelity cases.
-- All 210 browser tests pass independently in Chromium, Firefox and WebKit, including 18 new browser cases.
+- All 235 browser tests pass independently in Chromium, Firefox and WebKit, including 18 new browser cases.
 - Generated real PDFs cover phrase search and dehyphenation through PDF.js extraction and highlight calculation at all four rotations with a crop box. Existing raster and selectable-text geometry checks also pass.
 - Browser selection tests cover quote text, partial and cross-page ranges, PDF-only copy, controls, viewer isolation, opt-out, updated options, cleanup, and logical Unicode order. Clipboard tests inspect copy-event payloads; they do not automate pasting into native desktop applications.
-- Library types, build, size limit, packed ESM import, CommonJS diagnostic, and SSR checks pass. The docs production build passes. Lint has no new errors; the existing two annotation-hook dependency warnings remain.
-- Bundled/compressed size: 52,489 → 53,936 bytes (+1,447 bytes).
+- Library types, build, size limit, packed ESM import, CommonJS diagnostic, and SSR checks pass. The docs production build and six docs tests pass. Lint has no new errors; the existing two annotation-hook dependency warnings remain.
+- Bundled/compressed size: 52,877 → 54,298 bytes (+1,421 bytes).
 
 ```sh
 pnpm --filter @anaralabs/lector test:unit

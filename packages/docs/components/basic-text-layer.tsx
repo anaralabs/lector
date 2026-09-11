@@ -3,7 +3,7 @@
 import { CanvasLayer, Page, Pages, TextLayer } from "@anaralabs/lector";
 import { ExampleRoot } from "./example-root";
 
-const fileUrl = "/pdf/large.pdf";
+const fileUrl = "/lector/pdf/large.pdf";
 
 const BasicTextLayer = () => {
 	return (
