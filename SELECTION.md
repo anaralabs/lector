@@ -30,3 +30,9 @@ The existing corpus, rendering, search, annotation, and performance regressions 
 ## Remaining work
 
 This follows PDF.js text order. Malformed column/table/footnote reading order, OCR for scans, and a broader complex-script corpus remain separate work. Browser ranges are more accurate than proportional character estimates but do not repair bad font mappings or source text. Native touch handles are retained; synthetic touch events and desktop WebKit do not certify physical iOS/Android selection-handle behavior. Multiple disjoint ranges and cross-viewer selections are outside the persistent model.
+
+## Review follow-up: completion state
+
+A delayed background page load could leave status at `loading` after a mounted text layer supplied the final missing selection data. Completion now publishes `ready` from either path and cancels redundant hydration. Async readers observe selection state, so completion and cancellation settle without waiting for stalled page loads; late failures cannot overwrite a ready result. Three regressions cover the disabled action, an already-pending async read, and cancellation during a stalled load.
+
+Follow-up validation: 229 Chromium tests, all 19 selection tests in Firefox and WebKit, and 32 Node tests pass. Types, changed-file lint, library build/size, and packed export/SSR checks pass. Current compressed bundle size is 57,646 bytes.

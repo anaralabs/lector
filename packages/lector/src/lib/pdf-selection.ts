@@ -56,7 +56,6 @@ export class PDFSelectionController {
 	private projection: Projection | null = null;
 	private frame: number | null = null;
 	private work: AbortController | null = null;
-	private pending: Promise<void> = Promise.resolve();
 	private structuralChange = false;
 	private drag: {
 		anchor: PDFTextAnchor;
@@ -288,12 +287,36 @@ export class PDFSelectionController {
 		options?: SelectionTextOptions,
 	): Promise<PDFSelectionResult | null> => {
 		const generation = this.generation;
-		await this.pending;
+		// Completion can come from mounted layers as well as background hydration.
+		// Wait on selection state so redundant/stalled page loads cannot delay it.
+		await new Promise<void>((resolve) => {
+			if (this.snapshot?.status !== "loading") {
+				resolve();
+				return;
+			}
+			const unsubscribe = this.subscribe(() => {
+				if (
+					generation !== this.generation ||
+					this.snapshot?.status !== "loading"
+				) {
+					unsubscribe();
+					resolve();
+				}
+			});
+		});
 		if (generation !== this.generation)
 			throw new DOMException("Selection changed", "AbortError");
 		if (this.snapshot?.status === "error") throw this.snapshot.error;
 		return this.getSelection(options);
 	};
+
+	private finishSelection() {
+		if (this.snapshot?.status !== "loading" || !this.complete()) return;
+		// A mounted layer may finish first. Its result makes hydration redundant.
+		this.work?.abort();
+		this.work = null;
+		this.publish({ ...this.snapshot, status: "ready" });
+	}
 
 	registerLayer(
 		element: HTMLElement,
@@ -305,6 +328,7 @@ export class PDFSelectionController {
 		this.layers.set(pageNumber, page);
 		try {
 			this.remember(page);
+			this.finishSelection();
 		} catch (error) {
 			this.work?.abort();
 			if (this.snapshot)
@@ -441,7 +465,6 @@ export class PDFSelectionController {
 
 	private hydrate() {
 		if (!this.snapshot || this.complete() || !this.container) {
-			this.pending = Promise.resolve();
 			return;
 		}
 		const range = this.ordered()!;
@@ -466,10 +489,10 @@ export class PDFSelectionController {
 				);
 			}
 		};
-		this.pending = Promise.all([worker(), worker()])
+		void Promise.all([worker(), worker()])
 			.then(() => {
-				if (generation === this.generation && this.snapshot) {
-					this.publish({ ...this.snapshot, status: "ready" });
+				if (!controller.signal.aborted && generation === this.generation) {
+					this.finishSelection();
 					this.schedule();
 				}
 			})
