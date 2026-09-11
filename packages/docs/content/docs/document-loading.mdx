@@ -89,6 +89,26 @@ export default function LocalFileViewer() {
 
 You can also read `await file.arrayBuffer()` and pass the bytes. PDF.js may transfer typed arrays to its worker, taking ownership of the buffer. Keep a separate copy if your app needs the original bytes or must retry a load. See [PDF.js binary data loading](https://mozilla.github.io/pdf.js/api/draft/module-pdfjsLib.html#~DocumentInitParameters).
 
+## Show the requested page sooner
+
+By default, `Root` resolves all page proxies and dimensions before mounting its children. Large documents can opt into progressive acquisition:
+
+```tsx
+<Root source="/report.pdf" progressive initialPage={12} style={{ height: 600 }}>
+  <Pages>
+    <Page><CanvasLayer /><TextLayer /></Page>
+  </Pages>
+</Root>
+```
+
+`initialPage` is one-based, defaults to 1, and is clamped to the document's page count. The requested page is acquired first. Remaining pages use at most 16 concurrent requests; newly visible pages move ahead of queued background work. `initialPage` and `progressive` are read when `source` changes. `Pages.initialOffset`, when provided, takes precedence over the initial page's position.
+
+Unknown page sizes initially use the requested page's dimensions. As real dimensions arrive, Lector corrects vertical offsets above the current reading position, including rotated pages and zoomed views. Corrections wait until an active pinch finishes. A wider page can still change horizontal centering or fit-width zoom; use the default eager mode if your layout requires every page's exact dimensions before its first paint. Progressive mode reduces time to the first usable page; it does not reduce the eventual number of page proxies retained by PDF.js.
+
+`Page` and `Thumbnail` keep unresolved resources behind loading placeholders and offer Retry if acquisition fails. `Search` waits for all pages before publishing its text index. Background failures also call `onError` with `phase: "viewport-generation"`; already loaded pages remain usable unless your error handler replaces the reader.
+
+Custom consumers can await `usePdf((state) => state.loadPdfPageProxy)` for a particular page, or `loadPdfPageProxies()` for the complete ordered array. `isPageLoaded(pageNumber)` reports availability. Synchronous `getPdfPageProxy(pageNumber)` still returns a real PDF.js proxy and throws a descriptive error for an unresolved page; await the async accessor first in progressive mode. The store's `pageProxies` array is empty until the complete ordered array is available, and `pagesLoaded` reports that state. The default eager mode preserves its existing complete array and synchronous access.
+
 ## Show errors and retry
 
 `loader` is waiting content, not an error boundary. Without your own error UI, a failed load can leave it visible. `onError` receives `{ error, phase, source }`; `error` is `unknown`. Render failures outside `Root`, since its children are not mounted during loading.

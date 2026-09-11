@@ -1,0 +1,57 @@
+{
+  "baselineCommit": "93c5bd6",
+  "fixture": "tests/fixtures/text-geometry.ts: deterministic Helvetica PDF, 600 by 800 points, text at (100,500), optional CropBox [50,100,550,700] and page rotation",
+  "verification": "tests/highlight-geometry.browser.test.tsx: eight comparisons against PDF.js raster glyph bounds (1-pixel antialiasing tolerance), one column-gutter check, and one strict comparison against an actual PDF.js TextLayer DOM Range (less than 1 CSS pixel); no mocked extraction",
+  "results": {
+    "cropAndRotation": {
+      "cases": 8,
+      "baselinePassed": 1,
+      "improvedPassed": 8,
+      "rotations": [
+        0,
+        90,
+        180,
+        270
+      ],
+      "crop": [
+        false,
+        true
+      ]
+    },
+    "columnGutter": {
+      "baseline": "Highlight crosses blank x=250 gutter between LEFT at x=100 and RIGHT at x=400",
+      "improved": "No returned rectangle crosses the gutter; whitespace still counts toward search offsets"
+    },
+    "proportionalGlyphWidths": {
+      "fixture": "iiiiWWWW, searching iiii, 20-point Helvetica",
+      "reference": "Actual PDF.js TextLayer DOM Range for the first four characters; native Helvetica advances are recorded separately from a second PDF containing only iiii",
+      "textLayerAbsoluteWidthErrorCssPixels": {
+        "requiredLessThan": 1,
+        "macOSChromium": 0.007814158786288772,
+        "macOSFirefox": 0.010006481277514467,
+        "macOSWebKit": 0.22655652939175752
+      },
+      "equalCharacterWidthControl": "The previous equal-character estimate differs from the actual TextLayer range by more than 20 CSS pixels in the regression fixture",
+      "nativeHelveticaAbsoluteWidthErrorPdfPoints": {
+        "baselineEqualCharacterEstimate": 28.88,
+        "macOSChromium": 0.013199329983240915,
+        "macOSFirefox": 0.01333397282404647,
+        "macOSWebKit": 0.013199329983240915,
+        "linuxCiFirefox": 2.700231615171564,
+        "linuxCiWebKit": 2.7011873554
+      },
+      "portabilityCorrection": "The original less-than-1-point assertion against native Helvetica advances failed on Linux Firefox and WebKit. The strict oracle now checks actual selectable text geometry; native-font agreement is explicitly platform-dependent. No production measurement code or tolerance was changed."
+    }
+  },
+  "browsers": [
+    "Chromium",
+    "Firefox",
+    "WebKit"
+  ],
+  "passedCasesPerBrowser": 10,
+  "limitations": [
+    "This fixes search highlight geometry; it does not alter PDF text extraction, search normalization, selection ordering, or hyphenation.",
+    "Partial glyph widths follow PDF.js selectable text-layer fallback-font measurement scaled to the PDF run width. Fallback glyph proportions vary by platform: native Helvetica advance discrepancy was about 0.013 points on macOS and 2.70 points on Linux Firefox/WebKit for this fixture. This does not establish exact agreement with native PDF glyphs, complex shaping, or mixed-direction runs.",
+    "Vertical-writing direction and pure RTL geometry additionally have streamed-item regression coverage; the generated PDF fixture uses horizontal Helvetica."
+  ]
+}

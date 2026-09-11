@@ -137,24 +137,26 @@ function ReaderContent() {
 						</button>
 					</div>
 					<span className="toolbar-divider" />
-					{highlights.length > 0 ? (
+					<div className="toolbar-group document-actions">
 						<button
 							type="button"
 							className="icon-button"
 							aria-label="Clear highlights"
+							title="Clear highlights"
+							disabled={highlights.length === 0}
 							onClick={() => setHighlight([])}
 						>
 							<Eraser size={15} />
 						</button>
-					) : null}
-					<a
-						className="icon-button"
-						href={source}
-						download="attention-is-all-you-need.pdf"
-						aria-label="Download Attention Is All You Need"
-					>
-						<ArrowDownToLine size={15} />
-					</a>
+						<a
+							className="icon-button"
+							href={source}
+							download="attention-is-all-you-need.pdf"
+							aria-label="Download Attention Is All You Need"
+						>
+							<ArrowDownToLine size={15} />
+						</a>
+					</div>
 				</div>
 			</div>
 			<div className="document-stage">
@@ -187,6 +189,7 @@ export default function LandingReader() {
 		<Root
 			key={attempt}
 			source={source}
+			progressive
 			className="landing-reader"
 			isZoomFitWidth
 			zoomOptions={{ minZoom: 0.25, maxZoom: 3 }}

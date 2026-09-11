@@ -6,6 +6,7 @@ import {
 	type ReactElement,
 	useCallback,
 	useEffect,
+	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -85,6 +86,7 @@ export const Pages = ({
 
 	const viewports = usePdf((state) => state.viewports);
 	const numPages = usePdf((state) => state.pdfDocumentProxy.numPages);
+	const initialPage = usePdf((state) => state.initialPage);
 	const isPinching = usePdf((state) => state.isPinching);
 
 	const elementWrapperRef = useRef<HTMLDivElement>(null);
@@ -100,7 +102,7 @@ export const Pages = ({
 	const setVirtualizer = usePdf((state) => state.setVirtualizer);
 
 	const { scrollToFn } = useScrollFn();
-	const { observeElementOffset } = useObserveElement();
+	const { observeElementOffset, observeElementRect } = useObserveElement();
 
 	const viewportsRef = useRef(viewports);
 	viewportsRef.current = viewports;
@@ -114,15 +116,27 @@ export const Pages = ({
 		[], // Stable — reads from ref
 	);
 
+	const [startingOffset] = useState(
+		() =>
+			initialOffset ??
+			viewports
+				.slice(0, initialPage - 1)
+				.reduce(
+					(offset, viewport) => offset + viewport.height + EXTRA_HEIGHT + gap,
+					0,
+				),
+	);
+
 	const virtualizer = useVirtualizer({
 		count: numPages || 0,
 		getScrollElement: () => containerRef.current,
 		estimateSize,
 		observeElementOffset,
+		observeElementRect,
 		overscan: virtualizerOptions?.overscan ?? 0,
 		scrollToFn,
 		gap,
-		initialOffset: initialOffset,
+		initialOffset: startingOffset,
 		// Never trust scrollend alone to reset isScrolling: a single missed
 		// event (a documented browser flake — TanStack flipped this default to
 		// false in later 3.x) would pin isScrolling=true forever, and every
@@ -130,6 +144,28 @@ export const Pages = ({
 		// false keeps the isScrollingResetDelay debounce active as a fallback.
 		useScrollendEvent: false,
 	});
+
+	const previousViewports = useRef(viewports);
+	useLayoutEffect(() => {
+		// Gesture rendering freezes virtual positions; apply accumulated corrections
+		// after the gesture commits rather than moving its original content anchor.
+		if (isPinching) return;
+		const previous = previousViewports.current;
+		previousViewports.current = viewports;
+		if (previous === viewports) return;
+		// resizeItem corrects offsets above the visible page, preserving the reading anchor
+		// when estimated dimensions resolve (including intrinsic page rotation).
+		let resized = false;
+		for (let index = 0; index < viewports.length; index++) {
+			if (previous[index]?.height !== viewports[index]?.height) {
+				virtualizer.resizeItem(index, viewports[index]!.height + EXTRA_HEIGHT);
+				resized = true;
+			}
+		}
+		// Retiring the gesture snapshot and correcting its scroll offset must
+		// paint together, rather than showing old positions for another 200 ms.
+		if (resized) setTempItems([]);
+	}, [viewports, virtualizer, isPinching]);
 
 	useEffect(() => {
 		if (onOffsetChange && virtualizer.scrollOffset)

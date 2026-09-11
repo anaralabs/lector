@@ -3,7 +3,7 @@ title: Thumbnails
 description: Add a scrollable page-preview sidebar beside the document.
 ---
 
-`Thumbnails` clones one `Thumbnail` template for every page. Each thumbnail navigates to its page on click or Enter. Both thumbnails and pages must share the same `Root`.
+`Thumbnails` clones one `Thumbnail` template for every page. Each thumbnail navigates to its page on click, Enter, or Space. Space activates on release without scrolling the sidebar. Thumbnails have a default accessible name (`Page N`) and mark the currently viewed page with `aria-current="page"`; override `aria-label` for localization. Custom event handlers can call `preventDefault()` to cancel navigation. Both thumbnails and pages must share the same `Root`.
 
 ## A sidebar layout
 
@@ -26,7 +26,7 @@ export default function ThumbnailViewer() {
     >
       <aside aria-label="Page thumbnails" style={{ width: 160, flexShrink: 0, overflow: "auto" }}>
         <Thumbnails style={{ display: "grid", gap: 16, padding: 8 }}>
-          <Thumbnail style={{ width: 128 }} aria-label="Go to this page" />
+          <Thumbnail style={{ width: 128 }} />
         </Thumbnails>
       </aside>
       <div style={{ flex: 1, minWidth: 0 }}>

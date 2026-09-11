@@ -74,3 +74,83 @@ test("selector consumers keep action identities across store updates", () => {
 	expect(result.current).toBe(action);
 	expect(renders).toBe(1);
 });
+
+test("incremental indexes agree with filtering across edits, moves, duplicates and replacements", () => {
+	const { result } = renderHook(
+		() => ({
+			state: useAnnotations(),
+			pages: [
+				usePageAnnotations(1),
+				usePageAnnotations(2),
+				usePageAnnotations(3),
+			],
+		}),
+		{ wrapper: AnnotationsStoreProvider },
+	);
+	act(() =>
+		result.current.state.setAnnotations([
+			annotation("duplicate", 1),
+			annotation("duplicate", 3),
+		]),
+	);
+	for (let step = 0; step < 100; step++) {
+		act(() => {
+			const state = result.current.state;
+			const id = step % 7 === 0 ? "duplicate" : String(step % 9);
+			if (step % 4 === 0) state.addAnnotation(annotation(id, (step % 3) + 1));
+			else if (step % 4 === 1)
+				state.updateAnnotation(id, {
+					pageNumber: 2,
+					highlights: [rect(3), rect(1)],
+					underlines: [rect(2)],
+				});
+			else if (step % 4 === 2)
+				state.updateAnnotation(id, {
+					comment: String(step),
+					highlights: [],
+					underlines: [],
+				});
+			else state.deleteAnnotation(id);
+		});
+		for (let page = 1; page <= 3; page++)
+			expect(result.current.pages[page - 1]).toEqual(
+				result.current.state.annotations.filter(
+					(a) =>
+						a.pageNumber === page ||
+						[...a.highlights, ...(a.underlines ?? [])].some(
+							(r) => r.pageNumber === page,
+						),
+				),
+			);
+	}
+	act(() =>
+		result.current.state.setAnnotations([annotation("replacement", 3)]),
+	);
+	expect(result.current.pages).toEqual([
+		[],
+		[],
+		result.current.state.annotations,
+	]);
+});
+
+test("unchanged updates and missing IDs do not notify annotation consumers", () => {
+	let renders = 0;
+	const { result } = renderHook(
+		() => {
+			renders++;
+			return useAnnotations();
+		},
+		{ wrapper: AnnotationsStoreProvider },
+	);
+	act(() => result.current.addAnnotation(annotation("a", 1)));
+	const before = renders;
+	const snapshot = result.current.annotations;
+	act(() => {
+		result.current.updateAnnotation("a", { color: "yellow" });
+		result.current.updateAnnotation("missing", { comment: "x" });
+		result.current.deleteAnnotation("missing");
+		result.current.setAnnotations(snapshot);
+	});
+	expect(renders).toBe(before);
+	expect(result.current.annotations).toBe(snapshot);
+});

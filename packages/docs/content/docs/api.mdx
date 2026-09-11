@@ -12,17 +12,19 @@ Loads one document and supplies its context. Accepts HTML `div` props in additio
 | Prop | Default | Contract |
 | --- | --- | --- |
 | `source` | Required | URL string, `URL`, typed array, `ArrayBuffer`, or PDF.js loading-parameters object |
-| `loader` | `"Loading..."` | Content shown until the document and viewports are ready |
+| `loader` | `"Loading..."` | Content shown until all page metadata is ready, or the requested page is ready in progressive mode |
 | `onDocumentLoad` | — | Receives `{ proxy, source }` after PDF.js loads the document, before viewport generation |
-| `onError` | — | Receives `{ error, phase, source }` for initialization failures |
+| `onError` | — | Receives `{ error, phase, source }` for initialization failures and background page failures in progressive mode |
 | `documentOptions` | Lector defaults | PDF.js loading-parameter overrides; applied on the next load |
+| `progressive` | `false` | Show the requested page before acquiring remaining pages; unknown dimensions are estimated |
+| `initialPage` | `1` | One-based page to acquire/display first; clamped to the page count |
 | `zoom` | `1` | Initial zoom multiplier |
 | `isZoomFitWidth` | `false` | Initial fit-width mode |
 | `zoomOptions` | `{ minZoom: 0.5, maxZoom: 10 }` | Initial limits for zoom updates |
 | `colorScheme` | `"light"` | `"light"` or `"dark"`; changes synchronize with the store |
 | `darkModeColors` | See [dark mode](/docs/dark-mode) | Optional `background` and `foreground`; changes synchronize with the store |
 
-`source` changes trigger loading. Keep object and binary sources stable. The zoom props initialize state; use store actions for subsequent changes. Changing `documentOptions` alone does not reload the document. See [loading documents](/docs/document-loading) for source handling, retries, and asset paths.
+`source` changes trigger loading. Keep object and binary sources stable. The zoom props initialize state; use store actions for subsequent changes. Changing `documentOptions`, `progressive`, or `initialPage` alone does not reload the document. See [loading documents](/docs/document-loading) for source handling, retries, and asset paths.
 
 The current type also contains `initialRotation`, but `Root` does not forward it into document initialization. Do not rely on it for rotation controls.
 
@@ -97,7 +99,12 @@ These are the store fields most useful to application code:
 | `highlights` | `setHighlight(rectangles)` replaces the array |
 | `coloredHighlights` | `addColoredHighlight(record)`, `deleteColoredHighlight(uuid)` |
 | `viewports` | Scale-1 PDF.js page viewports, indexed from 0 |
-| `pageProxies` | `getPdfPageProxy(pageNumber)` takes a one-based page number |
+| `pageProxies` | Complete ordered array in eager mode; empty until complete in progressive mode |
+| `pagesLoaded` | Whether the complete page array is available |
+| `getPdfPageProxy(pageNumber)` | Synchronous one-based accessor; throws if the page is unresolved |
+| `loadPdfPageProxy(pageNumber)` | Resolves a real PDF.js page proxy; prioritizes an unresolved progressive page |
+| `loadPdfPageProxies()` | Resolves the complete ordered page array |
+| `isPageLoaded(pageNumber)` | Tests page availability |
 | `textContent` | Populated by `Search` |
 
 The store also exposes rendering and virtualizer internals. Prefer the components and hooks above over mutating those fields.

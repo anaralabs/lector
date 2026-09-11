@@ -95,7 +95,7 @@ export default function SearchableViewer() {
 }
 ```
 
-`calculateHighlightRects` uses the result's page number, match index, and `searchText` to locate the match. Passing the result itself keeps highlighting tied to the submitted query even if the user has since edited the input. It returns pixel rectangles in page coordinates.
+`calculateHighlightRects` uses the result's page number, match index, and matched length (falling back to `searchText`) to locate the match. Passing the result itself keeps highlighting tied to the submitted query even if the user has since edited the input. It returns pixel rectangles in page coordinates.
 
 ## Search options and results
 
@@ -107,7 +107,7 @@ export default function SearchableViewer() {
 | `limit` | `10` | Result budget shared between exact and fuzzy groups |
 | `textSize` | `100` | Characters of trailing context to include after a match |
 
-Results contain `exactMatches`, `fuzzyMatches`, and `hasMoreResults`. Each match has `pageNumber`, `text`, `matchIndex`, `score`, `isExactMatch`, and optional `searchText`. Matching is case-insensitive. Searching an empty or whitespace-only query clears results.
+Results contain `exactMatches`, `fuzzyMatches`, and `hasMoreResults`. Each match has `pageNumber`, `text`, `matchIndex`, `score`, `isExactMatch`, and optional `searchText` and `matchLength`. Offsets and lengths refer to the original PDF text in UTF-16 code units. `matchLength` is present when the matched span differs from `searchText.length`, for example when case conversion expands a Unicode character. Pass the whole result to `calculateHighlightRects` to retain the correct span. Matching is case-insensitive. Searching an empty or whitespace-only query clears results.
 
 The current implementation allocates at most `ceil(limit / 2)` results to exact matches and the remaining budget to fuzzy matches. It can therefore return fewer than `limit` results even when more exact matches exist. `hasMoreResults` compares the total candidate count with `limit`; it is not a reliable count of everything omitted by the group allocation. If you build “show more,” rerun the submitted query with a higher limit rather than treating the result as paginated data.
 

@@ -1,0 +1,69 @@
+{
+  "date": "2026-09-10",
+  "baseline": "67c0823",
+  "environment": {
+    "os": "macOS 26.5.2 ARM64",
+    "node": "22.22.3",
+    "browser": "Chrome 153 (installed chrome channel)",
+    "vitest": "3.2.6"
+  },
+  "method": {
+    "annotations": 10000,
+    "pages": 1000,
+    "subscribedPages": 20,
+    "editsPerBatch": 100,
+    "warmupBatches": 1,
+    "measuredBatches": 7,
+    "description": "React act per offscreen comment edit; warm usePageAnnotations indexes. Local desktop timing; no CPU throttling."
+  },
+  "annotationBatchMs": {
+    "before": [
+      47.39999997615814,
+      46.300000071525574,
+      45,
+      45.299999952316284,
+      46.60000002384186,
+      45.89999997615814,
+      46.89999997615814
+    ],
+    "after": [
+      14.400000095367432,
+      12.299999952316284,
+      11.200000047683716,
+      11.099999904632568,
+      11,
+      12.600000023841858,
+      15.200000047683716
+    ],
+    "beforeMedian": 46.300000071525574,
+    "afterMedian": 12.299999952316284,
+    "ratio": 3.764227662684385
+  },
+  "search100kMedianMs": {
+    "before": {
+      "exact": 0,
+      "fuzzyShort": 4.1,
+      "fuzzyPhrase": 28.8
+    },
+    "after": {
+      "exact": 0,
+      "fuzzyShort": 3.7,
+      "fuzzyPhrase": 28.1
+    },
+    "note": "Zero indicates below browser timer resolution; small differences are not claimed as search speedups."
+  },
+  "bundleSizeLimitBytes": {
+    "before": 49815,
+    "after": 50296
+  },
+  "mobileToolbarTargetPixels": {
+    "before": [
+      28,
+      36
+    ],
+    "after": [
+      44,
+      44
+    ]
+  }
+}

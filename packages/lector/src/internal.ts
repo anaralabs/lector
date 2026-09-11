@@ -11,7 +11,9 @@ import {
 	type DarkModeColors,
 	DEFAULT_DARK_MODE_COLORS,
 } from "./lib/dark-mode";
+import type { PageResources } from "./lib/page-resources";
 import type { RenderColorMapRef } from "./lib/recolor-canvas-factory";
+import { applyViewportZoom } from "./lib/viewport-zoom";
 import { getFitWidthZoom } from "./lib/zoom";
 import { createZustandContext } from "./lib/zustand";
 
@@ -80,7 +82,14 @@ interface PDFState {
 	highlights: HighlightRect[];
 	setHighlight: (higlights: HighlightRect[]) => void;
 
+	/** Synchronous access; progressive consumers must load an unresolved page first. */
 	getPdfPageProxy: (pageNumber: number) => PDFPageProxy;
+	loadPdfPageProxy: (pageNumber: number) => Promise<PDFPageProxy>;
+	loadPdfPageProxies: () => Promise<PDFPageProxy[]>;
+	isPageLoaded: (pageNumber: number) => boolean;
+	/** False until the ordered pageProxies array is complete in progressive mode. */
+	pagesLoaded: boolean;
+	initialPage: number;
 
 	customSelectionRects: HighlightRect[];
 	setCustomSelectionRects: (rects: HighlightRect[]) => void;
@@ -107,6 +116,8 @@ interface PDFState {
 export type PDFVirtualizer = Virtualizer<any, any>;
 
 export interface InitialPDFState {
+	pageResources?: PageResources;
+	initialPage?: number;
 	pdfDocumentProxy: PDFDocumentProxy;
 	pageProxies: PDFPageProxy[];
 	viewports: Array<PageViewport>;
@@ -154,6 +165,9 @@ export const PDFStore = createZustandContext(
 						minZoom,
 						maxZoom,
 					);
+					// Subscribers must observe the new scale and its physical scroll
+					// compensation together, including toolbar/API zoom changes.
+					applyViewportZoom(state.viewportRef.current, newZoom);
 					return newZoom === state.zoom &&
 						isZoomFitWidth === state.isZoomFitWidth
 						? state
@@ -177,7 +191,8 @@ export const PDFStore = createZustandContext(
 				return clampedZoom;
 			},
 
-			currentPage: 1,
+			currentPage: initialState.initialPage ?? 1,
+			initialPage: initialState.initialPage ?? 1,
 			setCurrentPage: (val) => {
 				set((state) =>
 					state.currentPage === val ? state : { currentPage: val },
@@ -206,10 +221,36 @@ export const PDFStore = createZustandContext(
 			},
 
 			pageProxies: initialState.pageProxies,
+			pagesLoaded:
+				initialState.pageProxies.length ===
+				initialState.pdfDocumentProxy.numPages,
+			loadPdfPageProxies: () =>
+				initialState.pageResources
+					? initialState.pageResources.loadAll()
+					: Promise.resolve(get().pageProxies),
+			isPageLoaded: (pageNumber) =>
+				Boolean(
+					initialState.pageResources?.get(pageNumber) ??
+						get().pageProxies[pageNumber - 1],
+				),
+			loadPdfPageProxy: (pageNumber) =>
+				initialState.pageResources
+					? initialState.pageResources.load(pageNumber)
+					: Promise.resolve().then(() => get().getPdfPageProxy(pageNumber)),
 			getPdfPageProxy: (pageNumber) => {
-				const proxy = get().pageProxies[pageNumber - 1];
+				const proxy =
+					initialState.pageResources?.get(pageNumber) ??
+					get().pageProxies[pageNumber - 1];
 
-				if (!proxy) throw new Error(`Page ${pageNumber} does not exist`);
+				if (!proxy)
+					throw new Error(
+						initialState.pageResources &&
+							Number.isInteger(pageNumber) &&
+							pageNumber >= 1 &&
+							pageNumber <= initialState.pdfDocumentProxy.numPages
+							? `Page ${pageNumber} is not loaded. Await loadPdfPageProxy(${pageNumber}) first.`
+							: `Page ${pageNumber} does not exist`,
+					);
 
 				return proxy;
 			},

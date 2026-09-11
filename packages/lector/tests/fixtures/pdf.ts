@@ -1,5 +1,9 @@
 /** Small deterministic, valid PDF fixture. No network or binary fixture download. */
-export function createTextPdf(pageCount: number, lines = 20): Uint8Array {
+export function createTextPdf(
+	pageCount: number,
+	lines = 20,
+	pageSizes?: Array<{ width: number; height: number; rotation?: number }>,
+): Uint8Array {
 	const fontId = 3 + pageCount * 2;
 	const objects: string[] = [
 		"<< /Type /Catalog /Pages 2 0 R >>",
@@ -7,8 +11,9 @@ export function createTextPdf(pageCount: number, lines = 20): Uint8Array {
 	];
 	for (let i = 0; i < pageCount; i++) {
 		const text = `BT /F1 11 Tf 40 750 Td 14 TL ${Array.from({ length: lines }, (_, line) => `1 0 0 1 40 ${750 - (line % 50) * 14} Tm (Page ${i + 1} line ${line + 1}: searchable documents and efficient page navigation.) Tj`).join(" ")} ET`;
+		const size = pageSizes?.[i] ?? { width: 612, height: 792, rotation: 0 };
 		objects.push(
-			`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${4 + i * 2} 0 R >>`,
+			`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${size.width} ${size.height}] /Rotate ${size.rotation ?? 0} /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${4 + i * 2} 0 R >>`,
 			`<< /Length ${text.length} >>\nstream\n${text}\nendstream`,
 		);
 	}

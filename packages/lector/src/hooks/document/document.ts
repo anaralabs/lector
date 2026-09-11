@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import type { InitialPDFState, ZoomOptions } from "../../internal";
 import type { ColorScheme, DarkModeColors } from "../../lib/dark-mode";
 import { mapConcurrent } from "../../lib/map-concurrent";
+import { PageResources } from "../../lib/page-resources";
 import { getDefaultPdfJsAssetUrls, loadPdfJs } from "../../lib/pdfjs";
 import {
 	createRecolorCanvasFactory,
@@ -51,6 +52,10 @@ export interface usePDFDocumentParams {
 		source: Source;
 	}) => void;
 	initialRotation?: number;
+	/** Render the initial page before acquiring the rest. Unloaded page sizes are estimates. */
+	progressive?: boolean;
+	/** One-based page to load and display first. Read when source changes. */
+	initialPage?: number;
 	isZoomFitWidth?: boolean;
 	zoom?: number;
 	zoomOptions?: ZoomOptions;
@@ -142,6 +147,8 @@ export const usePDFDocumentContext = ({
 	onError,
 	source,
 	initialRotation = 0,
+	progressive = false,
+	initialPage = 1,
 	isZoomFitWidth,
 	zoom = 1,
 	zoomOptions,
@@ -181,7 +188,34 @@ export const usePDFDocumentContext = ({
 	// biome-ignore lint/correctness/useExhaustiveDependencies: <onDocumnetLoad,zoomOptions>
 	useEffect(() => {
 		let isDisposed = false;
+		let pageResources: PageResources | undefined;
 		const generateViewports = async (pdf: PDFDocumentProxy) => {
+			const firstPageNumber = Number.isFinite(initialPage)
+				? Math.max(1, Math.min(pdf.numPages, Math.trunc(initialPage)))
+				: 1;
+			if (progressive) {
+				const firstPage = await pdf.getPage(firstPageNumber);
+				if (isDisposed) return;
+				pageResources = new PageResources(pdf, firstPage, rotation, (error) => {
+					if (isDisposed) return;
+					console.error("Error generating PDF viewports", error);
+					onErrorRef.current?.({ error, phase: "viewport-generation", source });
+				});
+				setInitialState({
+					isZoomFitWidth,
+					viewports: pageResources.getSnapshot().viewports,
+					pageProxies: pageResources.getSnapshot().pageProxies ?? [],
+					pdfDocumentProxy: pdf,
+					zoom,
+					zoomOptions,
+					pageResources,
+					initialPage: firstPageNumber,
+					colorScheme: colorSchemeRef.current,
+					darkModeColors: darkModeColorsRef.current,
+					renderColorMapRef,
+				});
+				return;
+			}
 			const pageProxies: Array<PDFPageProxy> = [];
 			const viewports = await mapConcurrent(
 				Array.from({ length: pdf.numPages }, (_, index) => index),
@@ -210,6 +244,7 @@ export const usePDFDocumentContext = ({
 				pdfDocumentProxy: pdf,
 				zoom,
 				zoomOptions,
+				initialPage: firstPageNumber,
 				colorScheme: colorSchemeRef.current,
 				darkModeColors: darkModeColorsRef.current,
 				renderColorMapRef,
@@ -286,6 +321,7 @@ export const usePDFDocumentContext = ({
 
 			return () => {
 				isDisposed = true;
+				pageResources?.dispose();
 				void loadingTask?.destroy();
 			};
 		};

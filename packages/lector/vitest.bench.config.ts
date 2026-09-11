@@ -5,6 +5,10 @@ export default defineConfig({
 	test: {
 		...config.test,
 		include: ["benchmarks/**/*.browser.test.tsx"],
+		exclude: [
+			"benchmarks/reader-soak.browser.test.tsx",
+			"benchmarks/scroll-profile.browser.test.tsx",
+		],
 		testTimeout: 60000,
 	},
 });

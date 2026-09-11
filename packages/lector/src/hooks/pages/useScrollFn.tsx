@@ -33,9 +33,13 @@ export const useScrollFn = () => {
 			// if we are in auto scroll mode, then immediately scroll
 			// to the offset and not display any animation. For example if scroll
 			// immediately to a rescaled offset if zoom/scale has just been changed
-			elementScroll(offset, canSmooth, instance);
+			elementScroll(
+				offset,
+				{ ...canSmooth, adjustments: (canSmooth.adjustments ?? 0) * zoom },
+				instance,
+			);
 			// if (canSmooth.behavior === "auto") {
-			//   elementScroll(offset, canSmooth, instance);
+			//   elementScroll(offset, { ...canSmooth, adjustments: (canSmooth.adjustments ?? 0) * zoom }, instance);
 			//   return;
 			// }
 

@@ -18,6 +18,7 @@ import {
 	type DarkModeColors,
 	DEFAULT_DARK_MODE_COLORS,
 } from "../lib/dark-mode";
+import type { PageResources } from "../lib/page-resources";
 import { Primitive } from "./primitive";
 
 /**
@@ -75,6 +76,31 @@ const ColorSchemeSync = ({
 	return null;
 };
 
+/** Publish resource batches into the already-mounted store without replacing reader state. */
+const PageResourcesSync = ({ resources }: { resources?: PageResources }) => {
+	const store = PDFStore.useContext();
+	useEffect(() => {
+		if (!resources) return;
+		const update = () => {
+			const snapshot = resources.getSnapshot();
+			store.setState((state) => ({
+				viewports: snapshot.viewports,
+				pageProxies: snapshot.pageProxies ?? state.pageProxies,
+				pagesLoaded: Boolean(snapshot.pageProxies),
+			}));
+		};
+		const unsubscribe = resources.subscribe(update);
+		update();
+		// Give the initial reader commit its own task before acquiring unrelated pages.
+		const timer = setTimeout(resources.start, 0);
+		return () => {
+			clearTimeout(timer);
+			unsubscribe();
+		};
+	}, [resources, store]);
+	return null;
+};
+
 export const Root = forwardRef(
 	(
 		{
@@ -87,6 +113,8 @@ export const Root = forwardRef(
 			zoom,
 			zoomOptions,
 			documentOptions,
+			progressive,
+			initialPage,
 			colorScheme,
 			darkModeColors,
 			...props
@@ -104,6 +132,8 @@ export const Root = forwardRef(
 			zoom,
 			zoomOptions,
 			documentOptions,
+			progressive,
+			initialPage,
 			colorScheme,
 			darkModeColors,
 		});
@@ -134,6 +164,7 @@ export const Root = forwardRef(
 			<Primitive.div ref={ref} {...props}>
 				{initialState ? (
 					<PDFStore.Provider initialValue={initialState}>
+						<PageResourcesSync resources={initialState.pageResources} />
 						<ColorSchemeSync
 							colorScheme={colorScheme}
 							darkModeColors={darkModeColors}

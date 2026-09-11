@@ -1,8 +1,10 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
 	cloneElement,
+	type FocusEvent,
 	type HTMLProps,
 	type KeyboardEvent,
+	type MouseEvent,
 	type ReactElement,
 	useImperativeHandle,
 	useLayoutEffect,
@@ -13,9 +15,10 @@ import {
 import { usePdfJump } from "../hooks/pages/usePdfJump";
 import { useThumbnail } from "../hooks/useThumbnail";
 import { usePdf } from "../internal";
+import { PageLoadingBoundary } from "./page-loading-boundary";
 import { Primitive } from "./primitive";
 
-export const Thumbnail = ({
+const LoadedThumbnail = ({
 	pageNumber = 1,
 	eager = false,
 	...props
@@ -24,31 +27,48 @@ export const Thumbnail = ({
 		isFirstPage: eager || pageNumber < 5,
 	});
 	const { jumpToPage } = usePdfJump();
+	const isCurrentPage = usePdf((state) => state.currentPage === pageNumber);
+	const spacePressed = useRef(false);
 
 	return (
 		<div ref={containerRef} style={{ minHeight: "150px", minWidth: "10px" }}>
 			{isVisible && (
 				<Primitive.canvas
+					aria-label={`Page ${pageNumber}`}
+					aria-current={isCurrentPage ? "page" : undefined}
 					{...props}
 					role="button"
 					tabIndex={0}
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					onClick={(e: any) => {
-						if (props.onClick) {
-							props.onClick(e);
-						}
-
-						jumpToPage(pageNumber, { behavior: "auto" });
+					onClick={(event: MouseEvent<HTMLCanvasElement>) => {
+						props.onClick?.(event);
+						if (!event.defaultPrevented)
+							jumpToPage(pageNumber, { behavior: "auto" });
 					}}
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					onKeyDown={(e: any) => {
-						if (props.onKeyDown) {
-							props.onKeyDown(e);
+					onKeyDown={(event: KeyboardEvent<HTMLCanvasElement>) => {
+						props.onKeyDown?.(event);
+						if (event.defaultPrevented) return;
+						if (event.key === "Enter") {
+							event.preventDefault();
+							jumpToPage(pageNumber, { behavior: "auto" });
+						} else if (event.key === " ") {
+							// Match a button: prevent scrolling on press, activate on release.
+							event.preventDefault();
+							spacePressed.current = true;
 						}
-
-						if (e.key === "Enter") {
+					}}
+					onKeyUp={(event: KeyboardEvent<HTMLCanvasElement>) => {
+						props.onKeyUp?.(event);
+						if (event.key !== " ") return;
+						const activate = spacePressed.current && !event.defaultPrevented;
+						spacePressed.current = false;
+						if (activate) {
+							event.preventDefault();
 							jumpToPage(pageNumber, { behavior: "auto" });
 						}
+					}}
+					onBlur={(event: FocusEvent<HTMLCanvasElement>) => {
+						spacePressed.current = false;
+						props.onBlur?.(event);
 					}}
 					ref={canvasRef}
 				/>
@@ -56,6 +76,27 @@ export const Thumbnail = ({
 		</div>
 	);
 };
+
+/** An unresolved page occupies a stable row while its resource is acquired. */
+export const Thumbnail = (
+	props: HTMLProps<HTMLCanvasElement> & {
+		pageNumber?: number;
+		eager?: boolean;
+	},
+) => (
+	<PageLoadingBoundary
+		pageNumber={props.pageNumber ?? 1}
+		fallback={
+			<div
+				aria-label={`Loading page ${props.pageNumber ?? 1}`}
+				aria-busy="true"
+				style={{ minHeight: 150 }}
+			/>
+		}
+	>
+		<LoadedThumbnail {...props} />
+	</PageLoadingBoundary>
+);
 
 interface ThumbnailVirtualization {
 	/** Fixed row height in CSS pixels, including any desired space between items. */
@@ -80,6 +121,9 @@ function VirtualizedThumbnails({
 	const containerRef = useRef<HTMLDivElement>(null);
 	useImperativeHandle(ref, () => containerRef.current!);
 	const [focusPage, setFocusPage] = useState<number | null>(null);
+	const focusPageLoaded = usePdf((state) =>
+		focusPage === null ? false : state.isPageLoaded(focusPage),
+	);
 	const itemHeight = Number.isFinite(virtualize.itemHeight)
 		? Math.max(1, virtualize.itemHeight)
 		: 150;
@@ -100,7 +144,7 @@ function VirtualizedThumbnails({
 			canvas.focus({ preventScroll: true });
 			setFocusPage(null);
 		}
-	}, [focusPage, items]);
+	}, [focusPage, focusPageLoaded, items]);
 	return (
 		<Primitive.div
 			{...props}

@@ -12,6 +12,8 @@ export interface SearchResult {
 	text: string;
 	score: number;
 	matchIndex: number;
+	/** Matched UTF-16 span in the original PDF text, when different from searchText.length. */
+	matchLength?: number;
 	isExactMatch: boolean;
 	searchText?: string;
 }

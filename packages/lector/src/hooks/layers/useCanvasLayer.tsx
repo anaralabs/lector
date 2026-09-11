@@ -9,6 +9,7 @@ import {
 	applyContextRecolor,
 	removeContextRecolor,
 } from "../../lib/recolor-context";
+import { subscribeToViewportInvalidation } from "../../lib/viewport-invalidation";
 import { useDpr } from "../useDpr";
 import { usePDFPageNumber } from "../usePdfPageNumber";
 
@@ -388,8 +389,71 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 			throw error;
 		}
 
+		// Rasterizing overscan pages during a fast fling competes with the
+		// pages the reader can actually see. PDF.js exposes cooperative render
+		// continuations: hold only offscreen work while scrolling, then resume
+		// as soon as its page enters the visible range or scrolling settles.
+		// The virtualizer already tracks the range; no layout read is needed.
+		let continuation: (() => void) | null = null;
+		let idleTimer: ReturnType<typeof setTimeout> | null = null;
+		let unsubscribeViewport: (() => void) | null = null;
+		let priorityStopped = false;
+		const clearPriorityWait = () => {
+			if (idleTimer !== null) clearTimeout(idleTimer);
+			idleTimer = null;
+			unsubscribeViewport?.();
+			unsubscribeViewport = null;
+		};
+		const resumeWhenVisible = () => {
+			if (priorityStopped || !continuation) return;
+			const { virtualizer, viewportRef } = store.getState();
+			const item = virtualizer
+				?.getVirtualItems()
+				.find((candidate) => candidate.index === pageNumber - 1);
+			const offset = virtualizer?.scrollOffset;
+			const height = virtualizer?.scrollRect?.height;
+			// These are all logical PDF coordinates (the viewport observer
+			// normalizes its dimensions by zoom). Unknown geometry must render
+			// immediately rather than risk holding a visible page blank.
+			if (
+				virtualizer?.isScrolling &&
+				item &&
+				offset != null &&
+				height &&
+				(item.end < offset || item.start > offset + height)
+			) {
+				if (!unsubscribeViewport && viewportRef.current) {
+					unsubscribeViewport = subscribeToViewportInvalidation(
+						viewportRef.current,
+						resumeWhenVisible,
+					);
+				}
+				if (idleTimer === null) {
+					idleTimer = setTimeout(() => {
+						idleTimer = null;
+						resumeWhenVisible();
+					}, 160);
+				}
+				return;
+			}
+			clearPriorityWait();
+			const proceed = continuation;
+			continuation = null;
+			proceed();
+		};
+		const stopPriority = () => {
+			priorityStopped = true;
+			continuation = null;
+			clearPriorityWait();
+		};
+		renderingTask.onContinue = (proceed: () => void) => {
+			continuation = proceed;
+			resumeWhenVisible();
+		};
+
 		renderingTask.promise
 			.then(() => {
+				stopPriority();
 				if (cancelled) {
 					// Restore-without-finalize: matters for the no-buffer
 					// fallback, where renderCtx is the long-lived visible canvas
@@ -456,6 +520,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 				}
 			})
 			.catch((error) => {
+				stopPriority();
 				// Idempotent: a no-op when the fulfilled path already restored.
 				restoreRecolor?.();
 				releaseBuffer();
@@ -467,6 +532,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 		return () => {
 			cancelled = true;
+			stopPriority();
 			void renderingTask.cancel();
 		};
 	}, [
