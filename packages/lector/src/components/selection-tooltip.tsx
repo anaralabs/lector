@@ -183,6 +183,7 @@ export const SelectionTooltip = ({ children }: SelectionTooltipProps) => {
 		<>
 			{isOpen && (
 				<div
+					data-selection-tooltip=""
 					ref={refs.setFloating}
 					style={{
 						...floatingStyles,

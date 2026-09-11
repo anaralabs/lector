@@ -12,6 +12,7 @@ import {
 	DEFAULT_DARK_MODE_COLORS,
 } from "./lib/dark-mode";
 import type { PageResources } from "./lib/page-resources";
+import { PDFSelectionController } from "./lib/pdf-selection";
 import type { RenderColorMapRef } from "./lib/recolor-canvas-factory";
 import type { PageText } from "./lib/text-normalization";
 import { getFitWidthZoom } from "./lib/zoom";
@@ -43,6 +44,7 @@ export type ColoredHighlight = {
 };
 
 interface PDFState {
+	selection: PDFSelectionController;
 	pdfDocumentProxy: PDFDocumentProxy;
 
 	zoom: number;
@@ -143,6 +145,12 @@ export const PDFStore = createZustandContext(
 
 		return createStore<PDFState>((set, get) => ({
 			pdfDocumentProxy: initialState.pdfDocumentProxy,
+			selection: new PDFSelectionController({
+				pageCount: initialState.pdfDocumentProxy.numPages,
+				loadPage: (page) => get().loadPdfPageProxy(page),
+				revealPage: (page) =>
+					get().virtualizer?.scrollToIndex(page - 1, { align: "auto" }),
+			}),
 			zoom: initialState.zoom,
 			isZoomFitWidth: initialState.isZoomFitWidth ?? false,
 			zoomOptions: {

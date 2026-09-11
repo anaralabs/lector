@@ -33,6 +33,7 @@ try {
 	const html = renderToString(createElement(library.Root, { source: "test.pdf" }, "Loading"));
 	assert.equal(typeof html, "string");
 	assert.equal(typeof library.useSearch, "function");
+	assert.equal(typeof library.usePdfSelection, "function");
 	assert.equal(typeof library.usePageAnnotations, "function");
 	console.info("Packed exports, CommonJS diagnostic, ESM import and server rendering passed.");
 } finally {
