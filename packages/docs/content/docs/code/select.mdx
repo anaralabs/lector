@@ -61,6 +61,37 @@ Mount one selection tooltip per viewer, outside the repeated `Page` template. Pr
 
 `setHighlight` replaces the active highlight. The example does not accumulate selections or persist them.
 
+## Plain-text copy and quotes
+
+`Pages` handles PDF selections copied through the browser's copy event. Copied text expands Latin presentation ligatures, composes equivalent Unicode accents, and removes discretionary soft hyphens. It preserves case, accents, mathematical symbols, explicit line breaks, and page boundaries. Form fields and selections outside the viewer keep their normal copy behavior. A custom `onCopy` handler can call `preventDefault()` to take ownership.
+
+For prose, you can explicitly join single line breaks and wrapped hyphenated words:
+
+```tsx
+<Pages copyOptions={{ lineBreaks: "space", ignoreHyphenation: true }}>
+  <Page>
+    <CanvasLayer />
+    <TextLayer />
+  </Page>
+</Pages>
+```
+
+Double line breaks and boundaries between pages remain paragraph breaks. Inline compounds such as `state-of-the-art` retain their hyphens. Use `<Pages copyOptions={false}>` to retain native browser copying, including its rich-text behavior; Lector's handler writes `text/plain` only.
+
+`useSelectionDimensions()` also exposes `getText(options?)` for a quote action that does not need geometry:
+
+```tsx
+const { getText } = useSelectionDimensions();
+
+function readQuote() {
+  return getText({ lineBreaks: "space", ignoreHyphenation: true });
+}
+```
+
+Call it from the selection action's event handler. It returns `null` for an empty selection, a selection crossing viewers, multiple disjoint ranges, or a range that skips unmounted pages. It reads mounted PDF text layers only and excludes annotation controls between pages. The text returned by `getDimension`, `getSelection`, and `getAnnotationDimension` uses the same default normalization for supported selections; their existing fallback behavior remains for unsupported ranges.
+
+This preserves PDF.js's logical text order. It does not infer table structure, rearrange columns, repair a PDF with incorrect reading order, or fetch text for virtualized pages missing from the selection. If pages are missing, Lector leaves the browser copy event untouched rather than writing an incomplete reconstructed quote.
+
 ## Saving highlights
 
 For a built-in color picker, add `ColoredHighlightLayer` under `Page`. Its `onHighlight` callback receives a `ColoredHighlight` with `uuid`, `text`, `color`, `pageNumber`, and `rectangles`. Its tools use Tailwind utility classes; see [styles](/docs/installation#styles-and-pdf-assets).

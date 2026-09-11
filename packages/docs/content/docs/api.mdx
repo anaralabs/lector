@@ -37,6 +37,7 @@ The current type also contains `initialRotation`, but `Root` does not forward it
 | `Pages.virtualizerOptions` | `{ overscan: 1 }` | Extra pages mounted outside the visible range |
 | `Pages.initialOffset` | — | Initial vertical scroll offset in pixels |
 | `Pages.onOffsetChange` | — | Reports nonzero scroll offsets; zero is currently omitted |
+| `Pages.copyOptions` | Preserve line breaks | Plain-text copy settings `{ lineBreaks?: "preserve" \| "space", ignoreHyphenation?: boolean }`; `false` keeps native copying |
 | `Page.pageNumber` | `1` | One-based page number; supplied automatically by `Pages` |
 
 Both accept HTML `div` props. `Pages` supplies its own scrolling and a default height of 100%; its parent needs a definite height. `Page` establishes page-number context and owns viewport dimensions. See [layout](/docs/basic-usage#give-the-pages-room-to-scroll).
@@ -130,7 +131,7 @@ For rectangle navigation, `align` is `"start"` or `"center"` (default `"start"`)
 | `useSearch()` | Under `Root`; returns `search`, `searchAsync`, `cancelSearch`, `isSearching`, `searchResults`, `textContent`, and `keywords` (currently an empty array) |
 | `calculateHighlightRects(pageProxy, textPosition)` | Async utility returning `HighlightRect[]` for a text match |
 | `SelectionTooltip` | Under `Root`; displays children for a selection; mount once per viewer |
-| `useSelectionDimensions()` | Under `Root`; `getDimension()` reads text and rectangles, `getAnnotationDimension()` also computes underlines |
+| `useSelectionDimensions()` | Under `Root`; `getDimension()` reads text and rectangles, `getAnnotationDimension()` also computes underlines, and `getText(options?)` reads a normalized quote without geometry |
 | `usePDFPageNumber()` | Under `Page`; current one-based page number |
 | `usePageRendered(pageNumber)` | Under `Root`; reads whether that page is marked rendered |
 

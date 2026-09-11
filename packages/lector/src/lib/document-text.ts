@@ -1,7 +1,7 @@
 import type { PDFPageProxy } from "pdfjs-dist";
 import type { TextContent } from "pdfjs-dist/types/src/display/api";
+import type { PageText } from "./text-normalization";
 
-type PageText = { pageNumber: number; text: string };
 type Job = {
 	promise: Promise<PageText[]>;
 	controller: AbortController;
@@ -30,6 +30,8 @@ export function acquireDocumentText(pages: PDFPageProxy[]) {
 					.streamTextContent()
 					.getReader();
 				const chunks: string[] = [];
+				const lineBreaks: number[] = [];
+				let offset = 0;
 				let complete = false;
 				try {
 					while (true) {
@@ -39,11 +41,13 @@ export function acquireDocumentText(pages: PDFPageProxy[]) {
 							complete = true;
 							break;
 						}
-						chunks.push(
-							value.items
-								.map((item) => ("str" in item ? item.str : ""))
-								.join(""),
-						);
+						for (const item of value.items) {
+							if (!("str" in item)) continue;
+							chunks.push(item.str);
+							offset += item.str.length;
+							if (item.hasEOL && lineBreaks.at(-1) !== offset)
+								lineBreaks.push(offset);
+						}
 					}
 				} finally {
 					// PDF.js requires an Error reason; worker acknowledgements must
@@ -54,7 +58,11 @@ export function acquireDocumentText(pages: PDFPageProxy[]) {
 							.catch(() => {});
 					reader.releaseLock();
 				}
-				result[index] = { pageNumber: page.pageNumber, text: chunks.join("") };
+				result[index] = {
+					pageNumber: page.pageNumber,
+					text: chunks.join(""),
+					...(lineBreaks.length ? { lineBreaks } : {}),
+				};
 			}
 		};
 		const created: Job = {
