@@ -281,6 +281,7 @@ export const Pages = ({
 	return (
 		<Primitive.div
 			ref={containerRef}
+			tabIndex={0}
 			{...props}
 			style={{
 				display: "flex",

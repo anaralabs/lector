@@ -222,6 +222,7 @@ afterAll(() => stylesheet?.remove());
 
 test("keyboard extension restores an offscreen focus without losing its anchor", async () => {
 	const r = await reader();
+	r.viewport.focus();
 	act(() =>
 		r.api.setSelection(
 			{ pageNumber: 1, offset: 0 },
@@ -498,4 +499,80 @@ test("invalid anchors fail explicitly and never leave hidden text layers behind"
 			document.querySelectorAll('.textLayer[aria-hidden="true"]').length,
 		).toBe(0),
 	);
+});
+
+test.each([
+	["Shift-arrow", "{Shift>}{ArrowRight}{/Shift}", "ArrowRight"],
+	["Escape", "{Escape}", "Escape"],
+])(
+	"%s belongs to the focused external control, not a saved PDF selection",
+	async (_, keys, key) => {
+		const r = await reader();
+		act(() =>
+			r.api.setSelection(
+				{ pageNumber: 1, offset: 0 },
+				{ pageNumber: 1, offset: 4 },
+			),
+		);
+		const toolbar = render(<button type="button">Other page control</button>);
+		await userEvent.click(toolbar.getByRole("button"));
+		// Safari does not focus buttons on mouse clicks by default.
+		toolbar.getByRole("button").focus();
+		expect(document.activeElement).toBe(toolbar.getByRole("button"));
+		expect(r.api.getText()).toBe("Page");
+		const before = r.api.selection;
+		let prevented: boolean | undefined;
+		const observe = (event: KeyboardEvent) => {
+			if (event.key === key) prevented = event.defaultPrevented;
+		};
+		window.addEventListener("keydown", observe);
+		try {
+			await userEvent.keyboard(keys);
+			expect(prevented).toBe(false);
+			expect(r.api.selection).toEqual(before);
+		} finally {
+			window.removeEventListener("keydown", observe);
+		}
+	},
+);
+
+test("mouse selection gives the PDF viewport keyboard ownership", async () => {
+	const r = await reader();
+	await userEvent.dblClick(r.page(1)!.querySelector("span")!, {
+		position: { x: 8, y: 5 },
+	});
+	await waitFor(() => expect(r.api.getText()?.trim()).toBe("Page"));
+	expect(document.activeElement).toBe(r.viewport);
+	await userEvent.keyboard("{Shift>}{ArrowRight}{/Shift}");
+	await waitFor(() => expect(r.api.selection?.focus.offset).toBe(5));
+	await userEvent.keyboard("{Escape}");
+	await waitFor(() => expect(r.api.selection).toBeNull());
+});
+
+test("leaving the viewport cancels queued keyboard extension", async () => {
+	const r = await reader();
+	const toolbar = render(<button type="button">Other page control</button>);
+	r.viewport.focus();
+	act(() =>
+		r.api.setSelection(
+			{ pageNumber: 1, offset: 0 },
+			{ pageNumber: 1, offset: 4 },
+		),
+	);
+	const before = r.api.selection;
+	const event = new KeyboardEvent("keydown", {
+		key: "ArrowRight",
+		shiftKey: true,
+		bubbles: true,
+		cancelable: true,
+	});
+	// Move focus before the next animation frame can apply the queued key.
+	r.viewport.dispatchEvent(event);
+	expect(event.defaultPrevented).toBe(true);
+	toolbar.getByRole("button").focus();
+	await new Promise(requestAnimationFrame);
+	expect(r.api.selection).toEqual(before);
+	r.viewport.focus();
+	await userEvent.keyboard("{Shift>}{ArrowRight}{/Shift}");
+	await waitFor(() => expect(r.api.selection?.focus.offset).toBe(5));
 });

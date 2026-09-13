@@ -3,7 +3,7 @@ title: Text selection
 description: Capture selected text and page-relative rectangles with a selection action.
 ---
 
-Add `TextLayer` to make a text-based PDF selectable. Lector retains page/text anchors as pages scroll out of the DOM and restores the visible browser selection when they return. Mouse dragging autoscrolls across page boundaries. Shift-arrow keys extend an existing selection, including after its endpoint has scrolled out of view.
+Add `TextLayer` to make a text-based PDF selectable. Lector retains page/text anchors as pages scroll out of the DOM and restores the visible browser selection when they return. Mouse dragging autoscrolls across page boundaries. While focus is inside the PDF viewport, Shift-arrow keys extend an existing selection, including after its endpoint has scrolled out of view, and Escape clears it. `Pages` is keyboard-focusable by default; its `tabIndex` prop can override this. Restoring a selection programmatically does not move focus.
 
 ## Turn a selection into a highlight
 

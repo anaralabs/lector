@@ -42,3 +42,9 @@ Follow-up validation: 229 Chromium tests, all 19 selection tests in Firefox and 
 Merged main at `4080040` after PRs #163 and #167 landed. Conflict resolution preserves main's copy-boundary handling, viewport/toolbar zoom synchronization, selection geometry helpers, security dependency updates, and hosting changes alongside the persistent selection controller. Native pointer tests now use main's Vitest 4 browser API. A duplicate gesture-test block introduced by the automatic merge was removed.
 
 The integrated branch passes all 259 browser tests in Chromium, Firefox, and WebKit, 32 Node tests, six docs tests, types, library/package/SSR checks, and the docs production build. Lint retains only the two existing annotation-hook warnings. Compressed size is 58,217 bytes.
+
+## Review follow-up: keyboard focus
+
+Selection shortcuts now listen on the PDF viewport. `Pages` defaults to `tabIndex={0}`, so mouse selection and keyboard focus both support Shift-arrow extension and Escape. External controls keep their keyboard events and cannot alter the saved selection through native range changes; form-input behavior is preserved. Leaving the viewport cancels queued and pending keyboard extension. Programmatic restoration does not move focus.
+
+Four new regressions cover external Shift-arrow/Escape handling, mouse-to-keyboard selection, and cancelling a queued extension on focus loss. All 263 Chromium tests, all 23 selection tests in Firefox and WebKit, 32 Node tests, types, library build/size, and packed export/SSR checks pass. Lint retains the two existing annotation-hook warnings. Compressed size is 58,292 bytes.

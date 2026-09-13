@@ -354,7 +354,20 @@ export class PDFSelectionController {
 		return null;
 	}
 	private capture = () => {
-		const selection = this.container?.ownerDocument.getSelection();
+		const owner = this.container?.ownerDocument;
+		const active = owner?.activeElement;
+		// External controls may collapse or extend the native range on focus/keys.
+		// Keep the saved PDF selection intact while those controls own focus.
+		if (
+			active &&
+			active !== owner?.body &&
+			!this.container?.contains(active) &&
+			!active.closest(
+				'input, textarea, [contenteditable]:not([contenteditable="false"])',
+			)
+		)
+			return;
+		const selection = owner?.getSelection();
 		if (!selection || selection.rangeCount > 1) return;
 		if (
 			this.projection &&
@@ -609,7 +622,12 @@ export class PDFSelectionController {
 							),
 						)
 						.then((length) => {
-							if (generation !== this.generation || !this.container) return;
+							if (
+								controller.signal.aborted ||
+								generation !== this.generation ||
+								!this.container
+							)
+								return;
 							this.setSelection(anchor, { pageNumber: n, offset: length });
 							this.options.revealPage?.(n);
 						})
@@ -684,7 +702,21 @@ export class PDFSelectionController {
 		owner.addEventListener("pointerup", up, { signal });
 		owner.addEventListener("pointercancel", up, { signal });
 		owner.defaultView!.addEventListener("blur", up, { signal });
-		owner.addEventListener(
+		const cancelKeyboard = () => {
+			this.keyboardMoves = [];
+			this.keyboardWork?.abort();
+			this.keyboardWork = null;
+		};
+		container.addEventListener(
+			"focusout",
+			(event) => {
+				if (!container.contains(event.relatedTarget as Node | null))
+					cancelKeyboard();
+			},
+			{ signal },
+		);
+		owner.defaultView!.addEventListener("blur", cancelKeyboard, { signal });
+		container.addEventListener(
 			"keydown",
 			(event) => {
 				if (
