@@ -2,6 +2,8 @@
 
 Baseline: merged main `d9757fc`, including search fidelity and persistent selection. This pass improves search latency and responsiveness, and adds Windows regression coverage. It does not change rendering quality or claim that CPU throttling reproduces a physical old Windows laptop.
 
+The subsequent [interaction pass](INTERACTION-FEEL.md) measures and fixes wheel response, active-zoom page coverage and panning.
+
 ## Measured search improvements
 
 Chrome on macOS ARM64, 6× CPU throttling, default result limit 10. Each condition has two browser batches, each with one warm-up and seven measured samples per scenario (14 retained samples). Baseline and final batches alternate; an intermediate timer-based candidate was rejected. Medians below include cold search normalization, but exclude PDF loading and initial text extraction.

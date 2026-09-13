@@ -96,7 +96,7 @@ describe("gesture frame scheduling", () => {
 		document.body.replaceChildren();
 		vi.restoreAllMocks();
 	});
-	function setup() {
+	function setup(wheel = false) {
 		state.zoom = 1;
 		state.isPinching = false;
 		state.setIsPinching.mockImplementation((value: boolean) => {
@@ -112,7 +112,7 @@ describe("gesture frame scheduling", () => {
 			origin: [150, 150],
 			movement: [1, 0],
 			delta: [0, 0],
-			event: {},
+			event: wheel ? new WheelEvent("wheel") : {},
 			memo: undefined,
 		};
 		const memo = handlers.onPinch!(first as never);
@@ -120,10 +120,11 @@ describe("gesture frame scheduling", () => {
 			...fixtureState,
 			rerender: hook.rerender,
 			handlers,
-			move: (scale: number) =>
+			move: (scale: number, origin = first.origin) =>
 				handlers.onPinch!({
 					...first,
 					first: false,
+					origin,
 					memo,
 					movement: [scale, 0],
 				} as never),
@@ -196,6 +197,56 @@ describe("gesture frame scheduling", () => {
 		expect(writes).toHaveBeenCalledTimes(1);
 		expect(state.updateZoom).not.toHaveBeenCalled();
 	});
+	it("follows the moving pinch midpoint while zooming and panning", async () => {
+		const { container, move } = setup();
+		move(2, [120, 100]);
+		await act(
+			() =>
+				new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+		);
+		expect(container.scrollLeft).toBeCloseTo(180, 0);
+		expect(container.scrollTop).toBeCloseTo(200, 0);
+	});
+	it("allows horizontal trackpad panning immediately after wheel zoom", () => {
+		const { container } = setup();
+		container.dispatchEvent(
+			new WheelEvent("wheel", {
+				deltaY: -10,
+				ctrlKey: true,
+				cancelable: true,
+			}),
+		);
+		const pan = new WheelEvent("wheel", {
+			deltaX: 20,
+			deltaY: 0,
+			cancelable: true,
+		});
+		container.dispatchEvent(pan);
+		expect(pan.defaultPrevented).toBe(false);
+	});
+	it.each([false, true])(
+		"zooms around the new wheel pointer without treating cursor movement as a pan (pending=%s)",
+		async (pending) => {
+			const { container, move } = setup(true);
+			move(2);
+			if (!pending)
+				await act(
+					() =>
+						new Promise<void>((resolve) =>
+							requestAnimationFrame(() => resolve()),
+						),
+				);
+			move(3, [180, 200]);
+			await act(
+				() =>
+					new Promise<void>((resolve) =>
+						requestAnimationFrame(() => resolve()),
+					),
+			);
+			expect(container.scrollLeft).toBeCloseTo(315, 0);
+			expect(container.scrollTop).toBeCloseTo(325, 0);
+		},
+	);
 	it("discards queued work on unmount", async () => {
 		const { container, move } = setup();
 		const writes = vi.spyOn(container, "scrollTop", "set");

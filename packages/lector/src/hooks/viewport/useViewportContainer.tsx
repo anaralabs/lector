@@ -260,6 +260,13 @@ export const useViewportContainer = ({
 				return;
 			}
 
+			// Pinch-wheel inertia is vertical. A horizontal-dominant gesture
+			// is an intentional pan, even immediately after releasing Ctrl.
+			if (Math.abs(event.deltaX) > abs) {
+				st.active = false;
+				return;
+			}
+
 			if (now - st.lastTime > WHEEL_INERTIA_GAP_MS) {
 				st.active = false;
 				return;
@@ -334,13 +341,14 @@ export const useViewportContainer = ({
 						contentPosition,
 						containerPosition,
 						originZoom: currentZoom,
+						origin: [...origin] as [number, number],
 						lastZoom: currentZoom,
 					};
 				});
 
-				if (first) {
-					return newMemo;
-				}
+				// Wheel gestures include a scale delta in their first event. Apply
+				// it on the next frame instead of waiting for another event or end.
+				if (first && ms === 1) return newMemo;
 
 				const gestureValuesValid = Number.isFinite(ms) && ms > 0;
 
@@ -364,12 +372,28 @@ export const useViewportContainer = ({
 					minZoom,
 					maxZoom,
 				);
+				// A moving touch midpoint pans the anchored content. A wheel
+				// pointer instead chooses a new content anchor at the previous
+				// scale, including updates still queued for the next paint.
+				if (event.type === "wheel") {
+					const previousScale = newMemo.lastZoom / newMemo.originZoom;
+					for (const axis of [0, 1] as const) {
+						const movement = origin[axis] - newMemo.origin[axis];
+						newMemo.contentPosition[axis] += movement / previousScale;
+						newMemo.containerPosition[axis] += movement;
+						newMemo.origin[axis] = origin[axis];
+					}
+				}
 				const realMs = newZoom / newMemo.originZoom;
 
 				const newTranslateX =
-					newMemo.contentPosition[0] * realMs - newMemo.containerPosition[0];
+					newMemo.contentPosition[0] * realMs -
+					newMemo.containerPosition[0] -
+					(origin[0] - newMemo.origin[0]);
 				const newTranslateY =
-					newMemo.contentPosition[1] * realMs - newMemo.containerPosition[1];
+					newMemo.contentPosition[1] * realMs -
+					newMemo.containerPosition[1] -
+					(origin[1] - newMemo.origin[1]);
 
 				transformations.current = {
 					zoom: newZoom,

@@ -108,4 +108,4 @@ Keep the PR focused, and mention any validation you could not complete. Do not i
 
 ### Low-end performance measurements
 
-See [LOW-END-PERFORMANCE.md](LOW-END-PERFORMANCE.md) for the 6× CPU search benchmark, real-PDF scroll/zoom stress, raw samples, and reproduction steps. Run timing benchmarks separately from builds and other browser tests. CI also exercises Chromium and Firefox on Windows; CPU throttling is not a substitute for profiling physical low-end hardware.
+See [LOW-END-PERFORMANCE.md](LOW-END-PERFORMANCE.md) and [INTERACTION-FEEL.md](INTERACTION-FEEL.md) for the 6× CPU search benchmark, real-PDF scroll/zoom stress, raw samples, and reproduction steps. Run timing benchmarks separately from builds and other browser tests. CI also exercises Chromium and Firefox on Windows; CPU throttling is not a substitute for profiling physical low-end hardware.

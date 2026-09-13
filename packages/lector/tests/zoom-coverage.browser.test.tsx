@@ -83,7 +83,8 @@ for (const initialZoom of [0.25, 0.5, 1, 2]) {
 				);
 				expect(mounted).toEqual(expect.arrayContaining(expected));
 				// Keep virtualization bounded as zoom changes in either direction.
-				expect(mounted.length).toBeLessThanOrEqual(expected.length + 2);
+				if (!state.isPinching)
+					expect(mounted.length).toBeLessThanOrEqual(expected.length + 2);
 			});
 		};
 		await verifyCoverage();
@@ -94,7 +95,11 @@ for (const initialZoom of [0.25, 0.5, 1, 2]) {
 			expect(store.getState().virtualizer?.scrollOffset).toBeGreaterThan(0),
 		);
 		await verifyCoverage();
+		// Keep the gesture active: newly revealed pages must mount before pinch end.
+		act(() => store.getState().setIsPinching(true));
 		act(() => store.getState().updateZoom(initialZoom === 0.25 ? 2 : 0.25));
+		await verifyCoverage();
+		act(() => store.getState().setIsPinching(false));
 		await act(async () => {
 			await new Promise((resolve) => setTimeout(resolve, 250));
 		});

@@ -222,7 +222,17 @@ export const Pages = ({
 	}, [isPinching, virtualizer?.measure, virtualizer?.getVirtualItems]);
 
 	const virtualizerItems = virtualizer?.getVirtualItems() ?? [];
-	const items = tempItems.length ? tempItems : virtualizerItems;
+	// Keep the gesture's existing page positions, but also mount pages newly
+	// exposed by zooming out or panning. A frozen list leaves visible holes
+	// until the gesture ends, regardless of how quickly the PDF can render.
+	const items = useMemo(() => {
+		if (!tempItems.length) return virtualizerItems;
+		const combined = new Map(
+			virtualizerItems.map((item) => [item.index, item]),
+		);
+		for (const item of tempItems) combined.set(item.index, item);
+		return [...combined.values()].sort((a, b) => a.index - b.index);
+	}, [tempItems, virtualizerItems]);
 
 	useVisiblePage({
 		items,

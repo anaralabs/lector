@@ -1,0 +1,379 @@
+{
+  "baselineCommit": "72cc84a",
+  "date": "2026-09-13",
+  "environment": "macOS ARM64; Chrome 153; Playwright headless; desktop DPR 1; 6x CDP CPU throttle",
+  "batches": {
+    "before": {
+      "cpuRate": 6,
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+      "scrollFrames": 90,
+      "scrollStepPx": 24,
+      "warmupTrialsPerPdf": 1,
+      "rows": [
+        {
+          "name": "large",
+          "trial": 0,
+          "firstCanvasMs": 2910.100000023842,
+          "scrollP95Ms": 20.399999976158142,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 149,
+          "missingPagesDuringZoom": [
+            7,
+            8
+          ]
+        },
+        {
+          "name": "large",
+          "trial": 1,
+          "firstCanvasMs": 214,
+          "scrollP95Ms": 20.399999976158142,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 144.20000004768372,
+          "missingPagesDuringZoom": [
+            7,
+            8
+          ]
+        },
+        {
+          "name": "large",
+          "trial": 2,
+          "firstCanvasMs": 203,
+          "scrollP95Ms": 18.700000047683716,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 145.19999992847443,
+          "missingPagesDuringZoom": [
+            7,
+            8
+          ]
+        },
+        {
+          "name": "large",
+          "trial": 3,
+          "firstCanvasMs": 192.5,
+          "scrollP95Ms": 18.399999976158142,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 144.10000002384186,
+          "missingPagesDuringZoom": [
+            7,
+            8
+          ]
+        },
+        {
+          "name": "expensive",
+          "trial": 0,
+          "firstCanvasMs": 363.5,
+          "scrollP95Ms": 29.299999952316284,
+          "scrollFramesOver32Ms": 4,
+          "wheelResponseMs": 152.60000002384186,
+          "missingPagesDuringZoom": [
+            6,
+            7
+          ]
+        },
+        {
+          "name": "expensive",
+          "trial": 1,
+          "firstCanvasMs": 310.8000000715256,
+          "scrollP95Ms": 30.899999976158142,
+          "scrollFramesOver32Ms": 3,
+          "wheelResponseMs": 158,
+          "missingPagesDuringZoom": [
+            6,
+            7
+          ]
+        },
+        {
+          "name": "expensive",
+          "trial": 2,
+          "firstCanvasMs": 242.70000004768372,
+          "scrollP95Ms": 29.399999976158142,
+          "scrollFramesOver32Ms": 4,
+          "wheelResponseMs": 150.39999997615814,
+          "missingPagesDuringZoom": [
+            6,
+            7
+          ]
+        },
+        {
+          "name": "expensive",
+          "trial": 3,
+          "firstCanvasMs": 254.30000007152557,
+          "scrollP95Ms": 26.5,
+          "scrollFramesOver32Ms": 4,
+          "wheelResponseMs": 151.19999992847443,
+          "missingPagesDuringZoom": [
+            6,
+            7
+          ]
+        }
+      ]
+    },
+    "final": {
+      "cpuRate": 6,
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+      "scrollFrames": 90,
+      "scrollStepPx": 24,
+      "warmupTrialsPerPdf": 1,
+      "rows": [
+        {
+          "name": "large",
+          "trial": 0,
+          "firstCanvasMs": 860.5,
+          "scrollP95Ms": 20.5,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 16.5,
+          "missingPagesDuringZoom": []
+        },
+        {
+          "name": "large",
+          "trial": 1,
+          "firstCanvasMs": 245.79999995231628,
+          "scrollP95Ms": 20.199999928474426,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 9.5,
+          "missingPagesDuringZoom": []
+        },
+        {
+          "name": "large",
+          "trial": 2,
+          "firstCanvasMs": 224.60000002384186,
+          "scrollP95Ms": 19.700000047683716,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 9.800000071525574,
+          "missingPagesDuringZoom": []
+        },
+        {
+          "name": "large",
+          "trial": 3,
+          "firstCanvasMs": 320.2999999523163,
+          "scrollP95Ms": 21,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 11.299999952316284,
+          "missingPagesDuringZoom": []
+        },
+        {
+          "name": "expensive",
+          "trial": 0,
+          "firstCanvasMs": 840.6000000238419,
+          "scrollP95Ms": 36.700000047683716,
+          "scrollFramesOver32Ms": 7,
+          "wheelResponseMs": 46.199999928474426,
+          "missingPagesDuringZoom": []
+        },
+        {
+          "name": "expensive",
+          "trial": 1,
+          "firstCanvasMs": 350.7000000476837,
+          "scrollP95Ms": 34,
+          "scrollFramesOver32Ms": 5,
+          "wheelResponseMs": 32.299999952316284,
+          "missingPagesDuringZoom": []
+        },
+        {
+          "name": "expensive",
+          "trial": 2,
+          "firstCanvasMs": 365.89999997615814,
+          "scrollP95Ms": 30.799999952316284,
+          "scrollFramesOver32Ms": 4,
+          "wheelResponseMs": 18.199999928474426,
+          "missingPagesDuringZoom": []
+        },
+        {
+          "name": "expensive",
+          "trial": 3,
+          "firstCanvasMs": 1113.6000000238419,
+          "scrollP95Ms": 35.799999952316284,
+          "scrollFramesOver32Ms": 6,
+          "wheelResponseMs": 41.300000071525574,
+          "missingPagesDuringZoom": []
+        }
+      ]
+    },
+    "before-2": {
+      "cpuRate": 6,
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+      "scrollFrames": 90,
+      "scrollStepPx": 24,
+      "warmupTrialsPerPdf": 1,
+      "rows": [
+        {
+          "name": "large",
+          "trial": 0,
+          "firstCanvasMs": 1096.7999999523163,
+          "scrollP95Ms": 20.799999952316284,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 152.70000004768372,
+          "missingPagesDuringZoom": [
+            7,
+            8
+          ]
+        },
+        {
+          "name": "large",
+          "trial": 1,
+          "firstCanvasMs": 233.19999992847443,
+          "scrollP95Ms": 21.5,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 143.5,
+          "missingPagesDuringZoom": [
+            7,
+            8
+          ]
+        },
+        {
+          "name": "large",
+          "trial": 2,
+          "firstCanvasMs": 226.89999997615814,
+          "scrollP95Ms": 18.5,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 145.79999995231628,
+          "missingPagesDuringZoom": [
+            7,
+            8
+          ]
+        },
+        {
+          "name": "large",
+          "trial": 3,
+          "firstCanvasMs": 219.39999997615814,
+          "scrollP95Ms": 18.799999952316284,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 144.39999997615814,
+          "missingPagesDuringZoom": [
+            7,
+            8
+          ]
+        },
+        {
+          "name": "expensive",
+          "trial": 0,
+          "firstCanvasMs": 378.59999990463257,
+          "scrollP95Ms": 32.799999952316284,
+          "scrollFramesOver32Ms": 5,
+          "wheelResponseMs": 162.29999995231628,
+          "missingPagesDuringZoom": [
+            6,
+            7
+          ]
+        },
+        {
+          "name": "expensive",
+          "trial": 1,
+          "firstCanvasMs": 367.60000002384186,
+          "scrollP95Ms": 31.800000071525574,
+          "scrollFramesOver32Ms": 4,
+          "wheelResponseMs": 152.39999997615814,
+          "missingPagesDuringZoom": [
+            6,
+            7
+          ]
+        },
+        {
+          "name": "expensive",
+          "trial": 2,
+          "firstCanvasMs": 344.39999997615814,
+          "scrollP95Ms": 32.10000002384186,
+          "scrollFramesOver32Ms": 5,
+          "wheelResponseMs": 151,
+          "missingPagesDuringZoom": [
+            6,
+            7
+          ]
+        },
+        {
+          "name": "expensive",
+          "trial": 3,
+          "firstCanvasMs": 333.09999990463257,
+          "scrollP95Ms": 36.699999928474426,
+          "scrollFramesOver32Ms": 9,
+          "wheelResponseMs": 152.79999995231628,
+          "missingPagesDuringZoom": [
+            6,
+            7
+          ]
+        }
+      ]
+    },
+    "final-2": {
+      "cpuRate": 6,
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+      "scrollFrames": 90,
+      "scrollStepPx": 24,
+      "warmupTrialsPerPdf": 1,
+      "rows": [
+        {
+          "name": "large",
+          "trial": 0,
+          "firstCanvasMs": 893.4000000953674,
+          "scrollP95Ms": 20.100000023841858,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 13.299999952316284,
+          "missingPagesDuringZoom": []
+        },
+        {
+          "name": "large",
+          "trial": 1,
+          "firstCanvasMs": 204.10000002384186,
+          "scrollP95Ms": 18.59999990463257,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 12.299999952316284,
+          "missingPagesDuringZoom": []
+        },
+        {
+          "name": "large",
+          "trial": 2,
+          "firstCanvasMs": 218.10000002384186,
+          "scrollP95Ms": 19.399999976158142,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 7.899999976158142,
+          "missingPagesDuringZoom": []
+        },
+        {
+          "name": "large",
+          "trial": 3,
+          "firstCanvasMs": 199.70000004768372,
+          "scrollP95Ms": 18.700000047683716,
+          "scrollFramesOver32Ms": 0,
+          "wheelResponseMs": 7.600000023841858,
+          "missingPagesDuringZoom": []
+        },
+        {
+          "name": "expensive",
+          "trial": 0,
+          "firstCanvasMs": 361.7999999523163,
+          "scrollP95Ms": 30.700000047683716,
+          "scrollFramesOver32Ms": 3,
+          "wheelResponseMs": 23.700000047683716,
+          "missingPagesDuringZoom": []
+        },
+        {
+          "name": "expensive",
+          "trial": 1,
+          "firstCanvasMs": 284.60000002384186,
+          "scrollP95Ms": 27.800000071525574,
+          "scrollFramesOver32Ms": 1,
+          "wheelResponseMs": 15,
+          "missingPagesDuringZoom": []
+        },
+        {
+          "name": "expensive",
+          "trial": 2,
+          "firstCanvasMs": 260.10000002384186,
+          "scrollP95Ms": 29.600000023841858,
+          "scrollFramesOver32Ms": 4,
+          "wheelResponseMs": 15.700000047683716,
+          "missingPagesDuringZoom": []
+        },
+        {
+          "name": "expensive",
+          "trial": 3,
+          "firstCanvasMs": 269.60000002384186,
+          "scrollP95Ms": 29.299999952316284,
+          "scrollFramesOver32Ms": 2,
+          "wheelResponseMs": 15.200000047683716,
+          "missingPagesDuringZoom": []
+        }
+      ]
+    }
+  }
+}
