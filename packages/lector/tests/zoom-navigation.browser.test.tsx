@@ -166,3 +166,49 @@ it.each([
 		expect(() => store.getState().updateZoom(1)).not.toThrow();
 	},
 );
+
+it("responds to the first wheel zoom event before the gesture settles", async () => {
+	let store!: ReturnType<typeof PDFStore.useContext>;
+	function Probe() {
+		store = PDFStore.useContext();
+		return null;
+	}
+	const result = render(
+		<PDFStore.Provider
+			initialValue={{
+				pdfDocumentProxy: { numPages: 1 } as PDFDocumentProxy,
+				pageProxies: [
+					{ pageNumber: 1, view: [0, 0, 600, 800] },
+				] as PDFPageProxy[],
+				viewports: [{ width: 600, height: 800 }] as PageViewport[],
+				zoom: 1,
+			}}
+		>
+			<Probe />
+			<Pages data-testid="viewport" style={{ height: 500, width: 400 }}>
+				<Page>
+					<span>Page</span>
+				</Page>
+			</Pages>
+		</PDFStore.Provider>,
+	);
+	const viewport = result.getByTestId("viewport");
+	act(() =>
+		viewport.dispatchEvent(
+			new WheelEvent("wheel", {
+				deltaY: -30,
+				ctrlKey: true,
+				clientX: 150,
+				clientY: 150,
+				bubbles: true,
+				cancelable: true,
+			}),
+		),
+	);
+	await act(
+		() =>
+			new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+	);
+	expect(store.getState().isPinching).toBe(true);
+	expect(store.getState().zoom).toBeGreaterThan(1);
+});

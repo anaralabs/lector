@@ -66,9 +66,36 @@ jobs:
       - name: Check types, unit tests, browser regressions and bundle size
         run: pnpm --filter @anaralabs/lector test
 
+  windows-test:
+    name: Windows library tests (${{ matrix.browser }})
+    runs-on: windows-2022
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+    env:
+      LECTOR_TEST_BROWSER: ${{ matrix.browser }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @anaralabs/lector exec playwright install ${{ matrix.browser }}
+      # Fresh checkout: invoke the bundler without the Unix prebuild shell command.
+      # Packed-artifact/SSR checks remain covered by the Linux matrix above.
+      - run: pnpm --filter @anaralabs/lector exec tsup
+      - run: pnpm --filter @anaralabs/lector test:types
+      - run: pnpm --filter @anaralabs/lector test:unit
+      - run: pnpm --filter @anaralabs/lector test:browser
+      - run: pnpm --filter @anaralabs/lector test:size
+
   release:
     name: Release
-    needs: [lint, test]
+    needs: [lint, test, windows-test]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:

@@ -105,3 +105,7 @@ Describe the problem, the resulting behavior, and the checks you ran. For render
 This repository uses conventional commit messages. Documentation commits use the **`doc`** type, for example `doc: improve PDF worker setup`. The allowed types are defined in the root `package.json`; `docs` is not currently in that list.
 
 Keep the PR focused, and mention any validation you could not complete. Do not include private PDFs, credentials, generated build output, or unrelated local changes.
+
+### Low-end performance measurements
+
+See [LOW-END-PERFORMANCE.md](LOW-END-PERFORMANCE.md) and [INTERACTION-FEEL.md](INTERACTION-FEEL.md) for the 6× CPU search benchmark, real-PDF scroll/zoom stress, raw samples, and reproduction steps. Run timing benchmarks separately from builds and other browser tests. CI also exercises Chromium and Firefox on Windows; CPU throttling is not a substitute for profiling physical low-end hardware.

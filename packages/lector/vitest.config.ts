@@ -18,6 +18,8 @@ export default defineConfig({
 	optimizeDeps: {
 		include: [
 			"react/jsx-dev-runtime",
+			"@testing-library/react",
+			"zustand",
 			"pdfjs-dist/legacy/build/pdf.mjs",
 			"clsx",
 			"@tanstack/react-virtual",
@@ -25,6 +27,7 @@ export default defineConfig({
 			"@use-gesture/react",
 			"@floating-ui/react",
 			"zustand/react/shallow",
+			"zustand/vanilla",
 		],
 	},
 	test: {
@@ -36,6 +39,11 @@ export default defineConfig({
 		],
 		browser: {
 			enabled: true,
+			// Windows runners can reserve Vitest's default high port (63315).
+			api:
+				process.platform === "win32"
+					? { host: "127.0.0.1", port: 3100 }
+					: undefined,
 			commands: { selectionPointer },
 			provider: playwright({
 				launchOptions: {

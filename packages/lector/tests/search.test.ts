@@ -1,5 +1,9 @@
-import { expect, test } from "vitest";
-import { createBoundedDistance, searchDocument } from "../src/lib/search";
+import { expect, test, vi } from "vitest";
+import {
+	createBoundedDistance,
+	searchDocument,
+	searchDocumentAsync,
+} from "../src/lib/search";
 
 function referenceDistance(a: string, b: string): number {
 	const matrix = Array.from({ length: b.length + 1 }, (_, i) =>
@@ -91,3 +95,65 @@ test("Unicode case expansion preserves original offsets, snippets and match leng
 			.exactMatches[0]?.matchIndex,
 	).toBe(2);
 });
+
+test("exact search stops after proving the result budget is exceeded", () => {
+	const pages = [
+		{ pageNumber: 1, text: "ofﬁce ".repeat(11) },
+		{
+			pageNumber: 2,
+			get text(): string {
+				throw new Error("Unneeded page was indexed");
+			},
+		},
+	];
+	const result = searchDocument(pages, "office", { threshold: 1 });
+	expect(result.exactMatches.map((match) => match.matchIndex)).toEqual([
+		0, 6, 12, 18, 24, 30, 36, 42, 48, 54,
+	]);
+	expect(result.hasMoreResults).toBe(true);
+});
+
+test("exact result budgets distinguish exhausted results and deduplicated glyphs", () => {
+	for (const limit of [0, 1, 2, 3]) {
+		const result = searchDocument([{ pageNumber: 1, text: "ﬀ ﬀ" }], "f", {
+			threshold: 1,
+			limit,
+		});
+		expect(result.exactMatches.map((match) => match.matchIndex)).toEqual(
+			[0, 2].slice(0, limit),
+		);
+		expect(result.hasMoreResults).toBe(2 > limit);
+	}
+});
+
+test.each([true, false])(
+	"absent async queries yield and cancel with MessageChannel %s",
+	async (channelAvailable) => {
+		if (!channelAvailable) vi.stubGlobal("MessageChannel", undefined);
+		let clock = 0;
+		const inspected = new Set<number>();
+		const now = vi.spyOn(performance, "now").mockImplementation(() => clock);
+		const pages = Array.from({ length: 64 }, (_, index) => ({
+			pageNumber: index + 1,
+			get text() {
+				clock += 3;
+				inspected.add(index);
+				return "Text without the target";
+			},
+		}));
+		const controller = new AbortController();
+		try {
+			const pending = searchDocumentAsync(pages, "missing", {
+				threshold: 1,
+				signal: controller.signal,
+			});
+			const caught = pending.catch((error) => error);
+			controller.abort();
+			expect(inspected.size).toBeLessThan(pages.length);
+			expect(await caught).toMatchObject({ name: "AbortError" });
+		} finally {
+			now.mockRestore();
+			vi.unstubAllGlobals();
+		}
+	},
+);

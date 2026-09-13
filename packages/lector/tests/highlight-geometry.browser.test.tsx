@@ -114,84 +114,95 @@ test("a search spanning separate PDF columns does not paint the gutter", async (
 	}
 });
 
-test("partial matches follow the PDF.js selectable text layer across fallback fonts", async () => {
-	const pdfjs = await loadPdfJs();
-	pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-		"../node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs",
-		import.meta.url,
-	).href;
-	const tasks = ["iiiiWWWW", "iiii"].map((text) =>
-		pdfjs.getDocument({
-			data: createTextGeometryPdf({
-				operators: `BT /F1 20 Tf 1 0 0 1 100 500 Tm (${text}) Tj ET`,
+test.each([false, true])(
+	"partial matches follow PDF.js fallback fonts (override: %s)",
+	async (override) => {
+		const pdfjs = await loadPdfJs();
+		pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+			"../node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs",
+			import.meta.url,
+		).href;
+		const fontMap = pdfjs.TextLayer.fontFamilyMap as Map<string, string>;
+		const previousFamily = fontMap.get("sans-serif");
+		if (override) fontMap.set("sans-serif", "monospace");
+		const tasks = ["iiiiWWWW", "iiii"].map((text) =>
+			pdfjs.getDocument({
+				data: createTextGeometryPdf({
+					operators: `BT /F1 20 Tf 1 0 0 1 100 500 Tm (${text}) Tj ET`,
+				}),
 			}),
-		}),
-	);
-	const stylesheet = document.createElement("link");
-	stylesheet.rel = "stylesheet";
-	stylesheet.href = new URL(
-		"../node_modules/pdfjs-dist/web/pdf_viewer.css",
-		import.meta.url,
-	).href;
-	const container = document.createElement("div");
-	container.className = "textLayer";
-	container.style.position = "relative";
-	container.style.setProperty("--scale-factor", "1");
-	container.style.setProperty("--total-scale-factor", "1");
-	try {
-		await new Promise<void>((resolve, reject) => {
-			stylesheet.onload = () => resolve();
-			stylesheet.onerror = () =>
-				reject(new Error("PDF.js text-layer stylesheet failed to load"));
-			document.head.append(stylesheet);
-		});
-		document.body.append(container);
-		const [page, reference] = await Promise.all(
-			tasks.map(async (task) => (await task.promise).getPage(1)),
 		);
-		const expected = (await readTextItems(reference!)).find(
-			(item) => "str" in item && item.str === "iiii",
-		);
-		if (!expected || !("width" in expected))
-			throw new Error("Missing reference glyphs");
-		const layer = new pdfjs.TextLayer({
-			container,
-			viewport: page!.getViewport({ scale: 1 }),
-			textContentSource: page!.streamTextContent(),
-		});
-		await layer.render();
-		const span = [...container.querySelectorAll("span")].find(
-			(element) => element.textContent === "iiiiWWWW",
-		);
-		if (!span?.firstChild) throw new Error("Missing selectable text");
-		const range = document.createRange();
-		range.setStart(span.firstChild, 0);
-		range.setEnd(span.firstChild, 4);
-		const selectionWidth = range.getBoundingClientRect().width;
-		expect(selectionWidth).toBeGreaterThan(0);
-		const rects = await calculateHighlightRects(page!, {
-			pageNumber: 1,
-			text: "iiii",
-			matchIndex: 0,
-		});
-		expect(rects[0]!.left).toBeCloseTo(100, 1);
-		// Compare with real browser selection geometry, not a second copy of
-		// measureText. PDF.js uses platform fallback fonts for selectable text;
-		// their advances need not equal the PDF's native Helvetica metrics.
-		const textLayerError = Math.abs(rects[0]!.width - selectionWidth);
-		expect(textLayerError).toBeLessThan(1);
-		const equalCharacterWidth = span.getBoundingClientRect().width / 2;
-		expect(Math.abs(equalCharacterWidth - selectionWidth)).toBeGreaterThan(20);
-		console.info(
-			`FIDELITY proportional-width ${JSON.stringify({
-				textLayerError,
-				nativeHelveticaError: Math.abs(rects[0]!.width - expected.width),
-				fontFamily: getComputedStyle(span).fontFamily,
-			})}`,
-		);
-	} finally {
-		container.remove();
-		stylesheet.remove();
-		await Promise.all(tasks.map((task) => task.destroy()));
-	}
-});
+		const stylesheet = document.createElement("link");
+		stylesheet.rel = "stylesheet";
+		stylesheet.href = new URL(
+			"../node_modules/pdfjs-dist/web/pdf_viewer.css",
+			import.meta.url,
+		).href;
+		const container = document.createElement("div");
+		container.className = "textLayer";
+		container.style.position = "relative";
+		container.style.setProperty("--scale-factor", "1");
+		container.style.setProperty("--total-scale-factor", "1");
+		try {
+			await new Promise<void>((resolve, reject) => {
+				stylesheet.onload = () => resolve();
+				stylesheet.onerror = () =>
+					reject(new Error("PDF.js text-layer stylesheet failed to load"));
+				document.head.append(stylesheet);
+			});
+			document.body.append(container);
+			const [page, reference] = await Promise.all(
+				tasks.map(async (task) => (await task.promise).getPage(1)),
+			);
+			const expected = (await readTextItems(reference!)).find(
+				(item) => "str" in item && item.str === "iiii",
+			);
+			if (!expected || !("width" in expected))
+				throw new Error("Missing reference glyphs");
+			const layer = new pdfjs.TextLayer({
+				container,
+				viewport: page!.getViewport({ scale: 1 }),
+				textContentSource: page!.streamTextContent(),
+			});
+			await layer.render();
+			const span = [...container.querySelectorAll("span")].find(
+				(element) => element.textContent === "iiiiWWWW",
+			);
+			if (!span?.firstChild) throw new Error("Missing selectable text");
+			const range = document.createRange();
+			range.setStart(span.firstChild, 0);
+			range.setEnd(span.firstChild, 4);
+			const selectionWidth = range.getBoundingClientRect().width;
+			expect(selectionWidth).toBeGreaterThan(0);
+			const rects = await calculateHighlightRects(page!, {
+				pageNumber: 1,
+				text: "iiii",
+				matchIndex: 0,
+			});
+			expect(rects[0]!.left).toBeCloseTo(100, 1);
+			// Compare with real browser selection geometry, not a second copy of
+			// measureText. PDF.js uses platform fallback fonts for selectable text;
+			// their advances need not equal the PDF's native Helvetica metrics.
+			const textLayerError = Math.abs(rects[0]!.width - selectionWidth);
+			expect(textLayerError).toBeLessThan(1);
+			const equalCharacterWidth = span.getBoundingClientRect().width / 2;
+			if (!override)
+				expect(Math.abs(equalCharacterWidth - selectionWidth)).toBeGreaterThan(
+					20,
+				);
+			console.info(
+				`FIDELITY proportional-width ${JSON.stringify({
+					textLayerError,
+					nativeHelveticaError: Math.abs(rects[0]!.width - expected.width),
+					fontFamily: getComputedStyle(span).fontFamily,
+				})}`,
+			);
+		} finally {
+			if (previousFamily === undefined) fontMap.delete("sans-serif");
+			else fontMap.set("sans-serif", previousFamily);
+			container.remove();
+			stylesheet.remove();
+			await Promise.all(tasks.map((task) => task.destroy()));
+		}
+	},
+);

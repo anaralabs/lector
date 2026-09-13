@@ -6,6 +6,7 @@ import type {
 } from "pdfjs-dist/types/src/display/api";
 
 import type { HighlightRect } from "../../internal";
+import { loadPdfJs } from "../../lib/pdfjs";
 import type { SearchResult } from "./useSearch";
 
 interface TextPosition {
@@ -52,10 +53,22 @@ export async function calculateHighlightRects(
 				const start = Math.max(0, textMatch.matchIndex - offset);
 				const end = Math.min(length, matchEnd - offset);
 				if (end > start && item.str.slice(start, end).trim()) {
+					let style = styles[item.fontName];
+					if (
+						style?.fontFamily &&
+						!style.vertical &&
+						(start > 0 || end < length)
+					) {
+						// PDF.js substitutes platform-specific text-layer families (e.g.
+						// Calibri on Windows Firefox). Measure that same fallback font.
+						const { TextLayer } = await loadPdfJs();
+						const fontFamily = TextLayer.fontFamilyMap.get(style.fontFamily);
+						if (fontFamily) style = { ...style, fontFamily };
+					}
 					matchRects.push(
 						getItemRect(
 							item,
-							styles[item.fontName],
+							style,
 							viewport,
 							start,
 							end,

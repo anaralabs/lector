@@ -120,11 +120,24 @@ export function normalizeUnicode(text: string, matchDiacritics = true) {
 
 let segmenter: Intl.Segmenter | undefined;
 function* unicodeReplacements(text: string, matchDiacritics: boolean) {
-	segmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" });
 	// Segment only non-ASCII runs and their possible ASCII base character.
 	// One accent near the end of a long page must not segment every word.
 	for (const match of text.matchAll(/\p{ASCII}?\P{ASCII}+/gu)) {
 		if (normalizeUnicode(match[0], matchDiacritics) === match[0]) continue;
+		// An isolated presentation ligature is one grapheme even when the
+		// regex includes its preceding ASCII character. Avoid Segmenter work
+		// for this common PDF case; combining marks keep the full path below.
+		const prefix = match[0].charCodeAt(0) < 128 ? 1 : 0;
+		const code = match[0].charCodeAt(prefix);
+		if (match[0].length === prefix + 1 && code >= 0xfb00 && code <= 0xfb06) {
+			yield {
+				index: match.index + prefix,
+				length: 1,
+				text: ligatures[code - 0xfb00]!,
+			};
+			continue;
+		}
+		segmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" });
 		for (const { segment, index } of segmenter.segment(match[0])) {
 			yield {
 				index: match.index + index,

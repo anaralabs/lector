@@ -208,3 +208,18 @@ test("mapping storage follows changed runs, not the number of ordinary character
 	const normalized = normalizeSearchText(text, {}, [5000, 10000, 15000]);
 	expect(normalized.maps.flat().length).toBeLessThanOrEqual(6);
 });
+
+test("ligature fast paths retain adjacent ASCII and combining-mark glyph spans", () => {
+	for (const [text, query, index, length] of [
+		["aﬃ!", "ffi", 1, 1],
+		["aﬃ\u0301!", "ffí", 1, 2],
+		["a\u0301ﬃ!", "ffi", 2, 1],
+		["ﬃﬃ!", "ffiffi", 0, 2],
+	] as const) {
+		const match = searchDocument([{ pageNumber: 1, text }], query, {
+			threshold: 1,
+		}).exactMatches[0]!;
+		expect(match.matchIndex).toBe(index);
+		expect(match.matchLength ?? query.length).toBe(length);
+	}
+});
