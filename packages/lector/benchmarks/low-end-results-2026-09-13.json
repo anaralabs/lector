@@ -1737,5 +1737,13 @@
       "heapUsedAfterGc": 35280552
     }
   ],
-  "scrollNotes": "Unchanged rendering implementation: 4x CPU diagnostic profile and four 6x CPU desktop/DPR1 soak cycles. These are remaining-bottleneck measurements, not before/after rendering gains. Heap/canvas accounting excludes total process, worker and GPU memory."
+  "scrollNotes": "Unchanged rendering implementation: 4x CPU diagnostic profile and four 6x CPU desktop/DPR1 soak cycles. These are remaining-bottleneck measurements, not before/after rendering gains. Heap/canvas accounting excludes total process, worker and GPU memory.",
+  "windowsFindings": {
+    "highlightNativeBeforeErrorCssPx": 1.326672130691577,
+    "localMappedFontBeforeErrorCssPx": 28.87439130722379,
+    "unchangedAccuracyLimitCssPx": 1,
+    "failingWindowsFirefoxJob": "https://github.com/anaralabs/lector/actions/runs/34754354160/job/103716104210",
+    "cause": "PDF.js uses Calibri for selectable sans-serif text on Windows Firefox; the highlight code measured generic sans-serif instead.",
+    "fix": "Resolve partial-match font families through TextLayer.fontFamilyMap."
+  }
 }
