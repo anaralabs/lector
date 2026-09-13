@@ -18,6 +18,8 @@ import { useScrollFn } from "../hooks/pages/useScrollFn";
 import { useVisiblePage } from "../hooks/pages/useVisiblePage";
 import { useViewportContainer } from "../hooks/viewport/useViewportContainer";
 import { usePdf } from "../internal";
+import { registerPdfCopy } from "../lib/selection-text";
+import type { SelectionTextOptions } from "../lib/text-normalization";
 import { USE_LAYOUT_ZOOM } from "../lib/zoom";
 import { Primitive } from "./primitive";
 
@@ -72,6 +74,7 @@ export const Pages = ({
 	virtualizerOptions = DEFAULT_VIRTUALIZER_OPTIONS,
 	initialOffset,
 	onOffsetChange,
+	copyOptions,
 	...props
 }: HTMLProps<HTMLDivElement> & {
 	virtualizerOptions?: {
@@ -81,6 +84,8 @@ export const Pages = ({
 	children: ReactElement;
 	initialOffset?: number;
 	onOffsetChange?: (offset: number) => void;
+	/** Plain-text PDF copying. Preserve line breaks by default; false uses native copying. */
+	copyOptions?: false | SelectionTextOptions;
 }) => {
 	const [tempItems, setTempItems] = useState<VirtualItem[]>([]);
 
@@ -92,6 +97,13 @@ export const Pages = ({
 	const elementWrapperRef = useRef<HTMLDivElement>(null);
 	const elementRef = useRef<HTMLDivElement>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
+	const copyOptionsRef = useRef(copyOptions);
+	copyOptionsRef.current = copyOptions;
+	useEffect(() => {
+		const container = containerRef.current;
+		if (!container) return;
+		return registerPdfCopy(container, () => copyOptionsRef.current ?? {});
+	}, []);
 
 	useViewportContainer({
 		elementRef: elementRef,

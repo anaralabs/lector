@@ -13,14 +13,12 @@ import {
 } from "./lib/dark-mode";
 import type { PageResources } from "./lib/page-resources";
 import type { RenderColorMapRef } from "./lib/recolor-canvas-factory";
+import type { PageText } from "./lib/text-normalization";
 import { applyViewportZoom } from "./lib/viewport-zoom";
 import { getFitWidthZoom } from "./lib/zoom";
 import { createZustandContext } from "./lib/zustand";
 
-type TextContent = {
-	pageNumber: number;
-	text: string;
-};
+type TextContent = PageText;
 
 export type HighlightRect = {
 	pageNumber: number;

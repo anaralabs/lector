@@ -106,10 +106,33 @@ export default function SearchableViewer() {
 | `threshold` | `0.7` | Minimum fuzzy similarity; use a value from 0 to 1 |
 | `limit` | `10` | Result budget shared between exact and fuzzy groups |
 | `textSize` | `100` | Characters of trailing context to include after a match |
+| `matchDiacritics` | `true` | Set to `false` to ignore Latin, Greek and Cyrillic accents; meaningful marks in other scripts stay intact |
+| `ignoreHyphenation` | `false` | Join a letter, hard hyphen, line break and lowercase continuation; inline compound words are preserved |
 
 Results contain `exactMatches`, `fuzzyMatches`, and `hasMoreResults`. Each match has `pageNumber`, `text`, `matchIndex`, `score`, `isExactMatch`, and optional `searchText` and `matchLength`. Offsets and lengths refer to the original PDF text in UTF-16 code units. `matchLength` is present when the matched span differs from `searchText.length`, for example when case conversion expands a Unicode character. Pass the whole result to `calculateHighlightRects` to retain the correct span. Matching is case-insensitive. Searching an empty or whitespace-only query clears results.
 
-The current implementation allocates at most `ceil(limit / 2)` results to exact matches and the remaining budget to fuzzy matches. It can therefore return fewer than `limit` results even when more exact matches exist. `hasMoreResults` compares the total candidate count with `limit`; it is not a reliable count of everything omitted by the group allocation. If you build “show more,” rerun the submitted query with a higher limit rather than treating the result as paginated data.
+When both groups have enough matches, exact matches receive `ceil(limit / 2)` slots and fuzzy matches receive the remainder. Unused slots are filled from the other group. `hasMoreResults` indicates that candidates exceed the shared budget. For “show more,” rerun the submitted query with a higher limit; results are not paginated.
+
+## Equivalent text and wrapped lines
+
+Both search methods normalize canonical Unicode equivalents (`café` and `cafe\u0301`), Latin presentation ligatures (`ﬁ` and `fi`), soft hyphens, and whitespace. These count as exact matches, including with `threshold: 1`. The original text is preserved for snippets and highlight offsets; mathematical compatibility symbols such as `²` and `①` are not converted to ordinary digits.
+
+`Search` retains PDF.js `hasEOL` boundaries separately from the concatenated text. A phrase such as `first second` can therefore match two adjacent lines without incorrectly matching `firstsecond`. Chinese and Japanese line wraps between Han/kana characters add no space. Extraction order still comes from PDF.js; this is not a column or table reconstruction algorithm.
+
+```tsx
+const { searchAsync } = useSearch();
+
+// In a search action: match accented spellings and words split across lines.
+const results = await searchAsync(query, {
+  threshold: 1,
+  matchDiacritics: false,
+  ignoreHyphenation: true,
+});
+```
+
+Hard-hyphen joining is opt-in because a line-ending hyphen may belong to a compound word. It does not join across an explicit blank line or across pages. A soft hyphen is discretionary formatting and is always ignored. Normalization uses `Intl.Segmenter` when a Unicode conversion changes a grapheme; include a polyfill if your browser targets do not provide it.
+
+For custom indexes, the exported `PageText` type has `{ pageNumber, text, lineBreaks? }`. `lineBreaks` is an immutable sorted array of UTF-16 offsets immediately after items whose `hasEOL` is true. Keep `text` as the original concatenated strings and replace the array when boundaries change. Do not insert separators into that string if you will use PDF.js highlight geometry. `matchIndex` and `matchLength` continue to address those original strings.
 
 ## Practical limits
 

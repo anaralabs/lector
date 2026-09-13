@@ -1,5 +1,7 @@
 import { type HighlightRect, PDFStore } from "../internal";
 import { getTextNodeClientRects, mergeTextRuns } from "../lib/selection-rects";
+import { getPdfSelectionText } from "../lib/selection-text";
+import type { SelectionTextOptions } from "../lib/text-normalization";
 
 const MERGE_THRESHOLD = 2; // Reduced threshold for more precise merging
 const LAYER_ATTRIBUTION_TOLERANCE_PX = 4;
@@ -78,6 +80,16 @@ const mapSelectionRectsToLayers = (range: Range): MappedSelectionRect[] => {
 
 export const useSelectionDimensions = () => {
 	const store = PDFStore.useContext();
+	const getText = (options?: SelectionTextOptions) => {
+		const container = store.getState().viewportRef.current;
+		return container
+			? getPdfSelectionText(
+					container.ownerDocument.getSelection(),
+					container,
+					options,
+				)
+			: null;
+	};
 
 	const getAnnotationDimension = () => {
 		const selection = window.getSelection();
@@ -271,7 +283,7 @@ export const useSelectionDimensions = () => {
 			underlines: consolidateUnderlines(underlineRects).sort(
 				(a, b) => a.pageNumber - b.pageNumber,
 			),
-			text: range.toString().trim(),
+			text: (getText() ?? range.toString()).trim(),
 			isCollapsed: false,
 		};
 	};
@@ -393,7 +405,7 @@ export const useSelectionDimensions = () => {
 
 		return {
 			highlights: highlights.sort((a, b) => a.pageNumber - b.pageNumber),
-			text: range.toString().trim(),
+			text: (getText() ?? range.toString()).trim(),
 			isCollapsed: false,
 		};
 	};
@@ -401,5 +413,5 @@ export const useSelectionDimensions = () => {
 	const getSelection = (): CollapsibleSelection =>
 		getDimension() as CollapsibleSelection;
 
-	return { getDimension, getSelection, getAnnotationDimension };
+	return { getDimension, getSelection, getAnnotationDimension, getText };
 };

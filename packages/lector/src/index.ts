@@ -55,3 +55,4 @@ export {
 } from "./lib/dark-mode";
 
 export type { AsyncSearchOptions, SearchOptions } from "./lib/search";
+export type { PageText, SelectionTextOptions } from "./lib/text-normalization";

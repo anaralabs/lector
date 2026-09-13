@@ -1,62 +1,66 @@
 import type { SearchResult, SearchResults } from "../hooks/search/useSearch";
 
-export interface SearchOptions {
+import {
+	type NormalizedText,
+	normalizeSearchText,
+	originalTextRange,
+	type PageText,
+	type TextNormalizationOptions,
+} from "./text-normalization";
+
+export interface SearchOptions extends TextNormalizationOptions {
 	threshold?: number;
 	limit?: number;
 	textSize?: number;
 }
 
-type SearchPage = { pageNumber: number; text: string };
-// Weak keys let replaced documents be collected; no duplicate normalized text
-// is created when multiple search hooks consume the same store.
-interface NormalizedPage {
-	text: string;
-	lower: string;
-	starts?: Uint32Array;
-	ends?: Uint32Array;
-}
-const normalizedPages = new WeakMap<SearchPage, NormalizedPage>();
-function normalize(page: SearchPage): NormalizedPage {
-	const cached = normalizedPages.get(page);
-	if (cached?.text === page.text) return cached;
-	// Lowercase the whole string to retain context-sensitive case mappings.
-	const lower = page.text.toLowerCase();
-	const result: NormalizedPage = { text: page.text, lower };
-	// Most text keeps its UTF-16 length. Only allocate an offset map when case
-	// conversion expands it (e.g. İ -> i + combining dot).
-	if (lower.length !== page.text.length) {
-		result.starts = new Uint32Array(lower.length);
-		result.ends = new Uint32Array(lower.length);
-		let original = 0;
-		let normalized = 0;
-		for (const character of page.text) {
-			const length = character.toLowerCase().length;
-			for (let i = 0; i < length; i++) {
-				result.starts[normalized + i] =
-					original + (length === character.length ? i : 0);
-				result.ends[normalized + i] =
-					original + (length === character.length ? i + 1 : character.length);
-			}
-			original += character.length;
-			normalized += length;
-		}
+type SearchPage = PageText;
+// Share lazily built variants between hooks; releasing the document releases
+// every variant. Immutable line-break metadata is part of the cache identity.
+const normalizedPages = new WeakMap<
+	SearchPage,
+	{
+		text: string;
+		lineBreaks?: readonly number[];
+		variants: Map<number, NormalizedText>;
 	}
-	normalizedPages.set(page, result);
+>();
+function normalize(page: SearchPage, options: SearchOptions): NormalizedText {
+	let cached = normalizedPages.get(page);
+	if (cached?.text !== page.text || cached.lineBreaks !== page.lineBreaks) {
+		cached = {
+			text: page.text,
+			lineBreaks: page.lineBreaks,
+			variants: new Map(),
+		};
+		normalizedPages.set(page, cached);
+	}
+	const key =
+		(options.matchDiacritics === false ? 1 : 0) |
+		(options.ignoreHyphenation ? 2 : 0);
+	let result = cached.variants.get(key);
+	if (!result) {
+		result = normalizeSearchText(page.text, options, page.lineBreaks);
+		cached.variants.set(key, result);
+	}
 	return result;
 }
 
 function createMatch(
 	page: SearchPage,
-	normalized: NormalizedPage,
+	normalized: NormalizedText,
 	start: number,
 	length: number,
 	searchText: string,
 	textSize: number,
 	score: number,
 ): SearchResult {
-	const end = Math.min(normalized.lower.length, start + length);
-	const matchIndex = normalized.starts?.[start] ?? start;
-	const matchEnd = normalized.ends?.[end - 1] ?? end;
+	const end = Math.min(normalized.text.length, start + length);
+	const { start: matchIndex, end: matchEnd } = originalTextRange(
+		normalized,
+		start,
+		end,
+	);
 	const matchLength = matchEnd - matchIndex;
 	return {
 		pageNumber: page.pageNumber,
@@ -139,7 +143,8 @@ function* runSearch(
 		? Math.max(0, Math.floor(options.limit!))
 		: 10;
 	const textSize = options.textSize ?? 100;
-	const query = searchText.toLowerCase();
+	const query = normalizeSearchText(searchText, options).text;
+	if (!query.trim()) return empty;
 	const maxDistance = Math.floor(query.length * (1 - threshold));
 	const distance =
 		maxDistance > 0 ? createBoundedDistance(query, maxDistance) : null;
@@ -151,12 +156,14 @@ function* runSearch(
 	let deadline = cooperative ? performance.now() + budget : 0;
 
 	for (const page of pages) {
-		const normalized = normalize(page);
-		const lower = normalized.lower;
+		const normalized = normalize(page, options);
+		const lower = normalized.text;
 		// Ranges belong to this page. Storing every covered character wastes
 		// memory and sharing offsets across pages hides legitimate matches.
 		const exactStarts: number[] = [];
 		let index = 0;
+		let lastStart = -1;
+		let lastEnd = -1;
 		while (true) {
 			if (
 				cooperative &&
@@ -168,8 +175,18 @@ function* runSearch(
 			}
 			const matchIndex = lower.indexOf(query, index);
 			if (matchIndex === -1) break;
-			exactCount++;
+			const span = originalTextRange(
+				normalized,
+				matchIndex,
+				matchIndex + query.length,
+			);
+			index = matchIndex + query.length;
 			if (maxDistance > 0) exactStarts.push(matchIndex);
+			// A query for "f" in the single glyph ﬀ should yield one highlight.
+			if (span.start === lastStart && span.end === lastEnd) continue;
+			lastStart = span.start;
+			lastEnd = span.end;
+			exactCount++;
 			if (exactMatches.length < limit) {
 				exactMatches.push(
 					createMatch(
