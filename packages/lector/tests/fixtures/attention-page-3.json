@@ -1,0 +1,1224 @@
+{
+  "viewport": {
+    "viewBox": [
+      0,
+      0,
+      612,
+      792
+    ],
+    "userUnit": 1,
+    "scale": 1,
+    "rotation": 0,
+    "offsetX": 0,
+    "offsetY": 0,
+    "transform": [
+      1,
+      0,
+      0,
+      -1,
+      0,
+      792
+    ],
+    "width": 612,
+    "height": 792
+  },
+  "text": {
+    "items": [
+      {
+        "str": "Figure 1: The Transformer - model architecture.",
+        "dir": "ltr",
+        "width": 191.9793020000002,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          210.011,
+          379.699
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "The Transformer follows this overall architecture using stacked self-attention and point-wise, fully",
+        "dir": "ltr",
+        "width": 396.6620746615997,
+        "height": 9.9626,
+        "transform": [
+          10.0821512,
+          0,
+          0,
+          9.9626,
+          107.691,
+          347.647
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "connected layers for both the encoder and decoder, shown in the left and right halves of Figure 1,",
+        "dir": "ltr",
+        "width": 397.24711838400015,
+        "height": 9.9626,
+        "transform": [
+          10.161852,
+          0,
+          0,
+          9.9626,
+          108,
+          336.738
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "respectively.",
+        "dir": "ltr",
+        "width": 49.5838602,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          108,
+          325.829
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": "",
+        "dir": "ltr",
+        "width": 0,
+        "height": 0,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          108,
+          301.362
+        ],
+        "fontName": "g_d0_f2",
+        "hasEOL": true
+      },
+      {
+        "str": "3.1",
+        "dir": "ltr",
+        "width": 12.45325,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          108,
+          301.362
+        ],
+        "fontName": "g_d0_f2",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 9.962599999999995,
+        "height": 0,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          120.45325000000001,
+          301.362
+        ],
+        "fontName": "g_d0_f2",
+        "hasEOL": false
+      },
+      {
+        "str": "Encoder and Decoder Stacks",
+        "dir": "ltr",
+        "width": 122.58979300000001,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          130.41585,
+          301.362
+        ],
+        "fontName": "g_d0_f2",
+        "hasEOL": true
+      },
+      {
+        "str": "Encoder:",
+        "dir": "ltr",
+        "width": 40.078344288,
+        "height": 9.9626,
+        "transform": [
+          10.161852,
+          0,
+          0,
+          9.9626,
+          108,
+          281.384
+        ],
+        "fontName": "g_d0_f2",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 9.767309521568585,
+        "height": 0,
+        "transform": [
+          10.161852,
+          0,
+          0,
+          9.9626,
+          148.07834428800004,
+          281.384
+        ],
+        "fontName": "g_d0_f2",
+        "hasEOL": false
+      },
+      {
+        "str": "The encoder is composed of a stack of",
+        "dir": "ltr",
+        "width": 160.58774715600012,
+        "height": 9.9626,
+        "transform": [
+          10.161852,
+          0,
+          0,
+          9.9626,
+          158.041,
+          281.384
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 3.190252844000156,
+        "height": 0,
+        "transform": [
+          10.161852,
+          0,
+          0,
+          9.9626,
+          318.62874715599986,
+          281.384
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": "N",
+        "dir": "ltr",
+        "width": 8.004949100000001,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          321.819,
+          281.384
+        ],
+        "fontName": "g_d0_f3",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 5.145050900000001,
+        "height": 0,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          329.8239491,
+          281.384
+        ],
+        "fontName": "g_d0_f3",
+        "hasEOL": false
+      },
+      {
+        "str": "= 6",
+        "dir": "ltr",
+        "width": 16.78498847999999,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          334.969,
+          281.384
+        ],
+        "fontName": "g_d0_f4",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 3.1294230588235794,
+        "height": 0,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          351.75398848,
+          281.384
+        ],
+        "fontName": "g_d0_f4",
+        "hasEOL": false
+      },
+      {
+        "str": "identical layers. Each layer has two",
+        "dir": "ltr",
+        "width": 149.05404513600016,
+        "height": 9.9626,
+        "transform": [
+          10.161852,
+          0,
+          0,
+          9.9626,
+          354.946,
+          281.384
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "sub-layers. The first is a multi-head self-attention mechanism, and the second is a simple, position-",
+        "dir": "ltr",
+        "width": 397.6574878405998,
+        "height": 9.9626,
+        "transform": [
+          10.0522634,
+          0,
+          0,
+          9.9626,
+          108,
+          270.475
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "wise fully connected feed-forward network. We employ a residual connection [11] around each of",
+        "dir": "ltr",
+        "width": 396.3608404240005,
+        "height": 9.9626,
+        "transform": [
+          10.1220016,
+          0,
+          0,
+          9.9626,
+          107.641,
+          259.566
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "the two sub-layers, followed by layer normalization [1]. That is, the output of each sub-layer is",
+        "dir": "ltr",
+        "width": 395.9986743440005,
+        "height": 9.9626,
+        "transform": [
+          10.161852,
+          0,
+          0,
+          9.9626,
+          108,
+          248.657
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": "",
+        "dir": "ltr",
+        "width": 0,
+        "height": 0,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          108,
+          237.748
+        ],
+        "fontName": "g_d0_f4",
+        "hasEOL": true
+      },
+      {
+        "str": "LayerNorm(",
+        "dir": "ltr",
+        "width": 52.769899679999995,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          108,
+          237.748
+        ],
+        "fontName": "g_d0_f4",
+        "hasEOL": false
+      },
+      {
+        "str": "x",
+        "dir": "ltr",
+        "width": 5.6936259,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          160.774,
+          237.748
+        ],
+        "fontName": "g_d0_f3",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 2.4693741000000102,
+        "height": 0,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          166.4676259,
+          237.748
+        ],
+        "fontName": "g_d0_f3",
+        "hasEOL": false
+      },
+      {
+        "str": "+ Sublayer(",
+        "dir": "ltr",
+        "width": 51.478746719999975,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          168.937,
+          237.748
+        ],
+        "fontName": "g_d0_f4",
+        "hasEOL": false
+      },
+      {
+        "str": "x",
+        "dir": "ltr",
+        "width": 5.6936259,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          220.416,
+          237.748
+        ],
+        "fontName": "g_d0_f3",
+        "hasEOL": false
+      },
+      {
+        "str": "))",
+        "dir": "ltr",
+        "width": 7.74891028,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          226.10999999999999,
+          237.748
+        ],
+        "fontName": "g_d0_f4",
+        "hasEOL": false
+      },
+      {
+        "str": ", where",
+        "dir": "ltr",
+        "width": 30.282318959999998,
+        "height": 9.9626,
+        "transform": [
+          10.161852,
+          0,
+          0,
+          9.9626,
+          233.858,
+          237.748
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 2.83868104000004,
+        "height": 0,
+        "transform": [
+          10.161852,
+          0,
+          0,
+          9.9626,
+          264.14031895999995,
+          237.748
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": "Sublayer(",
+        "dir": "ltr",
+        "width": 41.25911163999998,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          266.979,
+          237.748
+        ],
+        "fontName": "g_d0_f4",
+        "hasEOL": false
+      },
+      {
+        "str": "x",
+        "dir": "ltr",
+        "width": 5.6936259,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          308.241,
+          237.748
+        ],
+        "fontName": "g_d0_f3",
+        "hasEOL": false
+      },
+      {
+        "str": ")",
+        "dir": "ltr",
+        "width": 3.87445514,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          313.935,
+          237.748
+        ],
+        "fontName": "g_d0_f4",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 2.7779851568627065,
+        "height": 0,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          317.80945514,
+          237.748
+        ],
+        "fontName": "g_d0_f4",
+        "hasEOL": false
+      },
+      {
+        "str": "is the function implemented by the sub-layer",
+        "dir": "ltr",
+        "width": 183.5230471200001,
+        "height": 9.9626,
+        "transform": [
+          10.161852,
+          0,
+          0,
+          9.9626,
+          320.643,
+          237.748
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "itself. To facilitate these residual connections, all sub-layers in the model, as well as the embedding",
+        "dir": "ltr",
+        "width": 396.00338739999995,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          108,
+          226.839
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "layers, produce outputs of dimension",
+        "dir": "ltr",
+        "width": 147.48633039999999,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          108,
+          215.929
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 2.489669599999928,
+        "height": 0,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          255.48633040000007,
+          215.929
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": "d",
+        "dir": "ltr",
+        "width": 5.1855333,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          257.976,
+          215.929
+        ],
+        "fontName": "g_d0_f3",
+        "hasEOL": false
+      },
+      {
+        "str": "model",
+        "dir": "ltr",
+        "width": 17.4345,
+        "height": 6.9738,
+        "transform": [
+          6.9738,
+          0,
+          0,
+          6.9738,
+          263.162,
+          214.435
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 3.264500000000055,
+        "height": 0,
+        "transform": [
+          6.9738,
+          0,
+          0,
+          6.9738,
+          280.59649999999993,
+          214.435
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": "= 512",
+        "dir": "ltr",
+        "width": 25.462413079999976,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          283.861,
+          215.929
+        ],
+        "fontName": "g_d0_f4",
+        "hasEOL": false
+      },
+      {
+        "str": ".",
+        "dir": "ltr",
+        "width": 2.49065,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          309.322,
+          215.929
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": "",
+        "dir": "ltr",
+        "width": 0,
+        "height": 0,
+        "transform": [
+          9.763348,
+          0,
+          0,
+          9.9626,
+          108,
+          192.808
+        ],
+        "fontName": "g_d0_f2",
+        "hasEOL": true
+      },
+      {
+        "str": "Decoder:",
+        "dir": "ltr",
+        "width": 37.95013367599999,
+        "height": 9.9626,
+        "transform": [
+          9.763348,
+          0,
+          0,
+          9.9626,
+          108,
+          192.808
+        ],
+        "fontName": "g_d0_f2",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 10.166190126530616,
+        "height": 0,
+        "transform": [
+          9.763348,
+          0,
+          0,
+          9.9626,
+          145.950133676,
+          192.808
+        ],
+        "fontName": "g_d0_f2",
+        "hasEOL": false
+      },
+      {
+        "str": "The decoder is also composed of a stack of",
+        "dir": "ltr",
+        "width": 167.51952498400004,
+        "height": 9.9626,
+        "transform": [
+          9.763348,
+          0,
+          0,
+          9.9626,
+          155.913,
+          192.808
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 2.3684750160000476,
+        "height": 0,
+        "transform": [
+          9.763348,
+          0,
+          0,
+          9.9626,
+          323.43252498399994,
+          192.808
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": "N",
+        "dir": "ltr",
+        "width": 8.004949100000001,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          325.801,
+          192.808
+        ],
+        "fontName": "g_d0_f3",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 3.853050900000028,
+        "height": 0,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          333.80594909999996,
+          192.808
+        ],
+        "fontName": "g_d0_f3",
+        "hasEOL": false
+      },
+      {
+        "str": "= 6",
+        "dir": "ltr",
+        "width": 15.499813079999974,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          337.659,
+          192.808
+        ],
+        "fontName": "g_d0_f4",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 2.4144764489796104,
+        "height": 0,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          353.15881307999996,
+          192.808
+        ],
+        "fontName": "g_d0_f4",
+        "hasEOL": false
+      },
+      {
+        "str": "identical layers. In addition to the two",
+        "dir": "ltr",
+        "width": 148.47123303600011,
+        "height": 9.9626,
+        "transform": [
+          9.763348,
+          0,
+          0,
+          9.9626,
+          355.525,
+          192.808
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "sub-layers in each encoder layer, the decoder inserts a third sub-layer, which performs multi-head",
+        "dir": "ltr",
+        "width": 395.99721058800014,
+        "height": 9.9626,
+        "transform": [
+          10.161852,
+          0,
+          0,
+          9.9626,
+          108,
+          181.899
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "attention over the output of the encoder stack. Similar to the encoder, we employ residual connections",
+        "dir": "ltr",
+        "width": 396.00139487999985,
+        "height": 9.9626,
+        "transform": [
+          9.763348,
+          0,
+          0,
+          9.9626,
+          108,
+          170.99
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "around each of the sub-layers, followed by layer normalization. We also modify the self-attention",
+        "dir": "ltr",
+        "width": 395.9972105879997,
+        "height": 9.9626,
+        "transform": [
+          10.161852,
+          0,
+          0,
+          9.9626,
+          108,
+          160.081
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "sub-layer in the decoder stack to prevent positions from attending to subsequent positions. This",
+        "dir": "ltr",
+        "width": 395.9972105879995,
+        "height": 9.9626,
+        "transform": [
+          10.161852,
+          0,
+          0,
+          9.9626,
+          108,
+          149.172
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "masking, combined with fact that the output embeddings are offset by one position, ensures that the",
+        "dir": "ltr",
+        "width": 395.99685193439956,
+        "height": 9.9626,
+        "transform": [
+          9.9426748,
+          0,
+          0,
+          9.9626,
+          108,
+          138.263
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "predictions for position",
+        "dir": "ltr",
+        "width": 92.9809458,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          108,
+          127.354
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 2.490054199999946,
+        "height": 0,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          200.98094580000006,
+          127.354
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": "i",
+        "dir": "ltr",
+        "width": 3.4321157,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          203.471,
+          127.354
+        ],
+        "fontName": "g_d0_f3",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 2.4908843000000047,
+        "height": 0,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          206.9031157,
+          127.354
+        ],
+        "fontName": "g_d0_f3",
+        "hasEOL": false
+      },
+      {
+        "str": "can depend only on the known outputs at positions less than",
+        "dir": "ltr",
+        "width": 238.84337240000028,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          209.394,
+          127.354
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 2.489627600000631,
+        "height": 0,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          448.23737239999934,
+          127.354
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": "i",
+        "dir": "ltr",
+        "width": 3.4321157,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          450.727,
+          127.354
+        ],
+        "fontName": "g_d0_f3",
+        "hasEOL": false
+      },
+      {
+        "str": ".",
+        "dir": "ltr",
+        "width": 2.49065,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          454.159,
+          127.354
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      },
+      {
+        "str": "",
+        "dir": "ltr",
+        "width": 0,
+        "height": 0,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          108,
+          102.887
+        ],
+        "fontName": "g_d0_f2",
+        "hasEOL": true
+      },
+      {
+        "str": "3.2",
+        "dir": "ltr",
+        "width": 12.45325,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          108,
+          102.887
+        ],
+        "fontName": "g_d0_f2",
+        "hasEOL": false
+      },
+      {
+        "str": " ",
+        "dir": "ltr",
+        "width": 9.962599999999995,
+        "height": 0,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          120.45325000000001,
+          102.887
+        ],
+        "fontName": "g_d0_f2",
+        "hasEOL": false
+      },
+      {
+        "str": "Attention",
+        "dir": "ltr",
+        "width": 40.398343000000004,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          130.41585,
+          102.887
+        ],
+        "fontName": "g_d0_f2",
+        "hasEOL": false
+      },
+      {
+        "str": "",
+        "dir": "ltr",
+        "width": 0,
+        "height": 0,
+        "transform": [
+          9.9426748,
+          0,
+          0,
+          9.9626,
+          107.641,
+          82.909
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "An attention function can be described as mapping a query and a set of key-value pairs to an output,",
+        "dir": "ltr",
+        "width": 397.60756525199946,
+        "height": 9.9626,
+        "transform": [
+          9.9426748,
+          0,
+          0,
+          9.9626,
+          107.641,
+          82.909
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "where the query, keys, values, and output are all vectors. The output is computed as a weighted sum",
+        "dir": "ltr",
+        "width": 396.3627881949994,
+        "height": 9.9626,
+        "transform": [
+          9.912787,
+          0,
+          0,
+          9.9626,
+          107.641,
+          72
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": true
+      },
+      {
+        "str": "3",
+        "dir": "ltr",
+        "width": 4.9813,
+        "height": 9.9626,
+        "transform": [
+          9.9626,
+          0,
+          0,
+          9.9626,
+          303.509,
+          42.112
+        ],
+        "fontName": "g_d0_f1",
+        "hasEOL": false
+      }
+    ],
+    "styles": {
+      "g_d0_f1": {
+        "fontFamily": "sans-serif",
+        "ascent": 0.678,
+        "descent": -0.216,
+        "vertical": false
+      },
+      "g_d0_f2": {
+        "fontFamily": "sans-serif",
+        "ascent": 0.69,
+        "descent": -0.209,
+        "vertical": false
+      },
+      "g_d0_f3": {
+        "fontFamily": "sans-serif",
+        "ascent": 0.694,
+        "descent": -0.194,
+        "vertical": false
+      },
+      "g_d0_f4": {
+        "fontFamily": "sans-serif",
+        "ascent": 0.694,
+        "descent": -0.194,
+        "vertical": false
+      }
+    },
+    "lang": null
+  }
+}
