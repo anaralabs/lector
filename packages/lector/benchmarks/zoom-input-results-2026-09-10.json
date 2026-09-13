@@ -1,0 +1,22 @@
+{
+  "baseline": "93c5bd6",
+  "changedFile": "src/hooks/viewport/useViewportContainer.tsx",
+  "command": "pnpm exec vitest run --config vitest.bench.config.ts benchmarks/zoom-input.browser.test.tsx",
+  "environment": { "platform": "macOS ARM64", "browser": "installed Chrome", "node": "22.22.3", "warmupRuns": 1, "measuredRuns": 5 },
+  "fixture": { "wheelEventsPerBurst": 120, "positionedTextSpans": 10000, "deltaY": -0.3, "ctrlKey": true, "description": "Actual DOM WheelEvents handled by use-gesture and Lector's viewport hook. PDF raster and Zustand subscribers are excluded to isolate input geometry work." },
+  "before": [
+    { "handlerMs": 11, "frameMs": 22.9, "synchronousWrites": 119, "totalWrites": 119, "zoomWidth": "859.534px" },
+    { "handlerMs": 11.2, "frameMs": 23.7, "synchronousWrites": 119, "totalWrites": 119, "zoomWidth": "859.534px" },
+    { "handlerMs": 11.3, "frameMs": 23.5, "synchronousWrites": 119, "totalWrites": 119, "zoomWidth": "859.534px" },
+    { "handlerMs": 11.2, "frameMs": 23.3, "synchronousWrites": 119, "totalWrites": 119, "zoomWidth": "859.534px" },
+    { "handlerMs": 11.1, "frameMs": 23.1, "synchronousWrites": 119, "totalWrites": 119, "zoomWidth": "859.534px" }
+  ],
+  "after": [
+    { "handlerMs": 1.1, "frameMs": 17.4, "synchronousWrites": 0, "totalWrites": 1, "zoomWidth": "859.534px" },
+    { "handlerMs": 0.9, "frameMs": 11.6, "synchronousWrites": 0, "totalWrites": 1, "zoomWidth": "859.534px" },
+    { "handlerMs": 1, "frameMs": 9.5, "synchronousWrites": 0, "totalWrites": 1, "zoomWidth": "859.534px" },
+    { "handlerMs": 0.9, "frameMs": 10.7, "synchronousWrites": 0, "totalWrites": 1, "zoomWidth": "859.534px" },
+    { "handlerMs": 1.1, "frameMs": 10, "synchronousWrites": 0, "totalWrites": 1, "zoomWidth": "859.534px" }
+  ],
+  "interpretation": "Median synchronous handler duration 11.2ms to 1.0ms; geometry applications 119 to 1 per burst. Frame probe includes variable vsync phase and is secondary. Synthetic burst stress does not establish physical-device pinch latency or full PDF scrolling FPS. Continuous input acknowledges its latest position on the next display frame; gesture end flushes immediately."
+}

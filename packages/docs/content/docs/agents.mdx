@@ -1,0 +1,96 @@
+---
+title: AI agents and MCP
+description: Connect a coding assistant to Lector's guides, search the docs, or fetch complete Markdown without a browser.
+---
+
+Give your assistant access to the same guides and examples you read here. Every page has a Markdown export, and the MCP server offers search and retrieval over the complete documentation catalog. No API key is required.
+
+These docs describe the source deployed with this site and track `main`. They are **not versioned by npm release**. Before applying an example, have your assistant inspect your installed `@anaralabs/lector`, `pdfjs-dist`, and React versions. Use the [release history](https://github.com/anaralabs/lector/releases) when working with an older package.
+
+## Connect an MCP client
+
+Add a remote server in your assistant's MCP settings:
+
+| Setting | Value |
+| --- | --- |
+| Name | `lector` |
+| Server URL | `https://anara.com/lector/mcp` |
+| Transport | Streamable HTTP |
+| Authentication | None; public, read-only documentation |
+
+For clients that use an `mcpServers` configuration with a `url` field:
+
+```json
+{
+  "mcpServers": {
+    "lector": {
+      "url": "https://anara.com/lector/mcp"
+    }
+  }
+}
+```
+
+Configuration keys vary by client. If yours asks for a transport type, select HTTP or Streamable HTTP. This endpoint is not a local `stdio` command or the older HTTP+SSE transport with a separate `/sse` URL. The server also supports clients using the 2025 MCP initialization handshake.
+
+After connecting, ask the assistant to list the Lector documentation. It should discover these tools:
+
+| Tool | Input | Result |
+| --- | --- | --- |
+| `list_docs` | `{}` | All page slugs, descriptions, URLs, resource URIs, and content hashes |
+| `search_docs` | `query`, optional `limit` | Ranked excerpts and links; defaults to 5 results, maximum 10 |
+| `get_doc` | `slug` | A complete Markdown guide, including its fenced code examples |
+
+Search accepts 1–200 characters. Use focused keywords such as `worker`, `Next.js`, `useSearch`, or `dark mode`. Results are keyword-ranked, not semantic search. An empty results list means no matching terms; try the API name or use `list_docs` to browse.
+
+Use the exact slug from a result: `installation`, `code/search`, or `index` for the overview. `get_doc` does not accept arbitrary URLs or local file paths.
+
+### A useful first request
+
+```text
+Use the Lector docs to add a PDF viewer to this app.
+Inspect the installed dependencies and framework first.
+Read installation and basic-usage, then the relevant feature guides.
+Include worker setup, selectable text, a defined viewer height,
+loading and error states, and controls that follow the app theme.
+Verify the implementation against the documented API.
+```
+
+For a specific task, search first and then read the complete result. Excerpts help find a guide; they may omit prerequisites or limitations that matter when writing code.
+
+Clients that support **resources** can list and read `lector://docs` for the JSON catalog and `lector://docs/<slug>` for individual Markdown pages. For example, `lector://docs/code/search` contains the search guide. Clients with **prompts** can run `build_pdf_viewer` with `framework: "react"` or `framework: "nextjs"` to start with the installation and first-viewer guides already included.
+
+The server only reads Lector documentation. It does not open your PDFs, access your repository, change files, or provide a PDF-processing service. Your assistant's other tools perform application work.
+
+## Fetch docs without MCP
+
+An agent with HTTP access can read any of these directly:
+
+| URL | When to use it |
+| --- | --- |
+| [/llms.txt](/llms.txt) | Start here: concise project context and links to every guide |
+| [/llms.json](/llms.json) | Discover page slugs, URLs, resource URIs, and SHA-256 content hashes programmatically |
+| [/docs/installation.md](/docs/installation.md) | Read one complete page; append `.md` to a guide URL |
+| [/docs/index.md](/docs/index.md) | Read the `/docs` overview as Markdown |
+| [/llms-full.txt](/llms-full.txt) | Fetch every guide in one response for tools with enough context |
+
+```bash
+curl -fsSL https://anara.com/lector/llms.txt
+curl -fsSL https://anara.com/lector/docs/code/search.md
+```
+
+Each HTML guide advertises its Markdown version through a `rel="alternate"` link. Markdown responses include a link to the discovery file. See the [llms.txt proposal](https://llmstxt.org/) for the discovery convention.
+
+Markdown is generated from the MDX used to build the site. Tables, links, and fenced source examples are retained. Executable MDX imports are removed, and interactive demos become a pointer to the browser page. A guide's `sha256` and the catalog's `revision` identify its exported content, so a client can detect changes without relying on a handwritten update date.
+
+## Connection problems
+
+| Symptom | Check |
+| --- | --- |
+| Opening `/mcp` in a browser returns 405 | Expected: use an MCP client that sends POST requests. For browser-readable content, use the docs or Markdown URLs. |
+| The client tries `/sse` or requires a command | Configure a remote Streamable HTTP server, or use direct Markdown fetching if the client only supports local servers. |
+| Tools work but resources or prompts are missing in the UI | Client support varies. All documentation is also available through the three tools. |
+| A browser-based client receives 403 | The deployment must explicitly allow that client's origin. Native clients without an `Origin` header can connect directly. |
+| Search finds too much or nothing | Use a distinctive API name, reduce the query to keywords, or browse `list_docs`. |
+| An example uses an export absent from your app | Compare installed versions with the source and releases; the corpus is not pinned to your npm version. |
+
+For a self-hosted site, replace the hostname above with your deployment's URL. The [maintainer guide](https://github.com/anaralabs/lector/blob/main/packages/docs/README.md#agent-documentation-and-mcp) covers origin configuration, validation, and how new pages enter the catalog.

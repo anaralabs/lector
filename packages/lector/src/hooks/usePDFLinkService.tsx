@@ -2,13 +2,30 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { RefProxy } from "pdfjs-dist/types/src/display/api";
 import { createContext, useContext, useEffect, useRef } from "react";
 
+export type PageNavigationCallback = (
+	pageNumber: number,
+	explicitDest?: unknown[],
+) => void;
+
 export class LinkService {
 	_pdfDocumentProxy?: PDFDocumentProxy;
 	externalLinkEnabled = true;
 	isInPresentationMode = false;
 
 	_currentPageNumber = 0;
-	_pageNavigationCallback?: (pageNumber: number) => void;
+	// Every mounted AnnotationLayer registers a callback here. A single slot
+	// breaks under page virtualization: any layer unmounting would wipe the
+	// callback registered by a still-mounted layer, silently killing internal
+	// link navigation. Keep them all and dispatch to the latest registrant.
+	_pageNavigationCallbacks = new Set<PageNavigationCallback>();
+
+	_dispatchPageNavigation(pageNumber: number, explicitDest?: unknown[]): void {
+		let latest: PageNavigationCallback | undefined;
+		for (const callback of this._pageNavigationCallbacks) {
+			latest = callback;
+		}
+		latest?.(pageNumber, explicitDest);
+	}
 
 	get pdfDocumentProxy(): PDFDocumentProxy {
 		if (!this._pdfDocumentProxy) {
@@ -28,9 +45,7 @@ export class LinkService {
 
 	set page(value: number) {
 		this._currentPageNumber = value;
-		if (this._pageNavigationCallback) {
-			this._pageNavigationCallback(value);
-		}
+		this._dispatchPageNavigation(value);
 	}
 
 	// Required for link annotations to work
@@ -163,13 +178,11 @@ export class LinkService {
 			return;
 		}
 
-		// Navigate to the page
+		// Navigate to the page, forwarding the explicit destination so the
+		// handler can scroll to the destination's position within the page.
 		const pageNumber = pageIndex + 1;
-
-		// Trigger the navigation callback
-		if (this._pageNavigationCallback) {
-			this._pageNavigationCallback(pageNumber);
-		}
+		this._currentPageNumber = pageNumber;
+		this._dispatchPageNavigation(pageNumber, explicitDest);
 	}
 
 	executeNamedAction(): void {
@@ -189,12 +202,16 @@ export class LinkService {
 		// Intentionally empty
 	}
 
-	goToPage(_page_valuer: number): void {
-		// if (pageNumber >= 1 && pageNumber <= this.pagesCount) {
-		// 	if (this._pageNavigationCallback) {
-		// 		this._pageNavigationCallback(pageNumber);
-		// 	}
-		// }
+	goToPage(pageNumber: number): void {
+		if (
+			!Number.isInteger(pageNumber) ||
+			pageNumber < 1 ||
+			(this.pagesCount > 0 && pageNumber > this.pagesCount)
+		) {
+			return;
+		}
+		this._currentPageNumber = pageNumber;
+		this._dispatchPageNavigation(pageNumber);
 	}
 
 	setHash(hash: string): void {
@@ -210,14 +227,21 @@ export class LinkService {
 		// Intentionally empty
 	}
 
-	// Method to register navigation callback
-	registerPageNavigationCallback(callback: (pageNumber: number) => void): void {
-		this._pageNavigationCallback = callback;
+	// Method to register navigation callback. Delete-then-add so re-registering
+	// an already-known callback still makes it the latest registrant.
+	registerPageNavigationCallback(callback: PageNavigationCallback): void {
+		this._pageNavigationCallbacks.delete(callback);
+		this._pageNavigationCallbacks.add(callback);
 	}
 
-	// Method to unregister navigation callback
-	unregisterPageNavigationCallback(): void {
-		this._pageNavigationCallback = undefined;
+	// Method to unregister navigation callback. Only removes the caller's own
+	// callback so one layer's cleanup can't drop another layer's registration.
+	unregisterPageNavigationCallback(callback?: PageNavigationCallback): void {
+		if (!callback) {
+			this._pageNavigationCallbacks.clear();
+		} else {
+			this._pageNavigationCallbacks.delete(callback);
+		}
 	}
 }
 

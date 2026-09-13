@@ -1,30 +1,42 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
-export const useDpr = () => {
-	const [dpr, setDPR] = useState(
-		typeof window === "undefined" ? 1 : Math.min(window.devicePixelRatio, 2),
+const listeners = new Set<() => void>();
+let media: MediaQueryList | undefined;
+const getSnapshot = () => Math.min(window.devicePixelRatio || 1, 3);
+const getServerSnapshot = () => 1;
+
+function unlisten() {
+	if (!media) return;
+	if (typeof media.removeEventListener === "function")
+		media.removeEventListener("change", onChange);
+	else media.removeListener(onChange);
+}
+function watchResolution() {
+	unlisten();
+	// Watch the actual resolution, even when the rendered DPR is capped.
+	// A min-resolution query misses increases and some monitor transitions.
+	media = window.matchMedia(
+		`(resolution: ${window.devicePixelRatio || 1}dppx), (-webkit-device-pixel-ratio: ${window.devicePixelRatio || 1})`,
 	);
-
-	useEffect(() => {
-		if (typeof window === "undefined") {
-			return;
+	if (typeof media.addEventListener === "function")
+		media.addEventListener("change", onChange);
+	else media.addListener(onChange);
+}
+function onChange() {
+	watchResolution();
+	for (const listener of listeners) listener();
+}
+function subscribe(listener: () => void) {
+	listeners.add(listener);
+	if (listeners.size === 1) watchResolution();
+	return () => {
+		listeners.delete(listener);
+		if (listeners.size === 0) {
+			unlisten();
+			media = undefined;
 		}
+	};
+}
 
-		const handleDPRChange = () => {
-			setDPR(Math.min(window.devicePixelRatio, 2));
-		};
-
-		const windowMatch = window.matchMedia(
-			`screen and (min-resolution: ${dpr}dppx)`,
-		);
-
-		windowMatch.addEventListener("change", handleDPRChange);
-
-		return () => {
-			windowMatch.removeEventListener("change", handleDPRChange);
-		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [dpr]);
-
-	return dpr;
-};
+export const useDpr = () =>
+	useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);

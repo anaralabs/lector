@@ -1,24 +1,24 @@
 "use client";
 
-import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
-import "@/lib/setup";
+import { CanvasLayer, Page, Pages, TextLayer } from "@anaralabs/lector";
+import { ExampleRoot } from "./example-root";
 
-const fileUrl = "/pdf/pathways.pdf";
+const fileUrl = "/lector/pdf/pathways.pdf";
 
 const Basic = () => {
 	return (
-		<Root
+		<ExampleRoot
 			source={fileUrl}
 			className="w-full h-[500px] border overflow-hidden rounded-lg"
 			loader={<div className="p-4">Loading...</div>}
 		>
-			<Pages className="dark:invert-[94%] dark:hue-rotate-180 dark:brightness-[80%] dark:contrast-[228%]">
+			<Pages>
 				<Page>
 					<CanvasLayer />
 					<TextLayer />
 				</Page>
 			</Pages>
-		</Root>
+		</ExampleRoot>
 	);
 };
 

@@ -5,13 +5,21 @@ import { createRef } from "react";
 import { createStore, useStore } from "zustand";
 
 import { clamp } from "./lib/clamp";
+import {
+	type ColorScheme,
+	createDarkModeColorMap,
+	type DarkModeColors,
+	DEFAULT_DARK_MODE_COLORS,
+} from "./lib/dark-mode";
+import type { PageResources } from "./lib/page-resources";
+import { PDFSelectionController } from "./lib/pdf-selection";
+import type { RenderColorMapRef } from "./lib/recolor-canvas-factory";
+import type { PageText } from "./lib/text-normalization";
+import { applyViewportZoom } from "./lib/viewport-zoom";
 import { getFitWidthZoom } from "./lib/zoom";
 import { createZustandContext } from "./lib/zustand";
 
-type TextContent = {
-	pageNumber: number;
-	text: string;
-};
+type TextContent = PageText;
 
 export type HighlightRect = {
 	pageNumber: number;
@@ -37,6 +45,7 @@ export type ColoredHighlight = {
 };
 
 interface PDFState {
+	selection: PDFSelectionController;
 	pdfDocumentProxy: PDFDocumentProxy;
 
 	zoom: number;
@@ -50,6 +59,9 @@ interface PDFState {
 
 	isPinching: boolean;
 	setIsPinching: (isPinching: boolean) => void;
+
+	isResizing: boolean;
+	setIsResizing: (isResizing: boolean) => void;
 
 	currentPage: number;
 	setCurrentPage: (pageNumber: number) => void;
@@ -70,7 +82,14 @@ interface PDFState {
 	highlights: HighlightRect[];
 	setHighlight: (higlights: HighlightRect[]) => void;
 
+	/** Synchronous access; progressive consumers must load an unresolved page first. */
 	getPdfPageProxy: (pageNumber: number) => PDFPageProxy;
+	loadPdfPageProxy: (pageNumber: number) => Promise<PDFPageProxy>;
+	loadPdfPageProxies: () => Promise<PDFPageProxy[]>;
+	isPageLoaded: (pageNumber: number) => boolean;
+	/** False until the ordered pageProxies array is complete in progressive mode. */
+	pagesLoaded: boolean;
+	initialPage: number;
 
 	customSelectionRects: HighlightRect[];
 	setCustomSelectionRects: (rects: HighlightRect[]) => void;
@@ -82,24 +101,57 @@ interface PDFState {
 	renderedPages: Record<number, true>;
 	markPageRendered: (pageNumber: number) => void;
 	unmarkPageRendered: (pageNumber: number) => void;
+
+	colorScheme: ColorScheme;
+	darkModeColors: Required<DarkModeColors>;
+	setColorScheme: (colorScheme: ColorScheme, colors?: DarkModeColors) => void;
+	/**
+	 * Shared with the document's pdf.js CanvasFactory so internal scratch
+	 * canvases (transparency groups, soft masks, patterns) follow the scheme.
+	 */
+	renderColorMapRef: RenderColorMapRef;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type PDFVirtualizer = Virtualizer<any, any>;
 
 export interface InitialPDFState {
+	pageResources?: PageResources;
+	initialPage?: number;
 	pdfDocumentProxy: PDFDocumentProxy;
 	pageProxies: PDFPageProxy[];
 	viewports: Array<PageViewport>;
 	zoom: number;
 	isZoomFitWidth?: boolean;
 	zoomOptions?: ZoomOptions;
+	colorScheme?: ColorScheme;
+	darkModeColors?: DarkModeColors;
+	renderColorMapRef?: RenderColorMapRef;
 }
 
 export const PDFStore = createZustandContext(
 	(initialState: InitialPDFState) => {
+		const initialColorScheme = initialState.colorScheme ?? "light";
+		const initialDarkModeColors = {
+			...DEFAULT_DARK_MODE_COLORS,
+			...initialState.darkModeColors,
+		};
+		const renderColorMapRef = initialState.renderColorMapRef ?? {
+			current: null,
+		};
+		renderColorMapRef.current =
+			initialColorScheme === "dark"
+				? createDarkModeColorMap(initialDarkModeColors)
+				: null;
+
 		return createStore<PDFState>((set, get) => ({
 			pdfDocumentProxy: initialState.pdfDocumentProxy,
+			selection: new PDFSelectionController({
+				pageCount: initialState.pdfDocumentProxy.numPages,
+				loadPage: (page) => get().loadPdfPageProxy(page),
+				revealPage: (page) =>
+					get().virtualizer?.scrollToIndex(page - 1, { align: "auto" }),
+			}),
 			zoom: initialState.zoom,
 			isZoomFitWidth: initialState.isZoomFitWidth ?? false,
 			zoomOptions: {
@@ -114,12 +166,18 @@ export const PDFStore = createZustandContext(
 				const { minZoom, maxZoom } = get().zoomOptions;
 
 				set((state) => {
-					if (typeof zoom === "function") {
-						const newZoom = clamp(zoom(state.zoom), minZoom, maxZoom);
-						return { zoom: newZoom, isZoomFitWidth };
-					}
-					const newZoom = clamp(zoom, minZoom, maxZoom);
-					return { zoom: newZoom, isZoomFitWidth };
+					const newZoom = clamp(
+						typeof zoom === "function" ? zoom(state.zoom) : zoom,
+						minZoom,
+						maxZoom,
+					);
+					// Subscribers must observe the new scale and its physical scroll
+					// compensation together, including toolbar/API zoom changes.
+					applyViewportZoom(state.viewportRef.current, newZoom);
+					return newZoom === state.zoom &&
+						isZoomFitWidth === state.isZoomFitWidth
+						? state
+						: { zoom: newZoom, isZoomFitWidth };
 				});
 			},
 
@@ -134,62 +192,95 @@ export const PDFStore = createZustandContext(
 					zoomOptions,
 				);
 
-				set({
-					zoom: clampedZoom,
-					isZoomFitWidth: true,
-				});
+				get().updateZoom(clampedZoom, true);
 
 				return clampedZoom;
 			},
 
-			currentPage: 1,
+			currentPage: initialState.initialPage ?? 1,
+			initialPage: initialState.initialPage ?? 1,
 			setCurrentPage: (val) => {
-				set({
-					currentPage: val,
-				});
+				set((state) =>
+					state.currentPage === val ? state : { currentPage: val },
+				);
 			},
 
 			isPinching: false,
 			setIsPinching: (val) => {
+				set((state) =>
+					state.isPinching === val ? state : { isPinching: val },
+				);
+			},
+
+			isResizing: false,
+			setIsResizing: (val) => {
 				set({
-					isPinching: val,
+					isResizing: val,
 				});
 			},
 
 			virtualizer: null,
 			setVirtualizer: (val) => {
-				set({
-					virtualizer: val,
-				});
+				set((state) =>
+					state.virtualizer === val ? state : { virtualizer: val },
+				);
 			},
 
 			pageProxies: initialState.pageProxies,
+			pagesLoaded:
+				initialState.pageProxies.length ===
+				initialState.pdfDocumentProxy.numPages,
+			loadPdfPageProxies: () =>
+				initialState.pageResources
+					? initialState.pageResources.loadAll()
+					: Promise.resolve(get().pageProxies),
+			isPageLoaded: (pageNumber) =>
+				Boolean(
+					initialState.pageResources?.get(pageNumber) ??
+						get().pageProxies[pageNumber - 1],
+				),
+			loadPdfPageProxy: (pageNumber) =>
+				initialState.pageResources
+					? initialState.pageResources.load(pageNumber)
+					: Promise.resolve().then(() => get().getPdfPageProxy(pageNumber)),
 			getPdfPageProxy: (pageNumber) => {
-				const proxy = get().pageProxies[pageNumber - 1];
+				const proxy =
+					initialState.pageResources?.get(pageNumber) ??
+					get().pageProxies[pageNumber - 1];
 
-				if (!proxy) throw new Error(`Page ${pageNumber} does not exist`);
+				if (!proxy)
+					throw new Error(
+						initialState.pageResources &&
+							Number.isInteger(pageNumber) &&
+							pageNumber >= 1 &&
+							pageNumber <= initialState.pdfDocumentProxy.numPages
+							? `Page ${pageNumber} is not loaded. Await loadPdfPageProxy(${pageNumber}) first.`
+							: `Page ${pageNumber} does not exist`,
+					);
 
 				return proxy;
 			},
 
 			textContent: [],
 			setTextContent: (val) => {
-				set({
-					textContent: val,
-				});
+				set((state) =>
+					state.textContent === val ? state : { textContent: val },
+				);
 			},
 			highlights: [],
 			setHighlight: (val) => {
-				set({
-					highlights: val,
-				});
+				set((state) =>
+					state.highlights === val ? state : { highlights: val },
+				);
 			},
 
 			customSelectionRects: [],
 			setCustomSelectionRects: (val) => {
-				set({
-					customSelectionRects: val,
-				});
+				set((state) =>
+					state.customSelectionRects === val
+						? state
+						: { customSelectionRects: val },
+				);
 			},
 
 			coloredHighlights: [],
@@ -203,6 +294,29 @@ export const PDFStore = createZustandContext(
 						(rect) => rect.uuid !== uuid,
 					),
 				})),
+
+			colorScheme: initialColorScheme,
+			darkModeColors: initialDarkModeColors,
+			renderColorMapRef,
+			setColorScheme: (colorScheme, colors) => {
+				const prev = get();
+				const darkModeColors = {
+					background: colors?.background ?? prev.darkModeColors.background,
+					foreground: colors?.foreground ?? prev.darkModeColors.foreground,
+				};
+				if (
+					prev.colorScheme === colorScheme &&
+					prev.darkModeColors.background === darkModeColors.background &&
+					prev.darkModeColors.foreground === darkModeColors.foreground
+				) {
+					return;
+				}
+				prev.renderColorMapRef.current =
+					colorScheme === "dark"
+						? createDarkModeColorMap(darkModeColors)
+						: null;
+				set({ colorScheme, darkModeColors });
+			},
 
 			renderedPages: {},
 			markPageRendered: (pageNumber: number) => {

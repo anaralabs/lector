@@ -1,14 +1,15 @@
 import { cleanup, render, waitFor } from "@testing-library/react";
-import { commands } from "@vitest/browser/context";
 import type { PageViewport, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
+import { useEffect } from "react";
 import { afterEach, expect, test } from "vitest";
+import { page as browserPage, commands } from "vitest/browser";
 import { TextLayer } from "../src/components/layers/text-layer";
 import { Page } from "../src/components/page";
 import { PDFStore, usePdf } from "../src/internal";
 import "pdfjs-dist/web/pdf_viewer.css";
 import attention from "./fixtures/attention-page-3.json";
 
-declare module "@vitest/browser/context" {
+declare module "vitest/browser" {
 	interface BrowserCommands {
 		mouse(
 			action: string,
@@ -22,11 +23,18 @@ declare module "@vitest/browser/context" {
 function TestViewport({
 	children,
 	scroll,
+	persistent,
 }: {
 	children: React.ReactNode;
 	scroll: boolean;
+	persistent: boolean;
 }) {
 	const viewport = usePdf((state) => state.viewportRef);
+	const selection = usePdf((state) => state.selection);
+	useEffect(() => {
+		if (persistent && viewport.current)
+			return selection.connect(viewport.current);
+	}, [persistent, selection, viewport]);
 	return (
 		<div
 			ref={viewport}
@@ -49,7 +57,14 @@ const lines = [
 	"The output depends on the known outputs at earlier positions.",
 ];
 
-async function setup(scale = 1, pages = 1, scroll = false, recorded = false) {
+async function setup(
+	scale = 1,
+	pages = 1,
+	scroll = false,
+	recorded = false,
+	persistent = false,
+) {
+	await browserPage.viewport(2000, 1000);
 	document.body.style.margin = "0";
 	const viewport = {
 		width: 600,
@@ -116,7 +131,7 @@ async function setup(scale = 1, pages = 1, scroll = false, recorded = false) {
 				zoom: 1,
 			}}
 		>
-			<TestViewport scroll={scroll}>
+			<TestViewport scroll={scroll} persistent={persistent}>
 				<div
 					style={{ transform: `scale(${scale})`, transformOrigin: "top left" }}
 				>
@@ -299,25 +314,28 @@ test("scrolling updates drag geometry and auto-scroll stops on release", async (
 	expect(viewport.scrollTop).toBe(top);
 });
 
-test("recorded Encoder paragraph at 197% keeps its top anchor on text and margins", async () => {
-	const spans = await setup(1.97, 1, false, true);
-	const encoder = spans.find((s) => s.textContent === "Encoder:")!;
-	const decoder = spans.find((s) => s.textContent === "Decoder:")!;
-	expect(encoder).toBeTruthy();
-	expect(decoder).toBeTruthy();
-	// Translate the zoomed page just as the scrolled viewer in the recording does.
-	const page = encoder.closest(".textLayer")!.parentElement!;
-	page.style.top = "-380px";
-	const last = spans[spans.indexOf(decoder) - 1]!;
-	for (const margin of [0, 1, 3, 12, 30]) {
-		const start = point(encoder);
-		await drag([start[0] - margin, start[1]], point(last, true));
-		expect(document.getSelection()?.anchorNode).toBe(encoder.firstChild);
-		expect(document.getSelection()?.anchorOffset).toBe(0);
-		expect(document.getSelection()?.toString()).toContain("Encoder:");
-		expect(document.getSelection()?.toString()).not.toContain("Decoder:");
-	}
-});
+test.each([false, true])(
+	"recorded Encoder paragraph at 197% keeps its top anchor (persistent=%s)",
+	async (persistent) => {
+		const spans = await setup(1.97, 1, false, true, persistent);
+		const encoder = spans.find((s) => s.textContent === "Encoder:")!;
+		const decoder = spans.find((s) => s.textContent === "Decoder:")!;
+		expect(encoder).toBeTruthy();
+		expect(decoder).toBeTruthy();
+		// Translate the zoomed page just as the scrolled viewer in the recording does.
+		const page = encoder.closest(".textLayer")!.parentElement!;
+		page.style.top = "-380px";
+		const last = spans[spans.indexOf(decoder) - 1]!;
+		for (const margin of [0, 1, 3, 12, 30]) {
+			const start = point(encoder);
+			await drag([start[0] - margin, start[1]], point(last, true));
+			expect(document.getSelection()?.anchorNode).toBe(encoder.firstChild);
+			expect(document.getSelection()?.anchorOffset).toBe(0);
+			expect(document.getSelection()?.toString()).toContain("Encoder:");
+			expect(document.getSelection()?.toString()).not.toContain("Decoder:");
+		}
+	},
+);
 
 test("partial-word drags preserve character offsets", async () => {
 	const spans = await setup();

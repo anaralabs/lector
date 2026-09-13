@@ -4,13 +4,12 @@ import {
 	CanvasLayer,
 	Page,
 	Pages,
-	Root,
 	TextLayer,
 } from "@anaralabs/lector";
 import { type FormEvent, useState } from "react";
-import "@/lib/setup";
+import { ExampleRoot } from "./example-root";
 
-const fileUrl = "/pdf/form.pdf";
+const fileUrl = "/lector/pdf/form.pdf";
 
 type FormValues = {
 	[key: string]: FormDataEntryValue;
@@ -47,16 +46,18 @@ const PdfFormLayer = () => {
 		if (!formValues) return null;
 
 		return Object.entries(formValues).map(([key, value]) => (
-			<div key={key} className="mb-4 bg-white rounded-lg p-4 shadow-sm">
-				<div className="text-sm text-gray-600 mb-1">{formatFieldName(key)}</div>
+			<div key={key} className="mb-4 bg-background rounded-lg p-4 shadow-sm">
+				<div className="text-sm text-muted-foreground mb-1">
+					{formatFieldName(key)}
+				</div>
 				<div className="text-base font-medium break-all">{String(value)}</div>
 			</div>
 		));
 	};
 
 	return (
-		<div className="flex w-full h-screen">
-			<div className="flex-1">
+		<div className="not-prose flex w-full min-w-0 flex-col gap-4 sm:flex-row">
+			<div className="min-w-0 flex-1">
 				<form onSubmit={handleSubmit}>
 					<button
 						type="submit"
@@ -65,9 +66,9 @@ const PdfFormLayer = () => {
 						Get form values
 					</button>
 
-					<Root
+					<ExampleRoot
 						source={fileUrl}
-						className="bg-gray-100 border rounded-md overflow-hidden relative h-[700px]"
+						className="bg-muted border rounded-md overflow-hidden relative h-[700px]"
 						loader={<div className="p-4">Loading...</div>}
 					>
 						<Pages className="p-4 h-full">
@@ -77,13 +78,15 @@ const PdfFormLayer = () => {
 								<AnnotationLayer />
 							</Page>
 						</Pages>
-					</Root>
+					</ExampleRoot>
 				</form>
 			</div>
 
 			<div
-				className={`p-6 border-l bg-gray-50 transition-all duration-300 ${
-					!formValues || Object.keys(formValues).length === 0 ? "w-64" : "w-1/3"
+				className={`p-4 border-t sm:border-l sm:border-t-0 bg-muted transition-all duration-300 ${
+					!formValues || Object.keys(formValues).length === 0
+						? "w-full sm:w-48"
+						: "w-full sm:w-56"
 				}`}
 			>
 				<h2 className="text-lg font-semibold mb-4">Filled Form Values</h2>
@@ -92,7 +95,9 @@ const PdfFormLayer = () => {
 						{renderFormValues()}
 					</div>
 				) : (
-					<p className="text-gray-500">No form values have been entered yet</p>
+					<p className="text-muted-foreground">
+						No form values have been entered yet
+					</p>
 				)}
 			</div>
 		</div>

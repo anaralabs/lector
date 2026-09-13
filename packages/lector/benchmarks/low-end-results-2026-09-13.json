@@ -1,0 +1,1749 @@
+{
+  "date": "2026-09-13",
+  "baselineCommit": "d9757fc",
+  "environment": {
+    "os": "26.5.2",
+    "architecture": "arm64",
+    "node": "v22.22.3",
+    "browserChannel": "chrome",
+    "cpuThrottlingRate": 6,
+    "chrome": "153.0.8005.0"
+  },
+  "method": "One warm-up plus seven measured samples per scenario in each of two separate browser runs per condition. Run order: baseline batch 1, final batch 2, baseline batch 2, final batch 3. An intermediate timer-based candidate was measured and rejected before final batch 2. PDF extraction is excluded; page identities are recreated for each cold-normalization search. Local generated text and bundled large.pdf; default result limit 10. No concurrent local browser tests or builds during measurement.",
+  "limitations": [
+    "CPU throttling on macOS is not a physical old Windows laptop benchmark.",
+    "Initial zero-delay timer latency is an event-loop responsiveness proxy, not hardware keyboard-to-paint latency.",
+    "Synthetic pages repeat text; exact early exit is most effective when enough matches occur early.",
+    "Search latency excludes PDF loading and initial text extraction.",
+    "Two browser batches are descriptive samples, not confidence intervals; host and run-to-run timing varies."
+  ],
+  "search": {
+    "baseline": [
+      {
+        "scenario": "real-common-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 110.5,
+        "inputDelayMs": 8.399999976158142,
+        "batch": 1
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 97.10000002384186,
+        "inputDelayMs": 8.800000071525574,
+        "batch": 1
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 95.10000002384186,
+        "inputDelayMs": 9.799999952316284,
+        "batch": 1
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 97.79999995231628,
+        "inputDelayMs": 9,
+        "batch": 1
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 90.10000002384186,
+        "inputDelayMs": 9.900000095367432,
+        "batch": 1
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 84,
+        "inputDelayMs": 9.600000023841858,
+        "batch": 1
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 99.90000009536743,
+        "inputDelayMs": 8.400000095367432,
+        "batch": 1
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 70.89999997615814,
+        "inputDelayMs": 23.800000071525574,
+        "batch": 1
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 65.5,
+        "inputDelayMs": 26.899999976158142,
+        "batch": 1
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 60,
+        "inputDelayMs": 21.299999952316284,
+        "batch": 1
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 62.299999952316284,
+        "inputDelayMs": 21.100000023841858,
+        "batch": 1
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 62.200000047683716,
+        "inputDelayMs": 22.200000047683716,
+        "batch": 1
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 57.5,
+        "inputDelayMs": 20.600000023841858,
+        "batch": 1
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 68.39999997615814,
+        "inputDelayMs": 26.700000047683716,
+        "batch": 1
+      },
+      {
+        "scenario": "common-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 373.6999999284744,
+        "inputDelayMs": 9.099999904632568,
+        "batch": 1
+      },
+      {
+        "scenario": "common-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 482.5,
+        "inputDelayMs": 11.300000071525574,
+        "batch": 1
+      },
+      {
+        "scenario": "common-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 566.2999999523163,
+        "inputDelayMs": 9.699999928474426,
+        "batch": 1
+      },
+      {
+        "scenario": "common-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 417.2000000476837,
+        "inputDelayMs": 10.399999976158142,
+        "batch": 1
+      },
+      {
+        "scenario": "common-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 361.6999999284744,
+        "inputDelayMs": 10.899999976158142,
+        "batch": 1
+      },
+      {
+        "scenario": "common-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 394.2000000476837,
+        "inputDelayMs": 9.700000047683716,
+        "batch": 1
+      },
+      {
+        "scenario": "common-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 385,
+        "inputDelayMs": 10.600000023841858,
+        "batch": 1
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 278.89999997615814,
+        "inputDelayMs": 30.5,
+        "batch": 1
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 274.10000002384186,
+        "inputDelayMs": 32.89999997615814,
+        "batch": 1
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 275,
+        "inputDelayMs": 31.100000023841858,
+        "batch": 1
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 254.40000009536743,
+        "inputDelayMs": 31,
+        "batch": 1
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 354.10000002384186,
+        "inputDelayMs": 32.60000002384186,
+        "batch": 1
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 371.2999999523163,
+        "inputDelayMs": 30.600000023841858,
+        "batch": 1
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 371.40000009536743,
+        "inputDelayMs": 35.60000002384186,
+        "batch": 1
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 296.89999997615814,
+        "inputDelayMs": 9.799999952316284,
+        "batch": 1
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 377.5,
+        "inputDelayMs": 9.900000095367432,
+        "batch": 1
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 291.2000000476837,
+        "inputDelayMs": 8.900000095367432,
+        "batch": 1
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 289.60000002384186,
+        "inputDelayMs": 10.200000047683716,
+        "batch": 1
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 291.10000002384186,
+        "inputDelayMs": 9.100000023841858,
+        "batch": 1
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 287.39999997615814,
+        "inputDelayMs": 10.100000023841858,
+        "batch": 1
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 277.60000002384186,
+        "inputDelayMs": 9.200000047683716,
+        "batch": 1
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 111.70000004768372,
+        "inputDelayMs": 8.200000047683716,
+        "batch": 2
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 102.39999997615814,
+        "inputDelayMs": 9.399999976158142,
+        "batch": 2
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 95.10000002384186,
+        "inputDelayMs": 8.699999928474426,
+        "batch": 2
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 89.19999992847443,
+        "inputDelayMs": 10.199999928474426,
+        "batch": 2
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 98.79999995231628,
+        "inputDelayMs": 8.799999952316284,
+        "batch": 2
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 94.89999997615814,
+        "inputDelayMs": 9,
+        "batch": 2
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 113.20000004768372,
+        "inputDelayMs": 9.5,
+        "batch": 2
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 80.29999995231628,
+        "inputDelayMs": 31.199999928474426,
+        "batch": 2
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 71.5,
+        "inputDelayMs": 28.800000071525574,
+        "batch": 2
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 66.89999997615814,
+        "inputDelayMs": 24,
+        "batch": 2
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 65.39999997615814,
+        "inputDelayMs": 21.399999976158142,
+        "batch": 2
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 57.89999997615814,
+        "inputDelayMs": 23.899999976158142,
+        "batch": 2
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 61.5,
+        "inputDelayMs": 22.09999990463257,
+        "batch": 2
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 69.70000004768372,
+        "inputDelayMs": 27.700000047683716,
+        "batch": 2
+      },
+      {
+        "scenario": "common-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 404.89999997615814,
+        "inputDelayMs": 10.600000023841858,
+        "batch": 2
+      },
+      {
+        "scenario": "common-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 535.6000000238419,
+        "inputDelayMs": 9.5,
+        "batch": 2
+      },
+      {
+        "scenario": "common-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 339,
+        "inputDelayMs": 10.200000047683716,
+        "batch": 2
+      },
+      {
+        "scenario": "common-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 355.2000000476837,
+        "inputDelayMs": 9.899999976158142,
+        "batch": 2
+      },
+      {
+        "scenario": "common-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 351.89999997615814,
+        "inputDelayMs": 10.200000047683716,
+        "batch": 2
+      },
+      {
+        "scenario": "common-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 359.40000009536743,
+        "inputDelayMs": 9.300000071525574,
+        "batch": 2
+      },
+      {
+        "scenario": "common-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 388.2999999523163,
+        "inputDelayMs": 10.399999976158142,
+        "batch": 2
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 296.59999990463257,
+        "inputDelayMs": 32.299999952316284,
+        "batch": 2
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 302.2000000476837,
+        "inputDelayMs": 34.10000002384186,
+        "batch": 2
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 377.89999997615814,
+        "inputDelayMs": 32.5,
+        "batch": 2
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 409.5,
+        "inputDelayMs": 33.199999928474426,
+        "batch": 2
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 436.10000002384186,
+        "inputDelayMs": 34.10000002384186,
+        "batch": 2
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 410.39999997615814,
+        "inputDelayMs": 37.10000002384186,
+        "batch": 2
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 408.5,
+        "inputDelayMs": 34.10000002384186,
+        "batch": 2
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 365.40000009536743,
+        "inputDelayMs": 8.900000095367432,
+        "batch": 2
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 346.60000002384186,
+        "inputDelayMs": 9,
+        "batch": 2
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 365.5,
+        "inputDelayMs": 8.699999928474426,
+        "batch": 2
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 362.7999999523163,
+        "inputDelayMs": 9.899999976158142,
+        "batch": 2
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 356.60000002384186,
+        "inputDelayMs": 9.700000047683716,
+        "batch": 2
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 353.2000000476837,
+        "inputDelayMs": 9,
+        "batch": 2
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 354.5,
+        "inputDelayMs": 8.899999976158142,
+        "batch": 2
+      }
+    ],
+    "final": [
+      {
+        "scenario": "real-common-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 0.7000000476837158,
+        "inputDelayMs": 0.7000000476837158,
+        "batch": 2
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 0.6000000238418579,
+        "inputDelayMs": 0.6000000238418579,
+        "batch": 2
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 0.7999999523162842,
+        "inputDelayMs": 0.7999999523162842,
+        "batch": 2
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 0.3999999761581421,
+        "inputDelayMs": 0.3999999761581421,
+        "batch": 2
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 0.7999999523162842,
+        "inputDelayMs": 1,
+        "batch": 2
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 0.09999990463256836,
+        "inputDelayMs": 4.399999976158142,
+        "batch": 2
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 0.7999999523162842,
+        "inputDelayMs": 4.599999904632568,
+        "batch": 2
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 63.60000002384186,
+        "inputDelayMs": 8.700000047683716,
+        "batch": 2
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 60.09999990463257,
+        "inputDelayMs": 8,
+        "batch": 2
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 59.10000002384186,
+        "inputDelayMs": 8.5,
+        "batch": 2
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 54.700000047683716,
+        "inputDelayMs": 8.399999976158142,
+        "batch": 2
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 56.299999952316284,
+        "inputDelayMs": 8.799999952316284,
+        "batch": 2
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 53.89999997615814,
+        "inputDelayMs": 8.099999904632568,
+        "batch": 2
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 56.60000002384186,
+        "inputDelayMs": 10,
+        "batch": 2
+      },
+      {
+        "scenario": "common-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 0.10000002384185791,
+        "inputDelayMs": 0.10000002384185791,
+        "batch": 2
+      },
+      {
+        "scenario": "common-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 0,
+        "inputDelayMs": 0.10000002384185791,
+        "batch": 2
+      },
+      {
+        "scenario": "common-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 0.40000009536743164,
+        "inputDelayMs": 0.5,
+        "batch": 2
+      },
+      {
+        "scenario": "common-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 0.10000002384185791,
+        "inputDelayMs": 0.10000002384185791,
+        "batch": 2
+      },
+      {
+        "scenario": "common-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 0.10000002384185791,
+        "inputDelayMs": 1.100000023841858,
+        "batch": 2
+      },
+      {
+        "scenario": "common-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 0,
+        "inputDelayMs": 5.400000095367432,
+        "batch": 2
+      },
+      {
+        "scenario": "common-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 0.09999990463256836,
+        "inputDelayMs": 4.899999976158142,
+        "batch": 2
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 161.69999992847443,
+        "inputDelayMs": 8.099999904632568,
+        "batch": 2
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 155.19999992847443,
+        "inputDelayMs": 8.299999952316284,
+        "batch": 2
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 143.60000002384186,
+        "inputDelayMs": 9.5,
+        "batch": 2
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 151.20000004768372,
+        "inputDelayMs": 8.700000047683716,
+        "batch": 2
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 153.09999990463257,
+        "inputDelayMs": 9.399999976158142,
+        "batch": 2
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 182.20000004768372,
+        "inputDelayMs": 9,
+        "batch": 2
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 164.19999992847443,
+        "inputDelayMs": 8.699999928474426,
+        "batch": 2
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 202.10000002384186,
+        "inputDelayMs": 8.600000023841858,
+        "batch": 2
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 209,
+        "inputDelayMs": 8.399999976158142,
+        "batch": 2
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 206.19999992847443,
+        "inputDelayMs": 8.799999952316284,
+        "batch": 2
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 205.5,
+        "inputDelayMs": 9,
+        "batch": 2
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 202.89999997615814,
+        "inputDelayMs": 8.399999976158142,
+        "batch": 2
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 205.19999992847443,
+        "inputDelayMs": 8.799999952316284,
+        "batch": 2
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 196,
+        "inputDelayMs": 9.600000023841858,
+        "batch": 2
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 0.6999999284744263,
+        "inputDelayMs": 0.6999999284744263,
+        "batch": 3
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 1.1999999284744263,
+        "inputDelayMs": 1.1999999284744263,
+        "batch": 3
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 0,
+        "inputDelayMs": 0,
+        "batch": 3
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 0,
+        "inputDelayMs": 0.6000000238418579,
+        "batch": 3
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 0.10000002384185791,
+        "inputDelayMs": 0.10000002384185791,
+        "batch": 3
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 0.10000002384185791,
+        "inputDelayMs": 4.600000023841858,
+        "batch": 3
+      },
+      {
+        "scenario": "real-common-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 1.2000000476837158,
+        "inputDelayMs": 4.100000023841858,
+        "batch": 3
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 61.40000009536743,
+        "inputDelayMs": 8.400000095367432,
+        "batch": 3
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 58.5,
+        "inputDelayMs": 8.299999952316284,
+        "batch": 3
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 63.800000071525574,
+        "inputDelayMs": 8.800000071525574,
+        "batch": 3
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 58.299999952316284,
+        "inputDelayMs": 8.399999976158142,
+        "batch": 3
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 57.39999997615814,
+        "inputDelayMs": 8.299999952316284,
+        "batch": 3
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 57.10000002384186,
+        "inputDelayMs": 8.799999952316284,
+        "batch": 3
+      },
+      {
+        "scenario": "real-absent-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 607965,
+        "totalMs": 59.90000009536743,
+        "inputDelayMs": 9.300000071525574,
+        "batch": 3
+      },
+      {
+        "scenario": "common-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 0.10000002384185791,
+        "inputDelayMs": 0.10000002384185791,
+        "batch": 3
+      },
+      {
+        "scenario": "common-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 0.10000002384185791,
+        "inputDelayMs": 0.10000002384185791,
+        "batch": 3
+      },
+      {
+        "scenario": "common-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 1.2999999523162842,
+        "inputDelayMs": 1.2999999523162842,
+        "batch": 3
+      },
+      {
+        "scenario": "common-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 1.2999999523162842,
+        "inputDelayMs": 1.2999999523162842,
+        "batch": 3
+      },
+      {
+        "scenario": "common-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 0.10000002384185791,
+        "inputDelayMs": 0.10000002384185791,
+        "batch": 3
+      },
+      {
+        "scenario": "common-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 0,
+        "inputDelayMs": 4.200000047683716,
+        "batch": 3
+      },
+      {
+        "scenario": "common-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 1.399999976158142,
+        "inputDelayMs": 4.299999952316284,
+        "batch": 3
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 158.80000007152557,
+        "inputDelayMs": 8.100000023841858,
+        "batch": 3
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 153,
+        "inputDelayMs": 8.699999928474426,
+        "batch": 3
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 144.60000002384186,
+        "inputDelayMs": 8.600000023841858,
+        "batch": 3
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 143,
+        "inputDelayMs": 8.400000095367432,
+        "batch": 3
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 151.10000002384186,
+        "inputDelayMs": 9.699999928474426,
+        "batch": 3
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 174.60000002384186,
+        "inputDelayMs": 9.100000023841858,
+        "batch": 3
+      },
+      {
+        "scenario": "absent-exact",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 1128000,
+        "totalMs": 170.80000007152557,
+        "inputDelayMs": 8.300000071525574,
+        "batch": 3
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 1,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 180.5,
+        "inputDelayMs": 8.299999952316284,
+        "batch": 3
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 2,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 172.5,
+        "inputDelayMs": 8.5,
+        "batch": 3
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 3,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 175.5,
+        "inputDelayMs": 8.199999928474426,
+        "batch": 3
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 4,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 182.39999997615814,
+        "inputDelayMs": 9.799999952316284,
+        "batch": 3
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 5,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 177.69999992847443,
+        "inputDelayMs": 9.099999904632568,
+        "batch": 3
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 6,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 179.59999990463257,
+        "inputDelayMs": 8.799999952316284,
+        "batch": 3
+      },
+      {
+        "scenario": "fuzzy-typo",
+        "run": 7,
+        "cpuRate": 6,
+        "characters": 112800,
+        "totalMs": 194.29999995231628,
+        "inputDelayMs": 10.600000023841858,
+        "batch": 3
+      }
+    ]
+  },
+  "scrollProfile": [
+    {
+      "name": "large",
+      "drawImageMs": 1430.097,
+      "fillTextMs": 601.609,
+      "p95": 77.60000002384186,
+      "framesOver32": 54,
+      "rows": [
+        {
+          "name": "drawImage",
+          "url": "",
+          "line": -1,
+          "selfMs": 1430.097
+        },
+        {
+          "name": "fillText",
+          "url": "",
+          "line": -1,
+          "selfMs": 601.609
+        },
+        {
+          "name": "(program)",
+          "url": "",
+          "line": -1,
+          "selfMs": 587.965
+        },
+        {
+          "name": "publish",
+          "url": "http://localhost:63315/src/hooks/pages/useObserveElement.tsx",
+          "line": 44,
+          "selfMs": 105.641
+        },
+        {
+          "name": "showText",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=72609f91",
+          "line": 16250,
+          "selfMs": 76.293
+        },
+        {
+          "name": "onMessage_fn",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=72609f91",
+          "line": 13042,
+          "selfMs": 72.085
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=72609f91",
+          "line": 238,
+          "selfMs": 67.497
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=72609f91",
+          "line": 238,
+          "selfMs": 54.587
+        },
+        {
+          "name": "executeOperatorList",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=72609f91",
+          "line": 15486,
+          "selfMs": 51.409
+        },
+        {
+          "name": "(garbage collector)",
+          "url": "",
+          "line": -1,
+          "selfMs": 50.567
+        },
+        {
+          "name": "(idle)",
+          "url": "",
+          "line": -1,
+          "selfMs": 43.719
+        },
+        {
+          "name": "fillRect",
+          "url": "",
+          "line": -1,
+          "selfMs": 30.49
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=72609f91",
+          "line": 238,
+          "selfMs": 28.453
+        },
+        {
+          "name": "setFont",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=72609f91",
+          "line": 16081,
+          "selfMs": 23.396
+        },
+        {
+          "name": "getContext",
+          "url": "",
+          "line": -1,
+          "selfMs": 23.072
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=72609f91",
+          "line": 238,
+          "selfMs": 22.773
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/private/tmp/lector-low-end-performance/packages/lector/benchmarks/scroll-profile.browser.test.tsx?import&browserv=1789298214066",
+          "line": 82,
+          "selfMs": 22.009
+        },
+        {
+          "name": "save",
+          "url": "",
+          "line": -1,
+          "selfMs": 21.476
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=72609f91",
+          "line": 238,
+          "selfMs": 18.304
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=72609f91",
+          "line": 238,
+          "selfMs": 17.864
+        },
+        {
+          "name": "setValueForStyle",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/@testing-library_react.js?v=72609f91",
+          "line": 2237,
+          "selfMs": 17.194
+        },
+        {
+          "name": "setState",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/zustand.js?v=72609f91",
+          "line": 11,
+          "selfMs": 14.42
+        },
+        {
+          "name": "setFillRGBColor",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=72609f91",
+          "line": 16518,
+          "selfMs": 13.744
+        },
+        {
+          "name": "removeChild",
+          "url": "",
+          "line": -1,
+          "selfMs": 13.719
+        },
+        {
+          "name": "_next",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=72609f91",
+          "line": 20870,
+          "selfMs": 13.405
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=72609f91",
+          "line": 238,
+          "selfMs": 12.855
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/hooks/layers/useCanvasLayer.tsx",
+          "line": 281,
+          "selfMs": 12.108
+        },
+        {
+          "name": "markPageRendered",
+          "url": "http://localhost:63315/src/internal.ts",
+          "line": 143,
+          "selfMs": 11.929
+        },
+        {
+          "name": "resetCtxToDefault",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=72609f91",
+          "line": 15375,
+          "selfMs": 11.806
+        },
+        {
+          "name": "run",
+          "url": "",
+          "line": -1,
+          "selfMs": 10.91
+        }
+      ]
+    },
+    {
+      "name": "expensive",
+      "drawImageMs": 676.963,
+      "fillTextMs": 708.427,
+      "p95": 95.60000002384186,
+      "framesOver32": 92,
+      "rows": [
+        {
+          "name": "(idle)",
+          "url": "",
+          "line": -1,
+          "selfMs": 1053.8
+        },
+        {
+          "name": "fillText",
+          "url": "",
+          "line": -1,
+          "selfMs": 708.427
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/lib/recolor-context.ts",
+          "line": 378,
+          "selfMs": 630.14
+        },
+        {
+          "name": "(program)",
+          "url": "",
+          "line": -1,
+          "selfMs": 574.789
+        },
+        {
+          "name": "drawImage",
+          "url": "",
+          "line": -1,
+          "selfMs": 574.384
+        },
+        {
+          "name": "onMessage_fn",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=72609f91",
+          "line": 13042,
+          "selfMs": 271.184
+        },
+        {
+          "name": "showText",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=72609f91",
+          "line": 16250,
+          "selfMs": 159.142
+        },
+        {
+          "name": "getImageData",
+          "url": "",
+          "line": -1,
+          "selfMs": 118.92
+        },
+        {
+          "name": "executeOperatorList",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=72609f91",
+          "line": 15486,
+          "selfMs": 78.876
+        },
+        {
+          "name": "(garbage collector)",
+          "url": "",
+          "line": -1,
+          "selfMs": 76.519
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/lib/recolor-context.ts",
+          "line": 378,
+          "selfMs": 75.787
+        },
+        {
+          "name": "publish",
+          "url": "http://localhost:63315/src/hooks/pages/useObserveElement.tsx",
+          "line": 44,
+          "selfMs": 75.215
+        },
+        {
+          "name": "drawImage",
+          "url": "",
+          "line": -1,
+          "selfMs": 55.188
+        },
+        {
+          "name": "setFont",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=72609f91",
+          "line": 16081,
+          "selfMs": 44.884
+        },
+        {
+          "name": "drawImage",
+          "url": "",
+          "line": -1,
+          "selfMs": 38.405
+        },
+        {
+          "name": "fill",
+          "url": "",
+          "line": -1,
+          "selfMs": 33.236
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/private/tmp/lector-low-end-performance/packages/lector/benchmarks/scroll-profile.browser.test.tsx?import&browserv=1789298214066",
+          "line": 82,
+          "selfMs": 29.581
+        },
+        {
+          "name": "measureText",
+          "url": "",
+          "line": -1,
+          "selfMs": 29.41
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=72609f91",
+          "line": 238,
+          "selfMs": 29.344
+        },
+        {
+          "name": "fillRect",
+          "url": "",
+          "line": -1,
+          "selfMs": 25.189
+        },
+        {
+          "name": "setState",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/zustand.js?v=72609f91",
+          "line": 11,
+          "selfMs": 23.235
+        },
+        {
+          "name": "getContext",
+          "url": "",
+          "line": -1,
+          "selfMs": 23.032
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=72609f91",
+          "line": 238,
+          "selfMs": 21.864
+        },
+        {
+          "name": "constructPath",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=72609f91",
+          "line": 15897,
+          "selfMs": 21.803
+        },
+        {
+          "name": "save",
+          "url": "",
+          "line": -1,
+          "selfMs": 20.53
+        },
+        {
+          "name": "clone",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=72609f91",
+          "line": 15207,
+          "selfMs": 20.146
+        },
+        {
+          "name": "__accessCheck",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/chunk-QWN5BXRD.js?v=72609f91",
+          "line": 30,
+          "selfMs": 19.2
+        },
+        {
+          "name": "getTransform",
+          "url": "",
+          "line": -1,
+          "selfMs": 17.922
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=72609f91",
+          "line": 238,
+          "selfMs": 16.883
+        },
+        {
+          "name": "getCurrentTransform",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=72609f91",
+          "line": 5826,
+          "selfMs": 16.821
+        }
+      ]
+    }
+  ],
+  "scrollSoak": [
+    {
+      "cycle": 0,
+      "name": "large",
+      "colorScheme": "light",
+      "mobileEmulation": false,
+      "dpr": 1,
+      "cpuRate": 6,
+      "readyMs": 733.2000000476837,
+      "frameP95Ms": 96.60000002384186,
+      "framesOver32ms": 57,
+      "peakCanvases": 10,
+      "peakCanvasBytes": 33685200,
+      "peakBitmapBytes": 199760560,
+      "mountedBitmapBytes": 124898360,
+      "bitmapsCreated": 198,
+      "liveBitmapsAfterUnmount": 0,
+      "heapUsedAfterGc": 26027096
+    },
+    {
+      "cycle": 1,
+      "name": "expensive",
+      "colorScheme": "dark",
+      "mobileEmulation": false,
+      "dpr": 1,
+      "cpuRate": 6,
+      "readyMs": 358.8000000715256,
+      "frameP95Ms": 107.19999992847443,
+      "framesOver32ms": 98,
+      "peakCanvases": 10,
+      "peakCanvasBytes": 44933536,
+      "peakBitmapBytes": 212239196,
+      "mountedBitmapBytes": 200556220,
+      "bitmapsCreated": 85,
+      "liveBitmapsAfterUnmount": 0,
+      "heapUsedAfterGc": 36158776
+    },
+    {
+      "cycle": 2,
+      "name": "large",
+      "colorScheme": "light",
+      "mobileEmulation": false,
+      "dpr": 1,
+      "cpuRate": 6,
+      "readyMs": 205.69999992847443,
+      "frameP95Ms": 78.70000004768372,
+      "framesOver32ms": 52,
+      "peakCanvases": 10,
+      "peakCanvasBytes": 33685200,
+      "peakBitmapBytes": 194656780,
+      "mountedBitmapBytes": 124898360,
+      "bitmapsCreated": 198,
+      "liveBitmapsAfterUnmount": 0,
+      "heapUsedAfterGc": 26800624
+    },
+    {
+      "cycle": 3,
+      "name": "expensive",
+      "colorScheme": "dark",
+      "mobileEmulation": false,
+      "dpr": 1,
+      "cpuRate": 6,
+      "readyMs": 299,
+      "frameP95Ms": 105.89999997615814,
+      "framesOver32ms": 93,
+      "peakCanvases": 10,
+      "peakCanvasBytes": 44933536,
+      "peakBitmapBytes": 212239196,
+      "mountedBitmapBytes": 200556220,
+      "bitmapsCreated": 87,
+      "liveBitmapsAfterUnmount": 0,
+      "heapUsedAfterGc": 35280552
+    }
+  ],
+  "scrollNotes": "Unchanged rendering implementation: 4x CPU diagnostic profile and four 6x CPU desktop/DPR1 soak cycles. These are remaining-bottleneck measurements, not before/after rendering gains. Heap/canvas accounting excludes total process, worker and GPU memory.",
+  "windowsFindings": {
+    "highlightNativeBeforeErrorCssPx": 1.326672130691577,
+    "localMappedFontBeforeErrorCssPx": 28.87439130722379,
+    "unchangedAccuracyLimitCssPx": 1,
+    "failingWindowsFirefoxJob": "https://github.com/anaralabs/lector/actions/runs/34754354160/job/103716104210",
+    "cause": "PDF.js uses Calibri for selectable sans-serif text on Windows Firefox; the highlight code measured generic sans-serif instead.",
+    "fix": "Resolve partial-match font families through TextLayer.fontFamilyMap."
+  }
+}

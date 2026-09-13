@@ -1,12 +1,19 @@
 import { useGesture } from "@use-gesture/react";
-import { type RefObject, useCallback, useEffect, useRef } from "react";
+import {
+	type RefObject,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+} from "react";
 
-import { usePdf } from "../../internal";
+import { PDFStore, usePdf } from "../../internal";
 import { clamp } from "../../lib/clamp";
 import { firstMemo } from "../../lib/memo";
+import { registerViewportZoom } from "../../lib/viewport-zoom";
+import { USE_LAYOUT_ZOOM } from "../../lib/zoom";
 
 const WHEEL_ZOOM_SENSITIVITY = 0.01;
-// Heuristics for suppressing trackpad inertia after a CTRL+wheel zoom.
 const WHEEL_INERTIA_GAP_MS = 140;
 const WHEEL_INERTIA_ESCAPE_FACTOR = 1.35;
 
@@ -19,8 +26,9 @@ export const useViewportContainer = ({
 	elementWrapperRef: RefObject<HTMLDivElement | null>;
 	elementRef: RefObject<HTMLDivElement | null>;
 }) => {
-	// Ref instead of useState — the return value isn't consumed by any caller,
-	// so useState was causing a wasted React re-render on every pinch start.
+	const store = PDFStore.useContext();
+	const isPinching = usePdf((state) => state.isPinching);
+	const gestureTransformAppliedRef = useRef(false);
 	const originRef = useRef<[number, number]>([0, 0]);
 	const wheelInertia = useRef<{
 		active: boolean;
@@ -52,20 +60,13 @@ export const useViewportContainer = ({
 	}>({
 		translateX: 0,
 		translateY: 0,
-		zoom,
+		zoom: 1,
 	});
 
-	// rAF handle for debouncing Zustand store updates during pinch.
-	// The imperative DOM transform runs every frame; the store update
-	// (which triggers React re-renders in all zoom subscribers) is
-	// coalesced to at most one per animation frame.
 	const zoomRafRef = useRef<number | null>(null);
-	// Track the last zoom value we pushed to the store so the sync effect
-	// can distinguish our own rAF-deferred updates from external changes
-	// (e.g. zoom slider). Without this, the sync effect sees a mismatch
-	// between the store (stale rAF value) and transformations.current
-	// (already advanced by a newer pinch frame) and snaps back.
-	const lastPushedZoomRef = useRef(zoom);
+	const lastPushedZoomRef = useRef<number | null>(null);
+	const initializedZoomRef = useRef(false);
+	const appliedZoomRef = useRef(1);
 
 	const updateTransform = useCallback(
 		(zoomUpdate?: boolean) => {
@@ -79,10 +80,6 @@ export const useViewportContainer = ({
 
 			const { zoom, translateX, translateY } = transformations.current;
 
-			// Read natural dimensions BEFORE writing the transform — avoids
-			// forced synchronous layout. getBoundingClientRect() after a
-			// transform write forces Firefox to re-rasterize the compositor
-			// layer mid-frame, briefly flashing the canvas background color.
 			const naturalWidth =
 				parseFloat(elementRef.current.style.width) ||
 				elementRef.current.offsetWidth;
@@ -90,26 +87,77 @@ export const useViewportContainer = ({
 				parseFloat(elementRef.current.style.height) ||
 				elementRef.current.offsetHeight;
 
-			// Batch all writes — no layout reads after this point.
-			elementRef.current.style.transform = `scale3d(${zoom}, ${zoom}, 1)`;
+			if (USE_LAYOUT_ZOOM) {
+				const element = elementRef.current;
+				if (store.getState().isPinching) {
+					const layoutZoom = parseFloat(element.style.zoom) || 1;
+					const gestureScale = zoom / layoutZoom;
+					element.style.transform = `scale3d(${gestureScale}, ${gestureScale}, 1)`;
+					element.style.willChange = "transform";
+					gestureTransformAppliedRef.current = true;
+				} else {
+					// WebKit downsamples canvases under transformed ancestors: https://bugs.webkit.org/show_bug.cgi?id=264954
+					element.style.zoom = String(zoom);
+					element.style.transform = "none";
+					element.style.willChange = "auto";
+					gestureTransformAppliedRef.current = false;
+				}
+			} else {
+				elementRef.current.style.transform = `scale3d(${zoom}, ${zoom}, 1)`;
+			}
 			elementWrapperRef.current.style.width = `${naturalWidth * zoom}px`;
 			elementWrapperRef.current.style.height = `${naturalHeight * zoom}px`;
 			containerRef.current.scrollTop = translateY;
 			containerRef.current.scrollLeft = translateX;
+			appliedZoomRef.current = zoom;
 
-			if (zoomUpdate && zoomRafRef.current === null) {
-				zoomRafRef.current = requestAnimationFrame(() => {
-					zoomRafRef.current = null;
-					const z = transformations.current.zoom;
-					lastPushedZoomRef.current = z;
-					updateZoom(() => z);
-				});
+			if (zoomUpdate) {
+				lastPushedZoomRef.current = zoom;
+				updateZoom(() => zoom);
 			}
 		},
-		[containerRef, elementRef, elementWrapperRef, updateZoom],
+		[containerRef, elementRef, elementWrapperRef, updateZoom, store],
 	);
 
-	// Cancel pending rAF on unmount
+	useLayoutEffect(() => {
+		const viewport = containerRef.current;
+		if (!viewport) return;
+		return registerViewportZoom(viewport, (nextZoom) => {
+			if (
+				initializedZoomRef.current &&
+				appliedZoomRef.current === nextZoom &&
+				zoomRafRef.current === null
+			)
+				return;
+			if (zoomRafRef.current !== null) {
+				cancelAnimationFrame(zoomRafRef.current);
+				zoomRafRef.current = null;
+			}
+			lastPushedZoomRef.current = null;
+			// Before mount initialization the virtualizer's physical offset
+			// already includes the initial store scale.
+			const previousZoom = initializedZoomRef.current
+				? appliedZoomRef.current
+				: store.getState().zoom;
+			const ratio =
+				previousZoom > 0 && Number.isFinite(previousZoom)
+					? nextZoom / previousZoom
+					: 1;
+			transformations.current = {
+				zoom: nextZoom,
+				translateX: viewport.scrollLeft * ratio,
+				translateY: viewport.scrollTop * ratio,
+			};
+			initializedZoomRef.current = true;
+			updateTransform();
+		});
+	}, [containerRef, store, updateTransform]);
+
+	useEffect(() => {
+		if (USE_LAYOUT_ZOOM && gestureTransformAppliedRef.current && !isPinching)
+			updateTransform();
+	}, [isPinching, updateTransform]);
+
 	useEffect(() => {
 		return () => {
 			if (zoomRafRef.current !== null) {
@@ -118,19 +166,37 @@ export const useViewportContainer = ({
 		};
 	}, []);
 
-	// Sync external zoom changes (e.g. zoom slider, programmatic setZoom)
-	// into the imperative transform. Skip updates that originated from our
-	// own rAF-deferred store push to avoid overwriting a newer pinch value.
 	useEffect(() => {
+		if (!initializedZoomRef.current && containerRef.current) {
+			initializedZoomRef.current = true;
+			// The virtualizer restores its offset during layout, already scaled
+			// by the initial store zoom. Apply geometry without scaling that
+			// physical scroll position a second time.
+			transformations.current = {
+				zoom,
+				translateX: containerRef.current.scrollLeft,
+				translateY: containerRef.current.scrollTop,
+			};
+			updateTransform();
+			return;
+		}
 		if (transformations.current.zoom === zoom || !containerRef.current) {
 			return;
 		}
 
 		if (zoom === lastPushedZoomRef.current) {
+			lastPushedZoomRef.current = null;
 			return;
 		}
 
-		const prevZoom = transformations.current.zoom;
+		if (zoomRafRef.current !== null) {
+			cancelAnimationFrame(zoomRafRef.current);
+			zoomRafRef.current = null;
+		}
+		lastPushedZoomRef.current = null;
+
+		// A newer gesture value may still be queued for the next frame.
+		const prevZoom = appliedZoomRef.current;
 		if (!prevZoom || !Number.isFinite(prevZoom)) {
 			transformations.current = {
 				translateX: containerRef.current.scrollLeft,
@@ -168,8 +234,6 @@ export const useViewportContainer = ({
 		};
 	}, []);
 
-	// Prevent scroll when CTRL is held (zoom mode) and suppress the inertial tail
-	// after releasing CTRL so the PDF doesn't "keep scrolling" from trackpad velocity.
 	useEffect(() => {
 		const container = containerRef.current;
 		if (!container) return;
@@ -193,6 +257,13 @@ export const useViewportContainer = ({
 			}
 
 			if (!st.active) {
+				return;
+			}
+
+			// Pinch-wheel inertia is vertical. A horizontal-dominant gesture
+			// is an intentional pan, even immediately after releasing Ctrl.
+			if (Math.abs(event.deltaX) > abs) {
+				st.active = false;
 				return;
 			}
 
@@ -247,10 +318,6 @@ export const useViewportContainer = ({
 					const containerRect = currentContainer.getBoundingClientRect();
 					const currentZoom = transformations.current.zoom;
 
-					// containerRect is the border box, but the inner element
-					// sits in the padding box. Bake padding into containerPosition
-					// so the pinch math doesn't drop scrollTop by paddingTop on
-					// the first frame when the scroll container has padding.
 					const containerStyle = getComputedStyle(currentContainer);
 					const paddingTop = parseFloat(containerStyle.paddingTop) || 0;
 					const paddingLeft = parseFloat(containerStyle.paddingLeft) || 0;
@@ -274,13 +341,14 @@ export const useViewportContainer = ({
 						contentPosition,
 						containerPosition,
 						originZoom: currentZoom,
+						origin: [...origin] as [number, number],
 						lastZoom: currentZoom,
 					};
 				});
 
-				if (first) {
-					return newMemo;
-				}
+				// Wheel gestures include a scale delta in their first event. Apply
+				// it on the next frame instead of waiting for another event or end.
+				if (first && ms === 1) return newMemo;
 
 				const gestureValuesValid = Number.isFinite(ms) && ms > 0;
 
@@ -304,12 +372,28 @@ export const useViewportContainer = ({
 					minZoom,
 					maxZoom,
 				);
+				// A moving touch midpoint pans the anchored content. A wheel
+				// pointer instead chooses a new content anchor at the previous
+				// scale, including updates still queued for the next paint.
+				if (event.type === "wheel") {
+					const previousScale = newMemo.lastZoom / newMemo.originZoom;
+					for (const axis of [0, 1] as const) {
+						const movement = origin[axis] - newMemo.origin[axis];
+						newMemo.contentPosition[axis] += movement / previousScale;
+						newMemo.containerPosition[axis] += movement;
+						newMemo.origin[axis] = origin[axis];
+					}
+				}
 				const realMs = newZoom / newMemo.originZoom;
 
 				const newTranslateX =
-					newMemo.contentPosition[0] * realMs - newMemo.containerPosition[0];
+					newMemo.contentPosition[0] * realMs -
+					newMemo.containerPosition[0] -
+					(origin[0] - newMemo.origin[0]);
 				const newTranslateY =
-					newMemo.contentPosition[1] * realMs - newMemo.containerPosition[1];
+					newMemo.contentPosition[1] * realMs -
+					newMemo.containerPosition[1] -
+					(origin[1] - newMemo.origin[1]);
 
 				transformations.current = {
 					zoom: newZoom,
@@ -318,12 +402,35 @@ export const useViewportContainer = ({
 				};
 
 				newMemo.lastZoom = newZoom;
-				updateTransform(true);
+				// Trackpads can deliver several events before the next paint.
+				// Keep their latest anchor/scale, then apply geometry and publish
+				// the matching store zoom together once per frame. Scroll writes
+				// after size changes force layout, so batching just the store is
+				// not enough to keep this path responsive.
+				if (zoomRafRef.current === null) {
+					zoomRafRef.current = requestAnimationFrame(() => {
+						zoomRafRef.current = null;
+						updateTransform(true);
+					});
+				}
 
 				return newMemo;
 			},
 			onPinchStart: () => setIsPinching(true),
-			onPinchEnd: () => setIsPinching(false),
+			onPinchEnd: () => {
+				const pendingFrame = zoomRafRef.current !== null;
+				if (zoomRafRef.current !== null) {
+					cancelAnimationFrame(zoomRafRef.current);
+					zoomRafRef.current = null;
+				}
+				setIsPinching(false);
+				// A gesture can end before its queued frame. Flush its final
+				// position now, restoring native CSS zoom on WebKit before paint.
+				// A pinch with no movement must preserve native scrolling.
+				if (pendingFrame || gestureTransformAppliedRef.current) {
+					updateTransform(pendingFrame);
+				}
+			},
 		},
 		{
 			target: containerRef,

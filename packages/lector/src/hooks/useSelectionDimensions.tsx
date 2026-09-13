@@ -1,4 +1,7 @@
 import { type HighlightRect, PDFStore } from "../internal";
+import { getTextNodeClientRects, mergeTextRuns } from "../lib/selection-rects";
+import { getPdfSelectionText } from "../lib/selection-text";
+import type { SelectionTextOptions } from "../lib/text-normalization";
 
 const MERGE_THRESHOLD = 2; // Reduced threshold for more precise merging
 const LAYER_ATTRIBUTION_TOLERANCE_PX = 4;
@@ -10,77 +13,12 @@ type CollapsibleSelection = {
 	isCollapsed: boolean;
 };
 
-type TextNodeRect = { rect: DOMRect; element: Element | null };
-
 type MappedSelectionRect = {
 	clientRect: DOMRect;
 	sourceElement: Element | null;
 	layer: HTMLElement;
 	layerRect: DOMRect;
 	pageNumber: number;
-};
-
-/**
- * Per-text-node client rects for a selection. Avoids the block-level rects
- * that `range.getClientRects()` returns for `.textLayer` / page wrappers,
- * which would render as full-page highlights on multi-page selections.
- */
-const getTextNodeClientRects = (range: Range): TextNodeRect[] => {
-	const root = range.commonAncestorContainer;
-	const ownerDoc = root.ownerDocument ?? document;
-
-	if (root.nodeType === Node.TEXT_NODE) {
-		const parentElement = (root as Text).parentElement;
-		return Array.from(range.getClientRects()).map((rect) => ({
-			rect,
-			element: parentElement,
-		}));
-	}
-
-	const walker = ownerDoc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-		acceptNode(node) {
-			if (!node.nodeValue || node.nodeValue.length === 0) {
-				return NodeFilter.FILTER_REJECT;
-			}
-			try {
-				return range.intersectsNode(node)
-					? NodeFilter.FILTER_ACCEPT
-					: NodeFilter.FILTER_REJECT;
-			} catch {
-				return NodeFilter.FILTER_REJECT;
-			}
-		},
-	});
-
-	const results: TextNodeRect[] = [];
-	let current = walker.nextNode();
-	while (current) {
-		const textNode = current as Text;
-		const parentElement = textNode.parentElement;
-		const length = textNode.nodeValue?.length ?? 0;
-		const isStartNode = textNode === range.startContainer;
-		const isEndNode = textNode === range.endContainer;
-		const start = isStartNode ? range.startOffset : 0;
-		const end = isEndNode ? range.endOffset : length;
-		if (end > start) {
-			const sub = ownerDoc.createRange();
-			try {
-				sub.setStart(textNode, start);
-				sub.setEnd(textNode, end);
-				const subRects = sub.getClientRects();
-				for (let i = 0; i < subRects.length; i++) {
-					const r = subRects[i];
-					if (r) results.push({ rect: r, element: parentElement });
-				}
-			} catch {
-			} finally {
-				sub.detach?.();
-			}
-		}
-		current = walker.nextNode();
-	}
-
-	return results;
 };
 
 /**
@@ -140,197 +78,24 @@ const mapSelectionRectsToLayers = (range: Range): MappedSelectionRect[] => {
 	return result;
 };
 
-const shouldMergeRects = (
-	rect1: HighlightRect,
-	rect2: HighlightRect,
-): boolean => {
-	// Only merge if they actually overlap or are immediately adjacent
-	const verticalOverlap = !(
-		rect1.top > rect2.top + rect2.height || rect2.top > rect1.top + rect1.height
-	);
-
-	// Check for actual overlap or immediate adjacency (no gaps)
-	const horizontallyConnected =
-		Math.abs(rect1.left + rect1.width - rect2.left) <= MERGE_THRESHOLD ||
-		Math.abs(rect2.left + rect2.width - rect1.left) <= MERGE_THRESHOLD ||
-		(rect1.left < rect2.left + rect2.width &&
-			rect2.left < rect1.left + rect1.width); // Actual overlap
-
-	return verticalOverlap && horizontallyConnected;
-};
-
-// New function to consolidate highlights more aggressively to prevent overlaps
-const consolidateHighlightRects = (rects: HighlightRect[]): HighlightRect[] => {
-	if (rects.length <= 1) return rects;
-
-	// Use a more aggressive approach similar to underline consolidation
-	const consolidated: HighlightRect[] = [];
-	const sorted = [...rects].sort((a, b) => {
-		const pageCompare = a.pageNumber - b.pageNumber;
-		if (pageCompare !== 0) return pageCompare;
-		const topDiff = a.top - b.top;
-		return Math.abs(topDiff) < 2 ? a.left - b.left : topDiff;
-	});
-
-	let current = sorted[0];
-	if (!current) return rects;
-
-	for (let i = 1; i < sorted.length; i++) {
-		const next = sorted[i];
-		if (!next) continue;
-
-		// Check if highlights are on same page and same line (with tolerance)
-		const samePageAndLine =
-			current.pageNumber === next.pageNumber &&
-			Math.abs(current.top - next.top) <
-				Math.max(current.height, next.height) * 0.5;
-
-		// Check if they're horizontally adjacent, overlapping, or very close
-		const horizontallyConnected =
-			samePageAndLine &&
-			// Adjacent (touching or very close)
-			(Math.abs(current.left + current.width - next.left) <= MERGE_THRESHOLD ||
-				Math.abs(next.left + next.width - current.left) <= MERGE_THRESHOLD ||
-				// Overlapping
-				(current.left < next.left + next.width &&
-					next.left < current.left + current.width) ||
-				// Very close (small gap)
-				Math.abs(current.left + current.width - next.left) <=
-					current.height * 0.2);
-
-		if (horizontallyConnected) {
-			// Merge the highlights
-			const newLeft = Math.min(current.left, next.left);
-			const newRight = Math.max(
-				current.left + current.width,
-				next.left + next.width,
-			);
-			const newTop = Math.min(current.top, next.top);
-			const newBottom = Math.max(
-				current.top + current.height,
-				next.top + next.height,
-			);
-
-			current = {
-				left: newLeft,
-				top: newTop,
-				width: newRight - newLeft,
-				height: newBottom - newTop,
-				pageNumber: current.pageNumber,
-			};
-		} else {
-			consolidated.push(current);
-			current = next;
-		}
-	}
-
-	// Don't forget to add the last rectangle
-	if (current) {
-		consolidated.push(current);
-	}
-
-	return consolidated;
-};
-
-const consolidateRects = (rects: HighlightRect[]): HighlightRect[] => {
-	if (rects.length <= 1) return rects;
-
-	const result: HighlightRect[] = [];
-	const visited = new Set<number>();
-
-	for (let i = 0; i < rects.length; i++) {
-		if (visited.has(i)) continue;
-
-		const currentRect = rects[i];
-		if (!currentRect) continue;
-
-		const currentGroup = [currentRect];
-		visited.add(i);
-
-		// Find all rects that should be merged with the current one
-		let foundNew = true;
-		while (foundNew) {
-			foundNew = false;
-			for (let j = 0; j < rects.length; j++) {
-				if (visited.has(j)) continue;
-
-				const candidateRect = rects[j];
-				if (!candidateRect) continue;
-
-				// Check if this rect overlaps with any rect in the current group
-				const shouldMergeWithGroup = currentGroup.some((groupRect) =>
-					doRectsOverlap(groupRect, candidateRect),
-				);
-
-				if (shouldMergeWithGroup) {
-					currentGroup.push(candidateRect);
-					visited.add(j);
-					foundNew = true;
-				}
-			}
-		}
-
-		// Merge all rects in the current group into one
-		result.push(mergeRectGroup(currentGroup));
-	}
-
-	return result;
-};
-
-const doRectsOverlap = (
-	rect1: HighlightRect,
-	rect2: HighlightRect,
-): boolean => {
-	// Check if rectangles overlap (not just touch)
-	const horizontalOverlap =
-		rect1.left < rect2.left + rect2.width &&
-		rect2.left < rect1.left + rect1.width;
-	const verticalOverlap =
-		rect1.top < rect2.top + rect2.height &&
-		rect2.top < rect1.top + rect1.height;
-
-	// Also consider if they are very close (within threshold)
-	const closeEnough = shouldMergeRects(rect1, rect2);
-
-	return (horizontalOverlap && verticalOverlap) || closeEnough;
-};
-
-const mergeRectGroup = (rects: HighlightRect[]): HighlightRect => {
-	if (rects.length === 1) {
-		const rect = rects[0];
-		if (!rect) throw new Error("Invalid rect in group");
-		return rect;
-	}
-
-	const firstRect = rects[0];
-	if (!firstRect) throw new Error("Invalid first rect in group");
-
-	let minLeft = firstRect.left;
-	let minTop = firstRect.top;
-	let maxRight = firstRect.left + firstRect.width;
-	let maxBottom = firstRect.top + firstRect.height;
-
-	rects.forEach((rect) => {
-		if (!rect) return;
-		minLeft = Math.min(minLeft, rect.left);
-		minTop = Math.min(minTop, rect.top);
-		maxRight = Math.max(maxRight, rect.left + rect.width);
-		maxBottom = Math.max(maxBottom, rect.top + rect.height);
-	});
-
-	return {
-		left: minLeft,
-		top: minTop,
-		width: maxRight - minLeft,
-		height: maxBottom - minTop,
-		pageNumber: firstRect.pageNumber,
-	};
-};
-
 export const useSelectionDimensions = () => {
 	const store = PDFStore.useContext();
+	const getText = (options?: SelectionTextOptions) => {
+		if (store.getState().selection?.getSnapshot())
+			return store.getState().selection.getText(options);
+		const container = store.getState().viewportRef.current;
+		return container
+			? getPdfSelectionText(
+					container.ownerDocument.getSelection(),
+					container,
+					options,
+				)
+			: null;
+	};
 
 	const getAnnotationDimension = () => {
+		if (store.getState().selection?.getSnapshot())
+			return store.getState().selection.getSelection() ?? undefined;
 		const selection = window.getSelection();
 		if (!selection || selection.isCollapsed) return;
 
@@ -431,26 +196,10 @@ export const useSelectionDimensions = () => {
 			}
 		});
 
-		// Process highlight rectangles - use original consolidation for now
+		// Use the same line geometry for saved highlights and the selection preview.
 		textLayerMapHighlight.forEach((rects) => {
-			if (rects.length > 0) {
-				// For single rects, just add directly. For multiple, consolidate.
-				if (rects.length === 1) {
-					highlightRects.push(...rects);
-				} else {
-					const consolidated = consolidateHighlightRects(rects);
-					highlightRects.push(...consolidated);
-				}
-			}
+			highlightRects.push(...mergeTextRuns(rects));
 		});
-
-		// Skip final consolidation for now to debug
-		// if (highlightRects.length > 1) {
-		//   const finalHighlights = consolidateHighlightRects(highlightRects);
-		//   console.log('After final consolidation:', finalHighlights.length, 'rects');
-		//   highlightRects.length = 0; // Clear array
-		//   highlightRects.push(...finalHighlights);
-		// }
 
 		// Process underline rectangles
 		textLayerMapUnderline.forEach((rects) => {
@@ -538,7 +287,7 @@ export const useSelectionDimensions = () => {
 			underlines: consolidateUnderlines(underlineRects).sort(
 				(a, b) => a.pageNumber - b.pageNumber,
 			),
-			text: range.toString().trim(),
+			text: (getText() ?? range.toString()).trim(),
 			isCollapsed: false,
 		};
 	};
@@ -626,6 +375,8 @@ export const useSelectionDimensions = () => {
 	};
 
 	const getDimension = () => {
+		if (store.getState().selection?.getSnapshot())
+			return store.getState().selection.getSelection() ?? undefined;
 		const selection = window.getSelection();
 		if (!selection || selection.isCollapsed) return;
 
@@ -653,14 +404,14 @@ export const useSelectionDimensions = () => {
 
 		textLayerMap.forEach((rects) => {
 			if (rects.length > 0) {
-				const consolidated = consolidateRects(rects);
+				const consolidated = mergeTextRuns(rects);
 				highlights.push(...consolidated);
 			}
 		});
 
 		return {
 			highlights: highlights.sort((a, b) => a.pageNumber - b.pageNumber),
-			text: range.toString().trim(),
+			text: (getText() ?? range.toString()).trim(),
 			isCollapsed: false,
 		};
 	};
@@ -668,5 +419,5 @@ export const useSelectionDimensions = () => {
 	const getSelection = (): CollapsibleSelection =>
 		getDimension() as CollapsibleSelection;
 
-	return { getDimension, getSelection, getAnnotationDimension };
+	return { getDimension, getSelection, getAnnotationDimension, getText };
 };

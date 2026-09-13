@@ -1,103 +1,146 @@
 ---
-title: Select
-description: Select is a component that allows you to highlight the selected text in a PDF.
+title: Text selection
+description: Capture selected text and page-relative rectangles with a selection action.
 ---
+
+Add `TextLayer` to make a text-based PDF selectable. Lector retains page/text anchors as pages scroll out of the DOM and restores the visible browser selection when they return. Mouse dragging autoscrolls across page boundaries. While focus is inside the PDF viewport, Shift-arrow keys extend an existing selection, including after its endpoint has scrolled out of view, and Escape clears it. `Pages` is keyboard-focusable by default; its `tabIndex` prop can override this. Restoring a selection programmatically does not move focus.
+
+## Turn a selection into a highlight
+
+This example uses `pdf-setup.ts` from [installation](/docs/installation). Select text, then activate the Highlight button in the tooltip.
+
+```tsx title="selection-viewer.tsx"
+"use client";
+
+import {
+  CanvasLayer, HighlightLayer, Page, Pages, Root, SelectionTooltip,
+  TextLayer, usePdf, usePdfSelection,
+} from "@anaralabs/lector";
+import "./pdf-setup";
+
+function SelectionAction() {
+  const { selection, getSelection, clearSelection } = usePdfSelection();
+  const setHighlight = usePdf((state) => state.setHighlight);
+
+  return (
+    <SelectionTooltip>
+      <button
+        type="button"
+        disabled={selection?.status !== "ready"}
+        style={{ background: "white", color: "black", padding: "6px 12px", border: "1px solid" }}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => {
+          const result = getSelection();
+          if (!result || !result.highlights.length) return;
+          setHighlight(result.highlights);
+          clearSelection();
+        }}
+      >
+        Highlight selection
+      </button>
+    </SelectionTooltip>
+  );
+}
+
+export default function SelectionViewer() {
+  return (
+    <Root source="/sample.pdf" style={{ height: 600 }}>
+      <Pages>
+        <Page>
+          <CanvasLayer />
+          <TextLayer />
+          <HighlightLayer style={{ background: "#ffdf6080" }} />
+        </Page>
+      </Pages>
+      <SelectionAction />
+    </Root>
+  );
+}
+```
+
+Mount one selection tooltip per viewer, outside the repeated `Page` template. Preventing the button's mouse-down default keeps the browser from discarding the selection before the click handler reads it. The result contains `anchor`, `focus`, `text`, `highlights`, `underlines`, and `isCollapsed`. Rectangles use [scale-1 page pixels](/docs/code/highlight#coordinate-contract); a multi-page selection can contain multiple page numbers.
+
+`setHighlight` replaces the active highlight. The example does not accumulate selections or persist them.
+
+## Plain-text copy and quotes
+
+`Pages` handles PDF selections copied through the browser's copy event. Copied text expands Latin presentation ligatures, composes equivalent Unicode accents, and removes discretionary soft hyphens. It preserves case, accents, mathematical symbols, explicit line breaks, and page boundaries. Form fields and selections outside the viewer keep their normal copy behavior. A custom `onCopy` handler can call `preventDefault()` to take ownership.
+
+For prose, you can explicitly join single line breaks and wrapped hyphenated words:
+
+```tsx
+<Pages copyOptions={{ lineBreaks: "space", ignoreHyphenation: true }}>
+  <Page>
+    <CanvasLayer />
+    <TextLayer />
+  </Page>
+</Pages>
+```
+
+Double line breaks and boundaries between pages remain paragraph breaks. Inline compounds such as `state-of-the-art` retain their hyphens. Use `<Pages copyOptions={false}>` to retain native browser copying, including its rich-text behavior; Lector's handler writes `text/plain` only.
+
+`useSelectionDimensions()` also exposes `getText(options?)` for a quote action that does not need geometry:
+
+```tsx
+const { getText } = useSelectionDimensions();
+
+function readQuote() {
+  return getText({ lineBreaks: "space", ignoreHyphenation: true });
+}
+```
+
+Call it from the selection action's event handler. It returns `null` when there is no supported selection or missing selected pages are still loading. For a selection owned by `Pages`, it includes unmounted intermediate pages and excludes annotation controls. The existing `getDimension`, `getSelection`, and `getAnnotationDimension` helpers also read the persistent selection; geometry helpers return `undefined` until it is ready. Native ranges outside this model retain their existing behavior.
+
+This preserves PDF.js's logical text order. It does not infer table structure, rearrange columns, repair a PDF with incorrect reading order, or fetch text for virtualized pages missing from the selection. If pages are missing, Lector leaves the browser copy event untouched rather than writing an incomplete reconstructed quote.
+
+## Saving highlights
+
+For a built-in color picker, add `ColoredHighlightLayer` under `Page`. Its `onHighlight` callback receives a `ColoredHighlight` with `uuid`, `text`, `color`, `pageNumber`, and `rectangles`. Its tools use Tailwind utility classes; see [styles](/docs/installation#styles-and-pdf-assets).
+
+Your application owns storage. Save each highlight under a document ID and revision, report save failures, and restore saved records using the store's `addColoredHighlight`. Restore once per document session to avoid duplicate records. `deleteColoredHighlight(uuid)` removes one from the current store; delete it from your persistence layer separately.
+
+These are viewer overlays. They do not become embedded PDF annotations when downloading the original file.
+
+## Selection limits
+
+A scanned page without embedded text cannot provide text selection; Lector does not run OCR. Selection geometry also depends on the PDF's text layout and which virtualized text layers are mounted. Test multi-column text, rotated pages, zoom, and touch selection with the PDFs your users work with.
+
+If text is selectable but displaced, check the PDF.js stylesheet and avoid adding your own transforms to `Page` or `TextLayer`.
+
+## Live example
 
 import PdfHighlightSelect from "@/components/highlight-select";
 
 <PdfHighlightSelect />
 
-## Basic Usage
 
-Create a PDF viewer with text selection and highlighting capabilities:
+## Retain or restore a selection
+
+Use `usePdfSelection()` under `Root` with a mounted `Pages`. Anchors use one-based page numbers and UTF-16 offsets in the page's concatenated PDF.js selectable text, before copy normalization. Explicit line-break elements do not consume offsets. Invalid page numbers or offsets are rejected; an offset on an unloaded page is validated when that page is read. Store the anchors alongside your document identifier; they apply to the same PDF bytes and text extraction, not a revised document.
 
 ```tsx
-"use client";
+const { selection, setSelection, getSelectionAsync, clearSelection } = usePdfSelection();
 
-import {
-  Root,
-  Pages,
-  Page,
-  CanvasLayer,
-  TextLayer,
-  HighlightLayer,
-  useSelectionDimensions,
-  usePdf,
-} from "@anaralabs/lector";
-
-const PdfHighlightSelect = () => (
-  <Root
-    source="/pdf/document.pdf"
-    className="flex bg-gray-50 h-[500px]"
-    loader={<div className="p-4">Loading...</div>}
-  >
-    <HighlightLayerContent />
-  </Root>
+setSelection(
+  { pageNumber: 2, offset: 14 },
+  { pageNumber: 5, offset: 30 },
 );
 
-export default PdfHighlightSelect;
+try {
+  const result = await getSelectionAsync();
+  if (result) saveQuote(result.text, result.highlights);
+} catch (error) {
+  // AbortError means the selection changed before this request completed.
+  // Other errors indicate a missing page could not be read.
+}
 ```
 
-## Highlight Layer Implementation
+`selection` is `null` or `{ anchor, focus, status, error? }`. Status is `loading`, `ready`, or `error`. `getSelection()` returns a complete result synchronously when ready; `getSelectionAsync()` waits for missing selected pages and rejects if another selection supersedes it. A collapsed selection clears the model. Use `clearSelection()` after consuming a quote or highlight.
 
-Create a component to handle text selection and highlighting:
+Lector builds at most two missing text layers concurrently, reads their text and rectangles, then removes them. It does not pin selected page canvases or keep the document mounted. Cached text and rectangles grow with the selected range and are released when the selection changes or clears. A copy event during loading is cancelled to avoid silently copying only the visible fragment; enable your copy/highlight action when `selection.status === "ready"`. `copyOptions={false}` opts into native copying, which only sees mounted DOM.
 
-```tsx
-const HighlightLayerContent = () => {
-  const selectionDimensions = useSelectionDimensions();
-  const setHighlights = usePdf((state) => state.setHighlight);
+## Selection boundaries
 
-  const handleHighlight = () => {
-    const dimension = selectionDimensions.getDimension();
-    if (dimension && !dimension.isCollapsed) {
-      setHighlights(dimension.highlights);
-    }
-  };
+Rectangles follow browser text ranges for individual text runs, including partial proportional-font selections and intrinsically rotated pages. They do not merge across column gutters. Reading order still follows PDF.js; this does not reconstruct malformed reading order in columns, tables, footnotes, or scanned PDFs. Scans need an external OCR text layer.
 
-  return (
-    <Pages className="p-4 w-full">
-      <Page>
-        {selectionDimensions && <CustomSelect onHighlight={handleHighlight} />}
-        <CanvasLayer />
-        <TextLayer />
-        <HighlightLayer className="bg-yellow-200/70" />
-      </Page>
-    </Pages>
-  );
-};
-```
-
-## Custom Selection Tooltip
-
-Add a custom tooltip that appears when text is selected:
-
-```tsx
-import { SelectionTooltip } from "@anaralabs/lector";
-
-export const CustomSelect = ({ onHighlight }: { onHighlight: () => void }) => {
-  return (
-    <SelectionTooltip>
-      <button
-        className="bg-white shadow-lg rounded-md px-3 py-1 hover:bg-yellow-200/70"
-        onClick={onHighlight}
-      >
-        Highlight
-      </button>
-    </SelectionTooltip>
-  );
-};
-```
-
-## Features
-
-- Text selection with visual feedback
-- Custom tooltip on selection
-- Highlight selected text
-- Persistent highlights
-
-## Best Practices
-
-- Add visual feedback for text selection
-- Include hover states for better UX
-- Handle collapsed selections
-- Add keyboard navigation support
+Native touch selection remains in control of its handles and gestures; touch scrolling preserves stored anchors. Desktop Chromium, Firefox, and WebKit tests do not establish physical iOS/Android handle behavior. Multiple disjoint selections and selections spanning separate viewers are not supported by the persistent model.

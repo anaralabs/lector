@@ -6,7 +6,6 @@ import {
 	CurrentZoom,
 	Page,
 	Pages,
-	Root,
 	TextLayer,
 	Thumbnail,
 	Thumbnails,
@@ -16,57 +15,77 @@ import {
 import { cn } from "fumadocs-ui/components/api";
 import { useState } from "react";
 
-import "@/lib/setup";
+import { ExampleRoot } from "./example-root";
 
-const fileUrl = "/pdf/pathways.pdf";
+const fileUrl = "/lector/pdf/pathways.pdf";
 
 const WithThumbnails = () => {
 	const [showThumbnails, setShowThumbnails] = useState(true);
 
 	return (
-		<Root
+		<ExampleRoot
 			source={fileUrl}
-			className="bg-gray-100 border rounded-md overflow-hidden relative h-[700px] flex flex-col justify-stretch"
+			className="bg-muted border rounded-md overflow-hidden relative h-[700px] flex flex-col justify-stretch"
 			loader={<div className="p-4">Loading...</div>}
 		>
-			<div className="bg-gray-100 border-b p-1 flex items-center justify-center text-sm text-gray-600 gap-2">
+			<div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted p-2 text-sm text-muted-foreground">
 				<button
-					onClick={() => setShowThumbnails((showOutline) => !showOutline)}
-					className="px-2 hover:bg-gray-300 hover:text-gray-900 py-1 rounded-full"
+					type="button"
+					onClick={() => setShowThumbnails((show) => !show)}
+					className="rounded-full px-2 py-1 hover:bg-accent hover:text-foreground"
 				>
 					{showThumbnails ? "Hide" : "Show"} Thumbnails
 				</button>
-				<span className="flex-grow" />
-				Page
-				<CurrentPage className="bg-white rounded-full px-3 py-1 border text-center" />
-				Zoom
-				<ZoomOut className="px-3 py-1 -mr-2 text-gray-900">-</ZoomOut>
-				<CurrentZoom className="bg-white rounded-full px-3 py-1 border text-center w-16" />
-				<ZoomIn className="px-3 py-1 -ml-2 text-gray-900">+</ZoomIn>
-				<span className="flex-grow" />
+				<label className="flex items-center gap-2 whitespace-nowrap">
+					Page
+					<CurrentPage className="w-14 rounded-full border bg-background px-2 py-1 text-center" />
+				</label>
+				<div className="flex items-center gap-2 whitespace-nowrap">
+					<span>Zoom</span>
+					<ZoomOut
+						type="button"
+						aria-label="Zoom out"
+						className="px-2 py-1 text-foreground"
+					>
+						−
+					</ZoomOut>
+					<CurrentZoom
+						aria-label="Zoom percentage"
+						className="w-14 rounded-full border bg-background px-2 py-1 text-center"
+					/>
+					<ZoomIn
+						type="button"
+						aria-label="Zoom in"
+						className="px-2 py-1 text-foreground"
+					>
+						+
+					</ZoomIn>
+				</div>
 			</div>
 			<div
 				className={cn(
-					"basis-0 grow min-h-0 relative grid",
+					"basis-0 grow min-h-0 min-w-0 relative grid",
 					"transition-all duration-300",
-					showThumbnails ? "grid-cols-[24rem,1fr]" : "grid-cols-[0,1fr]",
+					showThumbnails
+						? "grid-cols-[7rem_minmax(0,1fr)]"
+						: "grid-cols-[0_minmax(0,1fr)]",
 				)}
 			>
 				<div className="overflow-y-auto overflow-x-hidden">
-					<div className="w-96 overflow-x-hidden">
+					<div className="w-28 overflow-x-hidden">
 						<Thumbnails className="flex flex-col gap-4 items-center py-4">
-							<Thumbnail className="transition-all w-48 hover:shadow-lg hover:outline hover:outline-gray-300" />
+							<Thumbnail className="transition-all w-20 hover:shadow-lg hover:outline hover:outline-gray-300" />
 						</Thumbnails>
 					</div>
 				</div>
-				<Pages className="p-4 h-full">
+				<Pages className="p-4 h-full min-w-0">
 					<Page>
 						<CanvasLayer />
 						<TextLayer />
 					</Page>
 				</Pages>
 			</div>
-		</Root>
+		</ExampleRoot>
 	);
 };
 

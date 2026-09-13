@@ -1,0 +1,360 @@
+{
+  "date": "2026-09-10",
+  "environment": {
+    "browser": "Chrome 153",
+    "os": "macOS ARM64",
+    "node": "22.22.3",
+    "pdfjs": "5.5.207"
+  },
+  "method": "Same worktree eager and opt-in progressive modes, alternating order per pair, one warmup pair and five measured pairs. Native PDF.js rendering; first canvas timestamp collected at renderedPages store notification. 10ms condition injects a delay per getPage call, not a network-throttling simulation. Background metadata acquisition remains active and completes before each unmount. Measurements taken without concurrent browser/build work.",
+  "results": [
+    {
+      "corpus": "generated-1000",
+      "metadataDelayMs": 0,
+      "warmupPairs": 1,
+      "samples": [
+        {
+          "run": 1,
+          "progressive": true,
+          "firstCanvasMs": 118.1,
+          "afterDocumentMs": 11.6,
+          "resolvedAtFirstCanvas": 79,
+          "peakRequests": 16
+        },
+        {
+          "run": 1,
+          "progressive": false,
+          "firstCanvasMs": 183.2,
+          "afterDocumentMs": 79.8,
+          "resolvedAtFirstCanvas": 1000,
+          "peakRequests": 16
+        },
+        {
+          "run": 2,
+          "progressive": false,
+          "firstCanvasMs": 198.2,
+          "afterDocumentMs": 91.5,
+          "resolvedAtFirstCanvas": 1000,
+          "peakRequests": 16
+        },
+        {
+          "run": 2,
+          "progressive": true,
+          "firstCanvasMs": 130.9,
+          "afterDocumentMs": 20.8,
+          "resolvedAtFirstCanvas": 230,
+          "peakRequests": 16
+        },
+        {
+          "run": 3,
+          "progressive": true,
+          "firstCanvasMs": 118.6,
+          "afterDocumentMs": 13.7,
+          "resolvedAtFirstCanvas": 113,
+          "peakRequests": 16
+        },
+        {
+          "run": 3,
+          "progressive": false,
+          "firstCanvasMs": 200.4,
+          "afterDocumentMs": 94.4,
+          "resolvedAtFirstCanvas": 1000,
+          "peakRequests": 16
+        },
+        {
+          "run": 4,
+          "progressive": false,
+          "firstCanvasMs": 197.9,
+          "afterDocumentMs": 89.1,
+          "resolvedAtFirstCanvas": 1000,
+          "peakRequests": 16
+        },
+        {
+          "run": 4,
+          "progressive": true,
+          "firstCanvasMs": 114.3,
+          "afterDocumentMs": 8.4,
+          "resolvedAtFirstCanvas": 26,
+          "peakRequests": 16
+        },
+        {
+          "run": 5,
+          "progressive": true,
+          "firstCanvasMs": 117.1,
+          "afterDocumentMs": 6.5,
+          "resolvedAtFirstCanvas": 10,
+          "peakRequests": 16
+        },
+        {
+          "run": 5,
+          "progressive": false,
+          "firstCanvasMs": 185,
+          "afterDocumentMs": 78.4,
+          "resolvedAtFirstCanvas": 1000,
+          "peakRequests": 16
+        }
+      ]
+    },
+    {
+      "corpus": "generated-1000",
+      "metadataDelayMs": 10,
+      "warmupPairs": 1,
+      "samples": [
+        {
+          "run": 1,
+          "progressive": true,
+          "firstCanvasMs": 158.5,
+          "afterDocumentMs": 30.4,
+          "resolvedAtFirstCanvas": 17,
+          "peakRequests": 16
+        },
+        {
+          "run": 1,
+          "progressive": false,
+          "firstCanvasMs": 889.4,
+          "afterDocumentMs": 766.6,
+          "resolvedAtFirstCanvas": 1000,
+          "peakRequests": 16
+        },
+        {
+          "run": 2,
+          "progressive": false,
+          "firstCanvasMs": 880.6,
+          "afterDocumentMs": 759.1,
+          "resolvedAtFirstCanvas": 1000,
+          "peakRequests": 16
+        },
+        {
+          "run": 2,
+          "progressive": true,
+          "firstCanvasMs": 146.4,
+          "afterDocumentMs": 19.3,
+          "resolvedAtFirstCanvas": 1,
+          "peakRequests": 16
+        },
+        {
+          "run": 3,
+          "progressive": true,
+          "firstCanvasMs": 155.4,
+          "afterDocumentMs": 25,
+          "resolvedAtFirstCanvas": 4,
+          "peakRequests": 16
+        },
+        {
+          "run": 3,
+          "progressive": false,
+          "firstCanvasMs": 873.2,
+          "afterDocumentMs": 749.9,
+          "resolvedAtFirstCanvas": 1000,
+          "peakRequests": 16
+        },
+        {
+          "run": 4,
+          "progressive": false,
+          "firstCanvasMs": 845.8,
+          "afterDocumentMs": 731.9,
+          "resolvedAtFirstCanvas": 1000,
+          "peakRequests": 16
+        },
+        {
+          "run": 4,
+          "progressive": true,
+          "firstCanvasMs": 131.9,
+          "afterDocumentMs": 27.2,
+          "resolvedAtFirstCanvas": 17,
+          "peakRequests": 16
+        },
+        {
+          "run": 5,
+          "progressive": true,
+          "firstCanvasMs": 125.5,
+          "afterDocumentMs": 24.2,
+          "resolvedAtFirstCanvas": 1,
+          "peakRequests": 16
+        },
+        {
+          "run": 5,
+          "progressive": false,
+          "firstCanvasMs": 874.9,
+          "afterDocumentMs": 757.3,
+          "resolvedAtFirstCanvas": 1000,
+          "peakRequests": 16
+        }
+      ]
+    },
+    {
+      "corpus": "large-320",
+      "metadataDelayMs": 0,
+      "warmupPairs": 1,
+      "samples": [
+        {
+          "run": 1,
+          "progressive": true,
+          "firstCanvasMs": 148.3,
+          "afterDocumentMs": 45.6,
+          "resolvedAtFirstCanvas": 184,
+          "peakRequests": 16
+        },
+        {
+          "run": 1,
+          "progressive": false,
+          "firstCanvasMs": 153.7,
+          "afterDocumentMs": 53,
+          "resolvedAtFirstCanvas": 320,
+          "peakRequests": 16
+        },
+        {
+          "run": 2,
+          "progressive": false,
+          "firstCanvasMs": 148.4,
+          "afterDocumentMs": 45.8,
+          "resolvedAtFirstCanvas": 320,
+          "peakRequests": 16
+        },
+        {
+          "run": 2,
+          "progressive": true,
+          "firstCanvasMs": 148.9,
+          "afterDocumentMs": 46.2,
+          "resolvedAtFirstCanvas": 320,
+          "peakRequests": 16
+        },
+        {
+          "run": 3,
+          "progressive": true,
+          "firstCanvasMs": 148.5,
+          "afterDocumentMs": 44.2,
+          "resolvedAtFirstCanvas": 256,
+          "peakRequests": 16
+        },
+        {
+          "run": 3,
+          "progressive": false,
+          "firstCanvasMs": 152.6,
+          "afterDocumentMs": 47.1,
+          "resolvedAtFirstCanvas": 320,
+          "peakRequests": 16
+        },
+        {
+          "run": 4,
+          "progressive": false,
+          "firstCanvasMs": 164.8,
+          "afterDocumentMs": 62,
+          "resolvedAtFirstCanvas": 320,
+          "peakRequests": 16
+        },
+        {
+          "run": 4,
+          "progressive": true,
+          "firstCanvasMs": 149.9,
+          "afterDocumentMs": 45.4,
+          "resolvedAtFirstCanvas": 181,
+          "peakRequests": 16
+        },
+        {
+          "run": 5,
+          "progressive": true,
+          "firstCanvasMs": 153.4,
+          "afterDocumentMs": 48.6,
+          "resolvedAtFirstCanvas": 320,
+          "peakRequests": 16
+        },
+        {
+          "run": 5,
+          "progressive": false,
+          "firstCanvasMs": 164.2,
+          "afterDocumentMs": 60.6,
+          "resolvedAtFirstCanvas": 320,
+          "peakRequests": 16
+        }
+      ]
+    },
+    {
+      "corpus": "large-320",
+      "metadataDelayMs": 10,
+      "warmupPairs": 1,
+      "samples": [
+        {
+          "run": 1,
+          "progressive": true,
+          "firstCanvasMs": 176.4,
+          "afterDocumentMs": 56.2,
+          "resolvedAtFirstCanvas": 17,
+          "peakRequests": 16
+        },
+        {
+          "run": 1,
+          "progressive": false,
+          "firstCanvasMs": 409.1,
+          "afterDocumentMs": 282.1,
+          "resolvedAtFirstCanvas": 320,
+          "peakRequests": 16
+        },
+        {
+          "run": 2,
+          "progressive": false,
+          "firstCanvasMs": 398.8,
+          "afterDocumentMs": 297.5,
+          "resolvedAtFirstCanvas": 320,
+          "peakRequests": 16
+        },
+        {
+          "run": 2,
+          "progressive": true,
+          "firstCanvasMs": 165.2,
+          "afterDocumentMs": 59.8,
+          "resolvedAtFirstCanvas": 18,
+          "peakRequests": 16
+        },
+        {
+          "run": 3,
+          "progressive": true,
+          "firstCanvasMs": 158.8,
+          "afterDocumentMs": 49.9,
+          "resolvedAtFirstCanvas": 17,
+          "peakRequests": 16
+        },
+        {
+          "run": 3,
+          "progressive": false,
+          "firstCanvasMs": 392,
+          "afterDocumentMs": 288.3,
+          "resolvedAtFirstCanvas": 320,
+          "peakRequests": 16
+        },
+        {
+          "run": 4,
+          "progressive": false,
+          "firstCanvasMs": 399.3,
+          "afterDocumentMs": 297.1,
+          "resolvedAtFirstCanvas": 320,
+          "peakRequests": 16
+        },
+        {
+          "run": 4,
+          "progressive": true,
+          "firstCanvasMs": 164,
+          "afterDocumentMs": 59.6,
+          "resolvedAtFirstCanvas": 33,
+          "peakRequests": 16
+        },
+        {
+          "run": 5,
+          "progressive": true,
+          "firstCanvasMs": 176.7,
+          "afterDocumentMs": 53.2,
+          "resolvedAtFirstCanvas": 17,
+          "peakRequests": 16
+        },
+        {
+          "run": 5,
+          "progressive": false,
+          "firstCanvasMs": 393.1,
+          "afterDocumentMs": 285.7,
+          "resolvedAtFirstCanvas": 320,
+          "peakRequests": 16
+        }
+      ]
+    }
+  ]
+}

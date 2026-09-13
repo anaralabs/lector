@@ -5,14 +5,13 @@ import {
 	HighlightLayer,
 	Page,
 	Pages,
-	Root,
 	TextLayer,
 	usePdfJump,
 } from "@anaralabs/lector";
 import { useState } from "react";
-import "@/lib/setup";
+import { ExampleRoot } from "./example-root";
 
-const fileUrl = "/pdf/pathways.pdf";
+const fileUrl = "/lector/pdf/pathways.pdf";
 
 const examples = [
 	{
@@ -122,8 +121,8 @@ const HighlightLayerContent = () => {
 	};
 
 	return (
-		<div className="flex">
-			<div className="flex-1 relative">
+		<div className="flex h-full w-full min-w-0 flex-col sm:flex-row">
+			<div className="min-h-0 min-w-0 flex-1 relative">
 				<Pages className="p-4">
 					<Page>
 						<CanvasLayer />
@@ -132,7 +131,7 @@ const HighlightLayerContent = () => {
 					</Page>
 				</Pages>
 			</div>
-			<div className="w-80 p-4 bg-white shadow-lg overflow-auto">
+			<div className="w-full max-h-40 shrink-0 border-t p-4 bg-background overflow-auto sm:max-h-none sm:w-56 sm:border-l sm:border-t-0">
 				<h2 className="text-lg font-bold mb-4">Important Sections</h2>
 				<div className="space-y-4">
 					{examples.map((example) => (
@@ -141,12 +140,14 @@ const HighlightLayerContent = () => {
 							onClick={() => handleExampleClick(example)}
 							className={`p-3 border rounded cursor-pointer ${
 								selectedExample === example.text
-									? "bg-yellow-100"
-									: "hover:bg-gray-50"
+									? "bg-yellow-200/30"
+									: "hover:bg-muted"
 							}`}
 						>
-							<h3 className="font-semibold text-gray-800">{example.title}</h3>
-							<p className="text-sm text-gray-600 mt-1">{example.text}</p>
+							<h3 className="font-semibold text-foreground">{example.title}</h3>
+							<p className="text-sm text-muted-foreground mt-1">
+								{example.text}
+							</p>
 						</div>
 					))}
 				</div>
@@ -156,13 +157,13 @@ const HighlightLayerContent = () => {
 };
 
 const PdfHighlightLayer = () => (
-	<Root
+	<ExampleRoot
 		source={fileUrl}
-		className="flex bg-gray-50 h-[500px]"
+		className="flex bg-muted h-[500px]"
 		loader={<div className="p-4">Loading...</div>}
 	>
 		<HighlightLayerContent />
-	</Root>
+	</ExampleRoot>
 );
 
 export default PdfHighlightLayer;

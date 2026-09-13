@@ -42,13 +42,13 @@ const ResultItem = ({ result, originalSearchText }: ResultItemProps) => {
 
 	return (
 		<div
-			className="flex py-2 hover:bg-gray-50 flex-col cursor-pointer"
+			className="flex py-2 hover:bg-muted flex-col cursor-pointer"
 			onClick={onClick}
 		>
 			<div className="flex-1 min-w-0">
-				<p className="text-sm text-gray-900">{result.text}</p>
+				<p className="text-sm text-foreground">{result.text}</p>
 			</div>
-			<div className="flex items-center gap-4 flex-shrink-0 text-sm text-gray-500">
+			<div className="flex items-center gap-4 flex-shrink-0 text-sm text-muted-foreground">
 				{!result.isExactMatch && (
 					<span>{(result.score * 100).toFixed()}% match</span>
 				)}
@@ -79,13 +79,13 @@ const ResultItemFullHighlight = ({ result }: { result: SearchResult }) => {
 
 	return (
 		<div
-			className="flex py-2 hover:bg-gray-50 flex-col cursor-pointer"
+			className="flex py-2 hover:bg-muted flex-col cursor-pointer"
 			onClick={onClick}
 		>
 			<div className="flex-1 min-w-0">
-				<p className="text-sm text-gray-900">{result.text}</p>
+				<p className="text-sm text-foreground">{result.text}</p>
 			</div>
-			<div className="flex items-center gap-4 flex-shrink-0 text-sm text-gray-500">
+			<div className="flex items-center gap-4 flex-shrink-0 text-sm text-muted-foreground">
 				{!result.isExactMatch && (
 					<span>{(result.score * 100).toFixed()}% match</span>
 				)}
@@ -116,8 +116,8 @@ const ResultGroup = ({
 
 	return (
 		<div className="space-y-2">
-			<h3 className="text-sm font-medium text-gray-700">{title}</h3>
-			<div className="divide-y divide-gray-100">
+			<h3 className="text-sm font-medium text-foreground">{title}</h3>
+			<div className="divide-y divide-border">
 				{displayResults.map((result) => (
 					<ResultItem
 						key={`${result.pageNumber}-${result.matchIndex}`}
@@ -144,8 +144,8 @@ const ResultGroupFullHighlight = ({
 
 	return (
 		<div className="space-y-2">
-			<h3 className="text-sm font-medium text-gray-700">{title}</h3>
-			<div className="divide-y divide-gray-100">
+			<h3 className="text-sm font-medium text-foreground">{title}</h3>
+			<div className="divide-y divide-border">
 				{displayResults.map((result) => (
 					<ResultItemFullHighlight
 						key={`${result.pageNumber}-${result.matchIndex}`}
@@ -179,15 +179,15 @@ export function SearchUI() {
 	};
 
 	return (
-		<div className="flex flex-col w-80 h-full">
-			<div className="px-4 py-4 border-b border-gray-200 bg-white">
+		<div className="flex max-h-48 w-full shrink-0 flex-col sm:max-h-none sm:w-56 sm:h-full">
+			<div className="px-4 py-4 border-b border-border bg-background">
 				<div className="relative">
 					<input
 						type="text"
 						value={searchText || ""}
 						onChange={(e) => handleSearch(e.target.value)}
 						placeholder="Search in document..."
-						className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+						className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
 					/>
 				</div>
 			</div>
@@ -223,7 +223,9 @@ export const SearchResults = ({
 
 	if (!results.exactMatches.length && !results.fuzzyMatches.length) {
 		return (
-			<div className="text-center py-4 text-gray-500">No results found</div>
+			<div className="text-center py-4 text-muted-foreground">
+				No results found
+			</div>
 		);
 	}
 
@@ -275,15 +277,15 @@ export const SearchUIFullHighlight = () => {
 	};
 
 	return (
-		<div className="flex flex-col w-80 h-full">
-			<div className="px-4 py-4 border-b border-gray-200 bg-white">
+		<div className="flex max-h-48 w-full shrink-0 flex-col sm:max-h-none sm:w-56 sm:h-full">
+			<div className="px-4 py-4 border-b border-border bg-background">
 				<div className="relative">
 					<input
 						type="text"
 						value={searchText || ""}
 						onChange={(e) => handleSearch(e.target.value)}
 						placeholder="Search in document..."
-						className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+						className="w-full px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
 					/>
 				</div>
 			</div>
@@ -310,7 +312,9 @@ const SearchResultsFullHighlight = ({
 
 	if (!results.exactMatches.length && !results.fuzzyMatches.length) {
 		return (
-			<div className="text-center py-4 text-gray-500">No results found</div>
+			<div className="text-center py-4 text-muted-foreground">
+				No results found
+			</div>
 		);
 	}
 

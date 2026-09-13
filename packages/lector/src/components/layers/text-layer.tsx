@@ -15,6 +15,10 @@ export const TextLayer = memo(
 					position: "absolute",
 					top: 0,
 					left: 0,
+					// Isolate the span subtree's layout so a getBoundingClientRect on
+					// an ancestor (e.g. renderDetailCanvas) doesn't reflow every text
+					// span on this page during scroll.
+					contain: "layout style",
 				}}
 				{...props}
 				{...{

@@ -8,10 +8,13 @@
     "start": "next start",
     "postinstall": "fumadocs-mdx",
     "lint": "biome check .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "test:agents": "node --import tsx --test tests/agent-docs.test.ts",
+    "test:agents:integration": "node --import tsx --test tests/agent-docs.integration.ts"
   },
   "dependencies": {
     "@anaralabs/lector": "workspace:*",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@radix-ui/react-dropdown-menu": "^2.1.4",
     "@radix-ui/react-popover": "^1.1.4",
     "@radix-ui/react-slot": "^1.1.0",
@@ -21,7 +24,8 @@
     "fumadocs-mdx": "11.1.2",
     "fumadocs-ui": "14.6.2",
     "lucide-react": "^0.469.0",
-    "next": "15.1.11",
+    "next": "^15.5.24",
+    "next-themes": "^0.4.4",
     "pdfjs-dist": "^5.5.207",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -29,16 +33,24 @@
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "use-debounce": "^10.0.4",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@types/mdast": "^4",
     "@types/mdx": "^2.0.13",
     "@types/node": "22.10.2",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
     "autoprefixer": "^10.4.20",
+    "mdast-util-gfm": "^3",
+    "mdast-util-to-markdown": "^2",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.16",
-    "typescript": "^5.7.2"
+    "tsx": "^4",
+    "typescript": "^5.7.2",
+    "unified": "^11"
   }
 }

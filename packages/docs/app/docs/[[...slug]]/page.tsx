@@ -6,6 +6,7 @@ import {
 	DocsTitle,
 } from "fumadocs-ui/page";
 import { notFound } from "next/navigation";
+import { markdownPath } from "@/lib/agent-docs/catalog";
 import { source } from "@/lib/source";
 
 export default async function Page(props: {
@@ -42,5 +43,10 @@ export async function generateMetadata(props: {
 	return {
 		title: page.data.title,
 		description: page.data.description,
+		alternates: {
+			types: {
+				"text/markdown": `/lector${markdownPath(page.slugs.join("/") || "index")}`,
+			},
+		},
 	};
 }

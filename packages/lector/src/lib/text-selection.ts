@@ -1,3 +1,5 @@
+import { createSelectionBackground } from "./selection-background";
+
 type Caret = { node: Node; offset: number };
 type TextBox = { node: Text; rect: DOMRect };
 type ViewportRef = { current: HTMLDivElement | null };
@@ -86,13 +88,21 @@ function caretInBox({ node, rect }: TextBox, x: number, y: number): Caret {
 	return { node, offset };
 }
 
-function createSelectionManager(viewport: ViewportRef, doc: Document) {
+function createSelectionManager(
+	viewport: ViewportRef,
+	doc: Document,
+	isPersistent: () => boolean,
+) {
 	const layers = new Set<HTMLDivElement>();
+	const background = createSelectionBackground();
+	const container = viewport.current;
 	const win = doc.defaultView!;
 	const controller = new AbortController();
 	const { signal } = controller;
 	let drag: { anchor: Caret; x: number; y: number } | null = null;
 	let boxes: TextBox[] | null = null;
+	let scrollLeft = container?.scrollLeft;
+	let scrollTop = container?.scrollTop;
 	let frame = 0;
 	let mousePointer = true;
 
@@ -134,6 +144,14 @@ function createSelectionManager(viewport: ViewportRef, doc: Document) {
 		return boxes;
 	};
 	const resolve = (x: number, y: number) => {
+		if (
+			scrollLeft !== container?.scrollLeft ||
+			scrollTop !== container?.scrollTop
+		) {
+			boxes = null;
+			scrollLeft = container?.scrollLeft;
+			scrollTop = container?.scrollTop;
+		}
 		const box = nearestBox(readBoxes(), x, y);
 		return box ? caretInBox(box, x, y) : null;
 	};
@@ -165,7 +183,7 @@ function createSelectionManager(viewport: ViewportRef, doc: Document) {
 		if (!drag) return;
 		let scrolled = false;
 		const container = viewport.current;
-		if (container) {
+		if (container && !isPersistent()) {
 			const r = container.getBoundingClientRect();
 			const edge = 24;
 			const speed = (point: number, start: number, end: number) =>
@@ -255,6 +273,8 @@ function createSelectionManager(viewport: ViewportRef, doc: Document) {
 					? { node: selection.anchorNode!, offset: selection.anchorOffset }
 					: focus;
 			event.preventDefault();
+			if (viewport.current && viewport.current.tabIndex >= 0)
+				viewport.current.focus({ preventScroll: true });
 			drag = { anchor, x: event.clientX, y: event.clientY };
 			for (const layer of layers) layer.classList.add("selecting");
 			update();
@@ -289,6 +309,11 @@ function createSelectionManager(viewport: ViewportRef, doc: Document) {
 		},
 		{ signal },
 	);
+	doc.addEventListener(
+		"selectionchange",
+		() => background.update(doc.getSelection(), layers),
+		{ signal },
+	);
 	doc.addEventListener("scroll", invalidate, {
 		signal,
 		capture: true,
@@ -306,10 +331,13 @@ function createSelectionManager(viewport: ViewportRef, doc: Document) {
 	);
 
 	return {
+		resolve,
 		add(layer: HTMLDivElement) {
 			layers.add(layer);
+			if (container) viewportManagers.set(container, { resolve });
 			invalidate();
 			return () => {
+				background.clear(layer);
 				layers.delete(layer);
 				layer.classList.remove("selecting");
 				invalidate();
@@ -318,10 +346,24 @@ function createSelectionManager(viewport: ViewportRef, doc: Document) {
 					reset();
 					controller.abort();
 					managers.delete(viewport);
+					if (container) viewportManagers.delete(container);
 				}
 			};
 		},
 	};
+}
+
+const viewportManagers = new WeakMap<
+	HTMLElement,
+	{ resolve(x: number, y: number): Caret | null }
+>();
+
+export function resolveTextSelectionCaret(
+	viewport: HTMLElement,
+	x: number,
+	y: number,
+) {
+	return viewportManagers.get(viewport)?.resolve(x, y);
 }
 
 const managers = new WeakMap<
@@ -333,10 +375,15 @@ const managers = new WeakMap<
 export function bindTextSelection(
 	layer: HTMLDivElement,
 	viewport: ViewportRef,
+	isPersistent: () => boolean = () => false,
 ) {
 	let manager = managers.get(viewport);
 	if (!manager) {
-		manager = createSelectionManager(viewport, layer.ownerDocument);
+		manager = createSelectionManager(
+			viewport,
+			layer.ownerDocument,
+			isPersistent,
+		);
 		managers.set(viewport, manager);
 	}
 	return manager.add(layer);

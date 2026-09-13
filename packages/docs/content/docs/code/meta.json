@@ -1,0 +1,14 @@
+{
+	"title": "Feature recipes",
+	"pages": [
+		"basic",
+		"page-navigation",
+		"zoom-control",
+		"thumbnails",
+		"search",
+		"highlight",
+		"select",
+		"links",
+		"pdf-form"
+	]
+}

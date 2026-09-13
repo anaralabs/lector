@@ -1,44 +1,103 @@
 ---
-title: Dark Mode
-description: Learn about Lector's dark mode implementation using CSS filters and future plans
+title: Dark mode
+description: Render dark PDF pages, synchronize your theme, and style overlays to match.
 ---
 
-## Current Approach
+`Root` accepts `colorScheme="dark"` to remap page colors during canvas rendering. It changes the document's pixels; your application still owns the toolbar, sidebar, and surrounding UI theme.
 
-Lector implements dark mode support through custom CSS filters since PDF.js currently doesn't provide native dark mode support. This approach allows us to maintain compatibility while providing a good dark mode experience for users.
+## Follow your app theme
 
-## Implementation Details
+Use the `pdf-setup.ts` from [installation](/docs/installation). Pass your resolved theme as a prop:
 
-We use CSS filters to invert colors and adjust them for better readability in dark mode. This solution, while not perfect, provides a reasonable dark mode experience without requiring modifications to PDF.js itself.
+```tsx title="themed-viewer.tsx"
+"use client";
 
-```tsx
-import { Root, Pages, Page, CanvasLayer } from "@anaralabs/lector";
+import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
+import "./pdf-setup";
 
-function PDFViewer() {
+export default function ThemedViewer({ dark }: { dark: boolean }) {
   return (
-    <Root fileUrl='/sample.pdf'>
-      <Pages className='dark:invert-[94%] dark:hue-rotate-180 dark:brightness-[80%] dark:contrast-[228%]'>
-        <Page>
-          <CanvasLayer />
-        </Page>
-      </Pages>
+    <Root
+      source="/sample.pdf"
+      colorScheme={dark ? "dark" : "light"}
+      style={{ height: 600 }}
+    >
+      <Pages><Page><CanvasLayer /><TextLayer /></Page></Pages>
     </Root>
   );
 }
 ```
 
-## Current Limitations
+Unlike initial zoom options, `colorScheme` updates the store when the prop changes. The canvas, thumbnails, and high-zoom detail layer use the active scheme. Cached bitmaps can be reused when available; switching is not guaranteed to be instantaneous for every document or cache state.
 
-The CSS filter approach has some limitations:
+## Let a viewer control its own theme
 
-1. Color accuracy might not be perfect for all PDF documents
-2. Some PDFs with complex color schemes might not render optimally
-3. Performance impact on larger documents
+If you do not pass a `colorScheme` prop, a child of `Root` can switch the scheme through the store:
 
-## Future Plans
+```tsx title="dark-mode-toggle.tsx"
+"use client";
 
-We are actively monitoring the PDF.js development regarding native dark mode support. As referenced in [PDF.js Issue #2071](https://github.com/mozilla/pdf.js/issues/2071), there are currently no plans to implement this feature in PDF.js itself.
+import { usePdf } from "@anaralabs/lector";
 
-### Forking PDF.js
+export default function DarkModeToggle() {
+  const scheme = usePdf((state) => state.colorScheme);
+  const setScheme = usePdf((state) => state.setColorScheme);
 
-**Forking PDF.js**: We might fork PDF.js in the future to implement proper dark mode support directly in the rendering pipeline.
+  return (
+    <button type="button" onClick={() => setScheme(scheme === "dark" ? "light" : "dark")}>
+      {scheme === "dark" ? "Use light pages" : "Use dark pages"}
+    </button>
+  );
+}
+```
+
+Choose one owner for the scheme. When the `colorScheme` prop is supplied, it synchronizes the store back to that value; a store-only toggle will not override it permanently.
+
+## Customize the palette
+
+`darkModeColors` accepts optional `background` and `foreground` colors. The defaults, exported as `DEFAULT_DARK_MODE_COLORS`, are `#141210` and `#eae6e0`.
+
+```tsx
+<Root
+  source="/sample.pdf"
+  colorScheme="dark"
+  darkModeColors={{ background: "#1e1e2e", foreground: "#cdd6f4" }}
+>
+  {/* Your bounded Pages container */}
+</Root>
+```
+
+The background replaces white paper and the foreground replaces black text and line art. Omitted fields in a supplied `darkModeColors` prop resolve to the defaults. The prop controls the palette even if you toggle the scheme through the store.
+
+Without a palette prop, `setColorScheme("dark", { background, foreground })` updates it at runtime. Toggling the scheme without a new palette preserves the current palette.
+
+Pass resolved CSS colors such as hex or `rgb(...)`; `var(--token)` is not resolved by the canvas color mapper. If your theme stores colors in CSS variables, resolve them after the intended theme class has been applied. Reading computed styles during render can capture the previous theme's values.
+
+## Match custom overlays
+
+`createDarkModeColorMap(colors)` returns a color-mapping function. Use it for application overlays that should follow the PDF palette:
+
+```tsx title="themed-highlight-layer.tsx"
+"use client";
+
+import { HighlightLayer, createDarkModeColorMap, usePdf } from "@anaralabs/lector";
+
+export default function ThemedHighlightLayer() {
+  const scheme = usePdf((state) => state.colorScheme);
+  const colors = usePdf((state) => state.darkModeColors);
+  const yellow = "#ffdf60";
+  const background = scheme === "dark" ? createDarkModeColorMap(colors)(yellow) : yellow;
+
+  return <HighlightLayer style={{ background, opacity: 0.4 }} />;
+}
+```
+
+Mount this under `Page` in place of `HighlightLayer`. If you use blend modes, test them against dark paper; a multiply blend chosen for white pages can make a highlight disappear on dark ones.
+
+## Rendering behavior and limits
+
+Lector remaps vector fills and strokes and uses a custom PDF.js canvas factory for internal scratch canvases. The current implementation also detects mostly white, page-covering scanned paper and recolors qualifying scans. Photos, colorful scans, and embedded figures are generally preserved. Scan detection is heuristic, so test your own documents rather than assuming every raster page will change.
+
+Some mesh gradients retain their original colors, and transparency or soft-mask midtones can differ. DOM annotations and form widgets are separate from canvas recoloring; style them with your application's CSS. Passing a custom `CanvasFactory` through `documentOptions` replaces Lector's scratch-canvas recoloring integration.
+
+Remove older CSS inversion filters when using `colorScheme`; combining both approaches applies another transformation to the already recolored page.

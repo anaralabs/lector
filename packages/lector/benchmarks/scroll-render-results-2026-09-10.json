@@ -1,0 +1,791 @@
+{
+  "date": "2026-09-10",
+  "environment": {
+    "platform": "macOS ARM64",
+    "browser": "installed Chrome",
+    "mobileEmulation": true,
+    "deviceScaleFactor": 3,
+    "cpuThrottlingRate": 4,
+    "physicalDevice": false
+  },
+  "workload": {
+    "frames": 120,
+    "programmaticZoomChanges": 20,
+    "zoomLevels": [
+      0.6,
+      1,
+      1.8,
+      3,
+      1.8,
+      1
+    ],
+    "pdfs": [
+      "large.pdf (320 pages)",
+      "expensive.pdf (50 pages, dark mode)"
+    ],
+    "description": "Same fast full-document back-and-forth scroll loop as reader-soak.browser.test.tsx, with CDP CPU profiling and no bitmap instrumentation."
+  },
+  "comparison": "Same final viewport normalization and gesture code; only useCanvasLayer offscreen continuation condition disabled for baseline. One profiled run per PDF per variant; profiler increases frame overhead. Repeated unprofiled soak is the primary frame-rate evidence.",
+  "command": "LECTOR_SOAK_PROFILE=mobile pnpm exec vitest run --config vitest.scroll-profile.config.ts",
+  "disableInstruction": "For comparison, temporarily prefix the virtualizer?.isScrolling condition inside resumeWhenVisible in src/hooks/layers/useCanvasLayer.tsx with false &&. Restore before checking or shipping.",
+  "before": [
+    {
+      "name": "large",
+      "drawImageMs": 2075.295,
+      "fillTextMs": 884.945,
+      "p95": 80.89999997615814,
+      "framesOver32": 81,
+      "rows": [
+        {
+          "name": "drawImage",
+          "url": "",
+          "line": -1,
+          "selfMs": 2066.371
+        },
+        {
+          "name": "fillText",
+          "url": "",
+          "line": -1,
+          "selfMs": 884.945
+        },
+        {
+          "name": "(program)",
+          "url": "",
+          "line": -1,
+          "selfMs": 478.152
+        },
+        {
+          "name": "showText",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 16250,
+          "selfMs": 121.583
+        },
+        {
+          "name": "(idle)",
+          "url": "",
+          "line": -1,
+          "selfMs": 114.954
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/hooks/pages/useObserveElement.tsx",
+          "line": 50,
+          "selfMs": 79.728
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 72.568
+        },
+        {
+          "name": "(garbage collector)",
+          "url": "",
+          "line": -1,
+          "selfMs": 65.064
+        },
+        {
+          "name": "onMessage_fn",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 13042,
+          "selfMs": 62.095
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 57.732
+        },
+        {
+          "name": "executeOperatorList",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 15486,
+          "selfMs": 47.824
+        },
+        {
+          "name": "setFont",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 16081,
+          "selfMs": 30.193
+        },
+        {
+          "name": "releaseBuffer",
+          "url": "http://localhost:63315/src/hooks/layers/useCanvasLayer.tsx",
+          "line": 211,
+          "selfMs": 25.316
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 23.926
+        },
+        {
+          "name": "fillRect",
+          "url": "",
+          "line": -1,
+          "selfMs": 23.315
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 22.702
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 21.285
+        },
+        {
+          "name": "setValueForStyle",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/@testing-library_react.js?v=c902981f",
+          "line": 2316,
+          "selfMs": 20.163
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 19.805
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/hooks/layers/useCanvasLayer.tsx",
+          "line": 281,
+          "selfMs": 18.294
+        },
+        {
+          "name": "getContext",
+          "url": "",
+          "line": -1,
+          "selfMs": 18.017
+        },
+        {
+          "name": "setFillRGBColor",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 16518,
+          "selfMs": 17.283
+        },
+        {
+          "name": "save",
+          "url": "",
+          "line": -1,
+          "selfMs": 15.884
+        },
+        {
+          "name": "setState",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/zustand.js?v=c902981f",
+          "line": 11,
+          "selfMs": 15.392
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/hooks/layers/useCanvasLayer.tsx",
+          "line": 356,
+          "selfMs": 14.806
+        },
+        {
+          "name": "fill",
+          "url": "",
+          "line": -1,
+          "selfMs": 14.066
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 13.517
+        },
+        {
+          "name": "removeChild",
+          "url": "",
+          "line": -1,
+          "selfMs": 13.269
+        },
+        {
+          "name": "get remeasure",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 12300,
+          "selfMs": 13.25
+        },
+        {
+          "name": "__accessCheck",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/chunk-WOOG5QLI.js?v=c902981f",
+          "line": 34,
+          "selfMs": 12.913
+        }
+      ]
+    },
+    {
+      "name": "expensive",
+      "drawImageMs": 955.708,
+      "fillTextMs": 781.808,
+      "p95": 97.80000007152557,
+      "framesOver32": 95,
+      "rows": [
+        {
+          "name": "(idle)",
+          "url": "",
+          "line": -1,
+          "selfMs": 1068.717
+        },
+        {
+          "name": "drawImage",
+          "url": "",
+          "line": -1,
+          "selfMs": 903.283
+        },
+        {
+          "name": "fillText",
+          "url": "",
+          "line": -1,
+          "selfMs": 781.808
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/lib/recolor-context.ts",
+          "line": 378,
+          "selfMs": 736.846
+        },
+        {
+          "name": "(program)",
+          "url": "",
+          "line": -1,
+          "selfMs": 529.312
+        },
+        {
+          "name": "onMessage_fn",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 13042,
+          "selfMs": 289.227
+        },
+        {
+          "name": "showText",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 16250,
+          "selfMs": 167.269
+        },
+        {
+          "name": "getImageData",
+          "url": "",
+          "line": -1,
+          "selfMs": 139.173
+        },
+        {
+          "name": "(garbage collector)",
+          "url": "",
+          "line": -1,
+          "selfMs": 126.99
+        },
+        {
+          "name": "executeOperatorList",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 15486,
+          "selfMs": 88.997
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/lib/recolor-context.ts",
+          "line": 378,
+          "selfMs": 85.758
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/hooks/pages/useObserveElement.tsx",
+          "line": 50,
+          "selfMs": 71.32
+        },
+        {
+          "name": "fill",
+          "url": "",
+          "line": -1,
+          "selfMs": 44.1
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 35.608
+        },
+        {
+          "name": "getCurrentTransform",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 5826,
+          "selfMs": 31.503
+        },
+        {
+          "name": "setFont",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 16081,
+          "selfMs": 29.049
+        },
+        {
+          "name": "drawImage",
+          "url": "",
+          "line": -1,
+          "selfMs": 28.082
+        },
+        {
+          "name": "constructPath",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 15897,
+          "selfMs": 25.226
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/lib/recolor-context.ts",
+          "line": 378,
+          "selfMs": 23.27
+        },
+        {
+          "name": "drawImage",
+          "url": "",
+          "line": -1,
+          "selfMs": 23.102
+        },
+        {
+          "name": "releaseBuffer",
+          "url": "http://localhost:63315/src/hooks/layers/useCanvasLayer.tsx",
+          "line": 211,
+          "selfMs": 22.72
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 22.034
+        },
+        {
+          "name": "Path2D",
+          "url": "",
+          "line": -1,
+          "selfMs": 21.978
+        },
+        {
+          "name": "fillRect",
+          "url": "",
+          "line": -1,
+          "selfMs": 20.99
+        },
+        {
+          "name": "getTransform",
+          "url": "",
+          "line": -1,
+          "selfMs": 20.444
+        },
+        {
+          "name": "makePathFromDrawOPS",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 6096,
+          "selfMs": 19.811
+        },
+        {
+          "name": "getContext",
+          "url": "",
+          "line": -1,
+          "selfMs": 18.474
+        },
+        {
+          "name": "setFillRGBColor",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 16518,
+          "selfMs": 17.806
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 17.446
+        },
+        {
+          "name": "save",
+          "url": "",
+          "line": -1,
+          "selfMs": 17.307
+        }
+      ]
+    }
+  ],
+  "after": [
+    {
+      "name": "large",
+      "drawImageMs": 1237.312,
+      "fillTextMs": 528.296,
+      "p95": 56.89999997615814,
+      "framesOver32": 53,
+      "rows": [
+        {
+          "name": "drawImage",
+          "url": "",
+          "line": -1,
+          "selfMs": 1234.56
+        },
+        {
+          "name": "fillText",
+          "url": "",
+          "line": -1,
+          "selfMs": 528.296
+        },
+        {
+          "name": "(program)",
+          "url": "",
+          "line": -1,
+          "selfMs": 524.172
+        },
+        {
+          "name": "(idle)",
+          "url": "",
+          "line": -1,
+          "selfMs": 111.41
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/hooks/pages/useObserveElement.tsx",
+          "line": 50,
+          "selfMs": 94.432
+        },
+        {
+          "name": "onMessage_fn",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 13042,
+          "selfMs": 71.4
+        },
+        {
+          "name": "showText",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 16250,
+          "selfMs": 69.579
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 55.211
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 53.573
+        },
+        {
+          "name": "executeOperatorList",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 15486,
+          "selfMs": 34.068
+        },
+        {
+          "name": "fillRect",
+          "url": "",
+          "line": -1,
+          "selfMs": 28.438
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 28.24
+        },
+        {
+          "name": "(garbage collector)",
+          "url": "",
+          "line": -1,
+          "selfMs": 27.662
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 24.538
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 23.874
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 23.36
+        },
+        {
+          "name": "setValueForStyle",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/@testing-library_react.js?v=c902981f",
+          "line": 2316,
+          "selfMs": 21.542
+        },
+        {
+          "name": "releaseBuffer",
+          "url": "http://localhost:63315/src/hooks/layers/useCanvasLayer.tsx",
+          "line": 211,
+          "selfMs": 18.822
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/hooks/layers/useCanvasLayer.tsx",
+          "line": 356,
+          "selfMs": 17.28
+        },
+        {
+          "name": "releaseBuffer",
+          "url": "http://localhost:63315/src/hooks/layers/useCanvasLayer.tsx",
+          "line": 211,
+          "selfMs": 15.804
+        },
+        {
+          "name": "setFont",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 16081,
+          "selfMs": 15.457
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/hooks/layers/useCanvasLayer.tsx",
+          "line": 281,
+          "selfMs": 15.269
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 14.881
+        },
+        {
+          "name": "getContext",
+          "url": "",
+          "line": -1,
+          "selfMs": 13.187
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 13.172
+        },
+        {
+          "name": "setState",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/zustand.js?v=c902981f",
+          "line": 11,
+          "selfMs": 12.541
+        },
+        {
+          "name": "save",
+          "url": "",
+          "line": -1,
+          "selfMs": 12.251
+        },
+        {
+          "name": "removeChild",
+          "url": "",
+          "line": -1,
+          "selfMs": 11.981
+        },
+        {
+          "name": "resetCtxToDefault",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 15375,
+          "selfMs": 11.516
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/hooks/layers/useCanvasLayer.tsx",
+          "line": 120,
+          "selfMs": 10.654
+        }
+      ]
+    },
+    {
+      "name": "expensive",
+      "drawImageMs": 851.594,
+      "fillTextMs": 756.167,
+      "p95": 89.5,
+      "framesOver32": 95,
+      "rows": [
+        {
+          "name": "(idle)",
+          "url": "",
+          "line": -1,
+          "selfMs": 984.743
+        },
+        {
+          "name": "drawImage",
+          "url": "",
+          "line": -1,
+          "selfMs": 799.167
+        },
+        {
+          "name": "fillText",
+          "url": "",
+          "line": -1,
+          "selfMs": 756.167
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/lib/recolor-context.ts",
+          "line": 378,
+          "selfMs": 717.776
+        },
+        {
+          "name": "(program)",
+          "url": "",
+          "line": -1,
+          "selfMs": 469.152
+        },
+        {
+          "name": "onMessage_fn",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 13042,
+          "selfMs": 248.258
+        },
+        {
+          "name": "showText",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 16250,
+          "selfMs": 135.779
+        },
+        {
+          "name": "getImageData",
+          "url": "",
+          "line": -1,
+          "selfMs": 96.581
+        },
+        {
+          "name": "(garbage collector)",
+          "url": "",
+          "line": -1,
+          "selfMs": 87.823
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/hooks/pages/useObserveElement.tsx",
+          "line": 50,
+          "selfMs": 77.938
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/lib/recolor-context.ts",
+          "line": 378,
+          "selfMs": 66.687
+        },
+        {
+          "name": "executeOperatorList",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 15486,
+          "selfMs": 57.596
+        },
+        {
+          "name": "getCurrentTransform",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 5826,
+          "selfMs": 51.202
+        },
+        {
+          "name": "fill",
+          "url": "",
+          "line": -1,
+          "selfMs": 50.173
+        },
+        {
+          "name": "setFont",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 16081,
+          "selfMs": 32.649
+        },
+        {
+          "name": "drawImage",
+          "url": "",
+          "line": -1,
+          "selfMs": 29.251
+        },
+        {
+          "name": "fillRect",
+          "url": "",
+          "line": -1,
+          "selfMs": 26.716
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/lib/recolor-context.ts",
+          "line": 378,
+          "selfMs": 24.399
+        },
+        {
+          "name": "save",
+          "url": "",
+          "line": -1,
+          "selfMs": 23.811
+        },
+        {
+          "name": "clone",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 15207,
+          "selfMs": 22.517
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 22.19
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 21.705
+        },
+        {
+          "name": "drawImage",
+          "url": "",
+          "line": -1,
+          "selfMs": 21.334
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 21.202
+        },
+        {
+          "name": "setFillRGBColor",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 16518,
+          "selfMs": 19.472
+        },
+        {
+          "name": "releaseBuffer",
+          "url": "http://localhost:63315/src/hooks/layers/useCanvasLayer.tsx",
+          "line": 211,
+          "selfMs": 17.868
+        },
+        {
+          "name": "",
+          "url": "http://localhost:63315/src/lib/recolor-context.ts",
+          "line": 378,
+          "selfMs": 16.111
+        },
+        {
+          "name": "getTransform",
+          "url": "",
+          "line": -1,
+          "selfMs": 15.953
+        },
+        {
+          "name": "exports.jsxDEV",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/react_jsx-dev-runtime.js?v=c902981f",
+          "line": 238,
+          "selfMs": 15.487
+        },
+        {
+          "name": "fill",
+          "url": "http://localhost:63315/node_modules/.vite/vitest/da39a3ee5e6b4b0d3255bfef95601890afd80709/deps/pdfjs-dist_legacy_build_pdf__mjs.js?v=c902981f",
+          "line": 15948,
+          "selfMs": 15.374
+        }
+      ]
+    }
+  ]
+}

@@ -2,18 +2,28 @@ import { baseUrl, createMetadata } from "@/lib/metadata";
 import "./global.css";
 import { RootProvider } from "fumadocs-ui/provider";
 import type { Viewport } from "next";
-import { Inter } from "next/font/google";
+import localFont from "next/font/local";
 import type { ReactNode } from "react";
 
-const inter = Inter({
-	subsets: ["latin"],
+const inter = localFont({
+	src: "../public/fonts/InterVariable.woff2",
+	display: "swap",
+	weight: "100 900",
+	style: "normal",
+	variable: "--font-inter",
 });
 
 export default function Layout({ children }: { children: ReactNode }) {
 	return (
-		<html lang="en" className={inter.className} suppressHydrationWarning>
+		<html
+			lang="en"
+			className={`${inter.className} ${inter.variable}`}
+			suppressHydrationWarning
+		>
 			<body className="flex flex-col min-h-screen">
-				<RootProvider>{children}</RootProvider>
+				<RootProvider search={{ options: { api: "/lector/api/search" } }}>
+					{children}
+				</RootProvider>
 			</body>
 		</html>
 	);

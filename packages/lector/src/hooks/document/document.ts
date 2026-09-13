@@ -1,5 +1,4 @@
 import type {
-	OnProgressParameters,
 	PDFDocumentLoadingTask,
 	PDFDocumentProxy,
 	PDFPageProxy,
@@ -11,7 +10,14 @@ import type {
 import { useEffect, useRef, useState } from "react";
 
 import type { InitialPDFState, ZoomOptions } from "../../internal";
+import type { ColorScheme, DarkModeColors } from "../../lib/dark-mode";
+import { mapConcurrent } from "../../lib/map-concurrent";
+import { PageResources } from "../../lib/page-resources";
 import { getDefaultPdfJsAssetUrls, loadPdfJs } from "../../lib/pdfjs";
+import {
+	createRecolorCanvasFactory,
+	type RenderColorMapRef,
+} from "../../lib/recolor-canvas-factory";
 
 export interface usePDFDocumentParams {
 	/**
@@ -46,15 +52,32 @@ export interface usePDFDocumentParams {
 		source: Source;
 	}) => void;
 	initialRotation?: number;
+	/** Render the initial page before acquiring the rest. Unloaded page sizes are estimates. */
+	progressive?: boolean;
+	/** One-based page to load and display first. Read when source changes. */
+	initialPage?: number;
 	isZoomFitWidth?: boolean;
 	zoom?: number;
 	zoomOptions?: ZoomOptions;
 	/**
 	 * Override or extend the PDF.js DocumentInitParameters passed to getDocument().
 	 * These take highest precedence over both the source object and lector's defaults.
-	 * Must be a stable reference (module-level constant or useMemo) to avoid reloading the document.
+	 * Read when source changes; changing options alone does not reload the document.
 	 */
 	documentOptions?: Partial<DocumentInitParameters>;
+	/**
+	 * Initial color scheme for page rendering. "dark" recolors the document at
+	 * render time (native dark mode): perceived lightness is flipped onto the
+	 * darkModeColors ramp while hue is preserved, and images keep their
+	 * original pixels. Changing the prop after mount updates the scheme; the
+	 * runtime equivalent is `usePdf((s) => s.setColorScheme)`.
+	 */
+	colorScheme?: ColorScheme;
+	/**
+	 * Palette for the dark scheme: `background` replaces white paper,
+	 * `foreground` replaces black text. Defaults to #141210 / #eae6e0.
+	 */
+	darkModeColors?: DarkModeColors;
 }
 
 export type Source =
@@ -67,6 +90,7 @@ export type Source =
 function buildDocumentInitParams(
 	source: Source,
 	pdfJsVersion: string,
+	renderColorMapRef: RenderColorMapRef,
 	overrides?: Partial<DocumentInitParameters>,
 ): DocumentInitParameters {
 	let params: DocumentInitParameters;
@@ -108,6 +132,11 @@ function buildDocumentInitParams(
 		cMapPacked: true,
 		standardFontDataUrl: assetUrls.standardFontDataUrl,
 		iccUrl: assetUrls.iccUrl,
+		// Internal pdf.js scratch canvases (transparency groups, soft masks,
+		// patterns) go through this factory so native dark mode can recolor
+		// content that never touches the context passed to render(). A no-op
+		// while the light scheme is active.
+		CanvasFactory: createRecolorCanvasFactory(renderColorMapRef),
 	};
 
 	return { ...defaults, ...params, ...overrides };
@@ -118,15 +147,24 @@ export const usePDFDocumentContext = ({
 	onError,
 	source,
 	initialRotation = 0,
+	progressive = false,
+	initialPage = 1,
 	isZoomFitWidth,
 	zoom = 1,
 	zoomOptions,
 	documentOptions,
+	colorScheme,
+	darkModeColors,
 }: usePDFDocumentParams) => {
-	const [_, setProgress] = useState(0);
-
 	const [initialState, setInitialState] = useState<InitialPDFState | null>();
 	const [rotation] = useState<number>(initialRotation);
+
+	// Shared between the document's CanvasFactory (created at getDocument time)
+	// and the store (which owns the current scheme). Stable for the lifetime of
+	// this hook; the store assigns `.current` whenever the scheme changes.
+	const [renderColorMapRef] = useState<RenderColorMapRef>(() => ({
+		current: null,
+	}));
 
 	// Ref so the effect always reads the latest documentOptions without
 	// needing it in the dependency array (avoids reload on every render
@@ -139,13 +177,50 @@ export const usePDFDocumentContext = ({
 	const onErrorRef = useRef(onError);
 	onErrorRef.current = onError;
 
+	// Same pattern: reloads (source change) should pick up the latest scheme
+	// without the effect depending on it. Post-mount changes are synced into
+	// the store by Root.
+	const colorSchemeRef = useRef(colorScheme);
+	colorSchemeRef.current = colorScheme;
+	const darkModeColorsRef = useRef(darkModeColors);
+	darkModeColorsRef.current = darkModeColors;
+
 	// biome-ignore lint/correctness/useExhaustiveDependencies: <onDocumnetLoad,zoomOptions>
 	useEffect(() => {
+		let isDisposed = false;
+		let pageResources: PageResources | undefined;
 		const generateViewports = async (pdf: PDFDocumentProxy) => {
+			const firstPageNumber = Number.isFinite(initialPage)
+				? Math.max(1, Math.min(pdf.numPages, Math.trunc(initialPage)))
+				: 1;
+			if (progressive) {
+				const firstPage = await pdf.getPage(firstPageNumber);
+				if (isDisposed) return;
+				pageResources = new PageResources(pdf, firstPage, rotation, (error) => {
+					if (isDisposed) return;
+					console.error("Error generating PDF viewports", error);
+					onErrorRef.current?.({ error, phase: "viewport-generation", source });
+				});
+				setInitialState({
+					isZoomFitWidth,
+					viewports: pageResources.getSnapshot().viewports,
+					pageProxies: pageResources.getSnapshot().pageProxies ?? [],
+					pdfDocumentProxy: pdf,
+					zoom,
+					zoomOptions,
+					pageResources,
+					initialPage: firstPageNumber,
+					colorScheme: colorSchemeRef.current,
+					darkModeColors: darkModeColorsRef.current,
+					renderColorMapRef,
+				});
+				return;
+			}
 			const pageProxies: Array<PDFPageProxy> = [];
-			const rotations: number[] = [];
-			const viewports = await Promise.all(
-				Array.from({ length: pdf.numPages }, async (_, index) => {
+			const viewports = await mapConcurrent(
+				Array.from({ length: pdf.numPages }, (_, index) => index),
+				16,
+				async (index) => {
 					const page = await pdf.getPage(index + 1);
 					// sometimes there is information about the default rotation of the document
 					// stored in page.rotate. we need to always add that additional rotaton offset
@@ -154,31 +229,31 @@ export const usePDFDocumentContext = ({
 						scale: 1,
 						rotation: rotation + deltaRotate,
 					});
-					pageProxies.push(page);
-					rotations.push(page.rotate);
+					pageProxies[index] = page;
 					return viewport;
-				}),
+				},
+				() => isDisposed,
 			);
 
-			const sortedPageProxies = pageProxies.toSorted(
-				(a, b) => a.pageNumber - b.pageNumber,
-			);
+			if (isDisposed) return;
 			setInitialState((prev) => ({
 				...prev,
 				isZoomFitWidth,
 				viewports,
-				pageProxies: sortedPageProxies,
+				pageProxies,
 				pdfDocumentProxy: pdf,
 				zoom,
 				zoomOptions,
+				initialPage: firstPageNumber,
+				colorScheme: colorSchemeRef.current,
+				darkModeColors: darkModeColorsRef.current,
+				renderColorMapRef,
 			}));
 		};
 
 		const loadDocument = () => {
 			setInitialState(null);
-			setProgress(0);
 			let loadingTask: PDFDocumentLoadingTask | null = null;
-			let isDisposed = false;
 
 			void loadPdfJs()
 				.then(({ getDocument, version }) => {
@@ -190,16 +265,10 @@ export const usePDFDocumentContext = ({
 						buildDocumentInitParams(
 							source,
 							version,
+							renderColorMapRef,
 							documentOptionsRef.current,
 						),
 					);
-					loadingTask.onProgress = (progressEvent: OnProgressParameters) => {
-						if (progressEvent.loaded === progressEvent.total) {
-							return;
-						}
-
-						setProgress(progressEvent.loaded / progressEvent.total);
-					};
 
 					return loadingTask.promise
 						.then(async (proxy) => {
@@ -208,7 +277,6 @@ export const usePDFDocumentContext = ({
 							}
 
 							onDocumentLoad?.({ proxy, source });
-							setProgress(1);
 
 							try {
 								await generateViewports(proxy);
@@ -253,6 +321,7 @@ export const usePDFDocumentContext = ({
 
 			return () => {
 				isDisposed = true;
+				pageResources?.dispose();
 				void loadingTask?.destroy();
 			};
 		};

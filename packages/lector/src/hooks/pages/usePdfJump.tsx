@@ -47,23 +47,24 @@ export const usePdfJump = () => {
 			type: "pixels" | "percent",
 			align: "start" | "center" = "start",
 			additionalOffset: number = 0,
-		) => {
-			if (!virtualizer) return;
+			behavior: "auto" | "smooth" = "smooth",
+		): boolean => {
+			if (!virtualizer || rects.length === 0) return false;
 
 			const firstPage = Math.min(...rects.map((rect) => rect.pageNumber));
 
 			// Get the start offset of the page in the viewport
 			const pageOffset = virtualizer.getOffsetForIndex(firstPage - 1, "start");
 
-			if (pageOffset === null) return;
+			if (pageOffset === null) return false;
 
 			// Find the target highlight rect (usually the first one)
 			const targetRect = rects.find((rect) => rect.pageNumber === firstPage);
 
-			if (!targetRect) return;
+			if (!targetRect) return false;
 
 			const isNumber = pageOffset?.[0] != null;
-			if (!isNumber) return;
+			if (!isNumber) return false;
 
 			const pageStart = pageOffset[0] ?? 0;
 
@@ -86,8 +87,9 @@ export const usePdfJump = () => {
 			let scrollOffset: number;
 
 			if (align === "center") {
-				// When centering in the viewport, we need the viewport height
-				const viewportHeight = virtualizer.scrollElement?.clientHeight || 0;
+				// The observed viewport is already normalized to PDF coordinates,
+				// matching pageStart and the highlight rect at every zoom level.
+				const viewportHeight = virtualizer.scrollRect?.height ?? 0;
 
 				// The target position is the rect's center minus half the viewport height
 				// This places the rect in the center of the viewport
@@ -106,8 +108,9 @@ export const usePdfJump = () => {
 
 			virtualizer.scrollToOffset(adjustedOffset, {
 				align: "start", // Always use start when we've calculated our own centering
-				behavior: "smooth",
+				behavior,
 			});
+			return true;
 		},
 		[virtualizer],
 	);

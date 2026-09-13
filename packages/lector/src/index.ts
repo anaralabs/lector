@@ -34,6 +34,7 @@ export type { Annotation } from "./hooks/useAnnotations";
 export {
 	AnnotationsStoreProvider,
 	useAnnotations,
+	usePageAnnotations,
 } from "./hooks/useAnnotations";
 export { usePageRendered } from "./hooks/usePageRendered";
 export {
@@ -43,5 +44,20 @@ export {
 	usePDFLinkService,
 } from "./hooks/usePDFLinkService";
 export { usePDFPageNumber } from "./hooks/usePdfPageNumber";
+export { usePdfSelection } from "./hooks/usePdfSelection";
 export { useSelectionDimensions } from "./hooks/useSelectionDimensions";
 export { type ColoredHighlight, type HighlightRect, usePdf } from "./internal";
+export {
+	type ColorScheme,
+	createDarkModeColorMap,
+	type DarkModeColors,
+	DEFAULT_DARK_MODE_COLORS,
+	type RenderColorMap,
+} from "./lib/dark-mode";
+export type {
+	PDFSelectionResult,
+	PDFTextAnchor,
+	PDFTextSelection,
+} from "./lib/pdf-selection";
+export type { AsyncSearchOptions, SearchOptions } from "./lib/search";
+export type { PageText, SelectionTextOptions } from "./lib/text-normalization";

@@ -1,6 +1,8 @@
 import react from "@vitejs/plugin-react";
-import type {} from "@vitest/browser/providers/playwright";
+import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
+
+import { selectionPointer } from "./tests/selection-commands";
 
 const browser =
 	process.env.LECTOR_TEST_BROWSER === "webkit"
@@ -12,18 +14,24 @@ const browser =
 export default defineConfig({
 	plugins: [react()],
 	resolve: { dedupe: ["react", "react-dom"] },
+
 	optimizeDeps: {
 		include: [
+			"react/jsx-dev-runtime",
+			"@testing-library/react",
+			"zustand",
 			"pdfjs-dist/legacy/build/pdf.mjs",
-			"zustand/react/shallow",
-			"@tanstack/react-virtual",
 			"clsx",
+			"@tanstack/react-virtual",
 			"use-debounce",
 			"@use-gesture/react",
 			"@floating-ui/react",
+			"zustand/react/shallow",
+			"zustand/vanilla",
 		],
 	},
 	test: {
+		fileParallelism: false,
 		include: [
 			"tests/**/*.browser.test.tsx",
 			"src/**/*.test.ts",
@@ -31,45 +39,50 @@ export default defineConfig({
 		],
 		browser: {
 			enabled: true,
-			name: browser,
-			provider: "playwright",
-			headless: true,
-			screenshotFailures: false,
-			viewport: { width: 2000, height: 1000 },
-			providerOptions: {
-				context: { viewport: { width: 2100, height: 1100 } },
-				launch: {
+			// Windows runners can reserve Vitest's default high port (63315).
+			api:
+				process.platform === "win32"
+					? { host: "127.0.0.1", port: 3100 }
+					: undefined,
+			commands: {
+				selectionPointer,
+				async mouse(context, action: string, x = 0, y = 0, shift = false) {
+					if (shift) await context.page.keyboard.down("Shift");
+					try {
+						if (action === "up") await context.page.mouse.up();
+						else {
+							await selectionPointer(context, "move", x, y);
+							if (action === "down") await context.page.mouse.down();
+							if (action === "click" || action === "double") {
+								await context.page.mouse.down({
+									clickCount: action === "double" ? 2 : 1,
+								});
+								await context.page.mouse.up({
+									clickCount: action === "double" ? 2 : 1,
+								});
+							}
+						}
+					} finally {
+						if (shift) await context.page.keyboard.up("Shift");
+					}
+				},
+			},
+			provider: playwright({
+				launchOptions: {
+					executablePath:
+						browser === "chromium"
+							? process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+							: undefined,
 					channel:
 						browser === "chromium"
 							? (process.env.LECTOR_BROWSER_CHANNEL ??
 								(process.env.CI ? undefined : "chrome"))
 							: undefined,
 				},
-			},
-			commands: {
-				async mouse(context, action: string, x = 0, y = 0, shift = false) {
-					const { page, iframe } = context as unknown as {
-						page: import("playwright").Page;
-						iframe: import("playwright").FrameLocator;
-					};
-					const box = await iframe.locator("body").boundingBox();
-					if (shift) await page.keyboard.down("Shift");
-					if (action === "down") {
-						await page.mouse.move(x + (box?.x ?? 0), y + (box?.y ?? 0));
-						await page.mouse.down();
-					}
-					if (action === "move")
-						await page.mouse.move(x + (box?.x ?? 0), y + (box?.y ?? 0), {
-							steps: 8,
-						});
-					if (action === "up") await page.mouse.up();
-					if (action === "click")
-						await page.mouse.click(x + (box?.x ?? 0), y + (box?.y ?? 0));
-					if (action === "double")
-						await page.mouse.dblclick(x + (box?.x ?? 0), y + (box?.y ?? 0));
-					if (shift) await page.keyboard.up("Shift");
-				},
-			},
+			}),
+			headless: true,
+			screenshotFailures: false,
+			instances: [{ browser }],
 		},
 	},
 });

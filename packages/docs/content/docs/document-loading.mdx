@@ -1,0 +1,205 @@
+---
+title: Loading documents
+description: Load URLs and files, handle failures, and serve PDF.js assets from your own app.
+---
+
+`Root` accepts a URL string, a `URL`, an `ArrayBuffer`, a typed array, or a PDF.js `DocumentInitParameters` object as `source`. It reloads when the `source` reference changes.
+
+## URLs and authenticated requests
+
+For a public file, use `source="/sample.pdf"`. Remote URLs must allow the browser's origin through CORS. Lector cannot bypass a server's CORS policy.
+
+For authenticated requests, keep the source object stable between renders:
+
+```tsx title="authenticated-viewer.tsx"
+"use client";
+
+import { CanvasLayer, Page, Pages, Root } from "@anaralabs/lector";
+import { useMemo } from "react";
+import "./pdf-setup";
+
+export default function AuthenticatedViewer({
+  url,
+  token,
+}: {
+  url: string;
+  token: string;
+}) {
+  const source = useMemo(
+    () => ({ url, httpHeaders: { Authorization: `Bearer ${token}` } }),
+    [url, token],
+  );
+
+  return (
+    <Root source={source} style={{ height: 600 }}>
+      <Pages><Page><CanvasLayer /></Page></Pages>
+    </Root>
+  );
+}
+```
+
+For cookie-based cross-origin requests, PDF.js accepts `withCredentials: true`. Your server must allow credentialed requests from the specific app origin. See the [PDF.js loading parameters](https://mozilla.github.io/pdf.js/api/draft/module-pdfjsLib.html#~DocumentInitParameters).
+
+Do not create `source={{ url }}` or `new Uint8Array(...)` inline during render: a fresh object triggers another load. `documentOptions` is different: changes are read on the next document load and do not trigger one by themselves.
+
+## Local files
+
+A `File` or `Blob` is not a direct `source` value. Create an object URL and release it when the file changes or the component unmounts:
+
+```tsx title="local-file-viewer.tsx"
+"use client";
+
+import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
+import { useEffect, useState } from "react";
+import "./pdf-setup";
+
+export default function LocalFileViewer() {
+  const [file, setFile] = useState<File | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!file) {
+      setUrl(null);
+      return;
+    }
+    const nextUrl = URL.createObjectURL(file);
+    setUrl(nextUrl);
+    return () => URL.revokeObjectURL(nextUrl);
+  }, [file]);
+
+  return (
+    <>
+      <label>
+        Choose a PDF
+        <input
+          type="file"
+          accept="application/pdf,.pdf"
+          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+        />
+      </label>
+      {url && (
+        <Root key={url} source={url} style={{ height: 600 }}>
+          <Pages><Page><CanvasLayer /><TextLayer /></Page></Pages>
+        </Root>
+      )}
+    </>
+  );
+}
+```
+
+You can also read `await file.arrayBuffer()` and pass the bytes. PDF.js may transfer typed arrays to its worker, taking ownership of the buffer. Keep a separate copy if your app needs the original bytes or must retry a load. See [PDF.js binary data loading](https://mozilla.github.io/pdf.js/api/draft/module-pdfjsLib.html#~DocumentInitParameters).
+
+## Show the requested page sooner
+
+By default, `Root` resolves all page proxies and dimensions before mounting its children. Large documents can opt into progressive acquisition:
+
+```tsx
+<Root source="/report.pdf" progressive initialPage={12} style={{ height: 600 }}>
+  <Pages>
+    <Page><CanvasLayer /><TextLayer /></Page>
+  </Pages>
+</Root>
+```
+
+`initialPage` is one-based, defaults to 1, and is clamped to the document's page count. The requested page is acquired first. Remaining pages use at most 16 concurrent requests; newly visible pages move ahead of queued background work. `initialPage` and `progressive` are read when `source` changes. `Pages.initialOffset`, when provided, takes precedence over the initial page's position.
+
+Unknown page sizes initially use the requested page's dimensions. As real dimensions arrive, Lector corrects vertical offsets above the current reading position, including rotated pages and zoomed views. Corrections wait until an active pinch finishes. A wider page can still change horizontal centering or fit-width zoom; use the default eager mode if your layout requires every page's exact dimensions before its first paint. Progressive mode reduces time to the first usable page; it does not reduce the eventual number of page proxies retained by PDF.js.
+
+`Page` and `Thumbnail` keep unresolved resources behind loading placeholders and offer Retry if acquisition fails. `Search` waits for all pages before publishing its text index. Background failures also call `onError` with `phase: "viewport-generation"`; already loaded pages remain usable unless your error handler replaces the reader.
+
+Custom consumers can await `usePdf((state) => state.loadPdfPageProxy)` for a particular page, or `loadPdfPageProxies()` for the complete ordered array. `isPageLoaded(pageNumber)` reports availability. Synchronous `getPdfPageProxy(pageNumber)` still returns a real PDF.js proxy and throws a descriptive error for an unresolved page; await the async accessor first in progressive mode. The store's `pageProxies` array is empty until the complete ordered array is available, and `pagesLoaded` reports that state. The default eager mode preserves its existing complete array and synchronous access.
+
+## Show errors and retry
+
+`loader` is waiting content, not an error boundary. Without your own error UI, a failed load can leave it visible. `onError` receives `{ error, phase, source }`; `error` is `unknown`. Render failures outside `Root`, since its children are not mounted during loading.
+
+```tsx title="resilient-viewer.tsx"
+"use client";
+
+import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
+import { useState } from "react";
+import "./pdf-setup";
+
+export default function ResilientViewer({ source }: { source: string }) {
+  return <DocumentSession key={source} source={source} />;
+}
+
+function DocumentSession({ source }: { source: string }) {
+  const [attempt, setAttempt] = useState(0);
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <div role="alert">
+        <p>We couldn't open this PDF. Check the file or try again.</p>
+        <button type="button" onClick={() => {
+          setFailed(false);
+          setAttempt((value) => value + 1);
+        }}>
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <Root
+      key={attempt}
+      source={source}
+      style={{ height: 600 }}
+      loader={<p role="status">Loading PDF…</p>}
+      onError={({ error, phase }) => {
+        console.error(`PDF failed during ${phase}`, error);
+        setFailed(true);
+      }}
+    >
+      <Pages><Page><CanvasLayer /><TextLayer /></Page></Pages>
+    </Root>
+  );
+}
+```
+
+| Phase | What failed |
+| --- | --- |
+| `pdfjs-load` | Importing the PDF.js runtime |
+| `document-load` | Loading or parsing the document, including worker initialization, network, or password errors |
+| `viewport-generation` | Resolving pages after the document loaded |
+
+`onDocumentLoad={({ proxy, source }) => …}` fires when PDF.js resolves the document, **before** Lector finishes generating page viewports. It is not a signal that canvases have painted. `onError` covers initialization failures; it does not catch every later canvas, text, or annotation rendering error.
+
+For a known PDF password, pass `documentOptions={{ password }}`. Lector does not expose a password-prompt callback. If credentials or the password change, reload using a new source reference or remount `Root` with a new `key`.
+
+## Self-host PDF.js assets
+
+Lector supplies versioned jsDelivr URLs for auxiliary PDF.js resources by default. For offline or same-origin deployment, copy the resources from your installed `pdfjs-dist` package:
+
+```bash
+mkdir -p public/pdfjs
+cp node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs public/pdfjs/
+cp -R node_modules/pdfjs-dist/wasm public/pdfjs/
+cp -R node_modules/pdfjs-dist/cmaps public/pdfjs/
+cp -R node_modules/pdfjs-dist/standard_fonts public/pdfjs/
+cp -R node_modules/pdfjs-dist/iccs public/pdfjs/
+```
+
+Keep these assets synchronized with the dependency when building or deploying. Configure the worker as in [installation](/docs/installation), then pass the auxiliary directories to `Root`:
+
+```tsx
+<Root
+  source="/sample.pdf"
+  documentOptions={{
+    wasmUrl: "/pdfjs/wasm/",
+    cMapUrl: "/pdfjs/cmaps/",
+    cMapPacked: true,
+    standardFontDataUrl: "/pdfjs/standard_fonts/",
+    iccUrl: "/pdfjs/iccs/",
+  }}
+  style={{ height: 600 }}
+>
+  <Pages><Page><CanvasLayer /><TextLayer /></Page></Pages>
+</Root>
+```
+
+Include trailing slashes and any application path prefix. Image decoders matter for scanned PDFs; character maps and font data matter for documents with non-embedded or CJK fonts. Serve `.mjs` as JavaScript and `.wasm` as `application/wasm`, and check your deployment's worker and resource CSP rules if the browser blocks requests.
+
+`documentOptions` overrides both source-object options and Lector's defaults. Supplying your own `CanvasFactory` also replaces Lector's dark-mode scratch-canvas factory.

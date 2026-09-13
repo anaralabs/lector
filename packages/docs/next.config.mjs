@@ -8,6 +8,38 @@ const withMDX = createMDX();
 /** @type {import('next').NextConfig} */
 const config = {
 	reactStrictMode: true,
+	basePath: "/lector",
+	async redirects() {
+		return [
+			{
+				source: "/lector/:path*",
+				destination: "https://anara.com/lector/:path*",
+				has: [{ type: "host", value: "lector.anara.com" }],
+				basePath: false,
+				permanent: true,
+			},
+			{
+				source: "/:path*",
+				destination: "https://anara.com/lector/:path*",
+				has: [{ type: "host", value: "lector.anara.com" }],
+				basePath: false,
+				permanent: true,
+			},
+			{
+				source: "/",
+				destination: "/lector",
+				basePath: false,
+				permanent: false,
+			},
+		];
+	},
+	async rewrites() {
+		return {
+			beforeFiles: [
+				{ source: "/docs/:slug*.md", destination: "/api/docs/:slug*" },
+			],
+		};
+	},
 	serverExternalPackages: ["pdfjs-dist"],
 	webpack: (config, { dev }) => {
 		if (dev) {

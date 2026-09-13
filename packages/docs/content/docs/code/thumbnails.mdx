@@ -1,105 +1,107 @@
 ---
 title: Thumbnails
-description: Using the basic PDF viewer with thumbnails navigation
+description: Add a scrollable page-preview sidebar beside the document.
 ---
 
-import WithThumbnails from "@/components/thumbnails.tsx";
+`Thumbnails` clones one `Thumbnail` template for every page. Each thumbnail navigates to its page on click, Enter, or Space. Space activates on release without scrolling the sidebar. Thumbnails have a default accessible name (`Page N`) and mark the currently viewed page with `aria-current="page"`; override `aria-label` for localization. Custom event handlers can call `preventDefault()` to cancel navigation. Both thumbnails and pages must share the same `Root`.
 
-<WithThumbnails />
+## A sidebar layout
 
-## Implementation
+Complete [installation](/docs/installation) and create `pdf-setup.ts` before using this example.
 
-Create a PDF viewer with thumbnail navigation and zoom controls:
-
-```tsx
+```tsx title="thumbnail-viewer.tsx"
 "use client";
 
 import {
-  CanvasLayer,
-  CurrentPage,
-  CurrentZoom,
-  Page,
-  Pages,
-  Root,
-  TextLayer,
-  Thumbnail,
-  Thumbnails,
-  ZoomIn,
-  ZoomOut,
+  CanvasLayer, Page, Pages, Root, TextLayer, Thumbnail, Thumbnails,
 } from "@anaralabs/lector";
-import { cn } from "fumadocs-ui/components/api";
-import { useState } from "react";
+import "./pdf-setup";
 
-const WithThumbnails = () => {
-  const [showThumbnails, setShowThumbnails] = useState(true);
-
+export default function ThumbnailViewer() {
   return (
     <Root
-      source="/pdf/document.pdf"
-      className="bg-gray-100 border rounded-md overflow-hidden relative h-[700px] flex flex-col justify-stretch"
-      loader={<div className="p-4">Loading...</div>}
+      source="/sample.pdf"
+      isZoomFitWidth
+      style={{ height: 600, display: "flex" }}
     >
-      {/* Control Bar */}
-      <div className="bg-gray-100 border-b p-1 flex items-center justify-center text-sm text-gray-600 gap-2">
-        <button
-          onClick={() => setShowThumbnails((show) => !show)}
-          className="px-2 hover:bg-gray-300 hover:text-gray-900 py-1 rounded-full"
-        >
-          {showThumbnails ? "Hide" : "Show"} Thumbnails
-        </button>
-        <span className="flex-grow" />
-        Page
-        <CurrentPage className="bg-white rounded-full px-3 py-1 border text-center" />
-        Zoom
-        <ZoomOut className="px-3 py-1 -mr-2 text-gray-900">-</ZoomOut>
-        <CurrentZoom className="bg-white rounded-full px-3 py-1 border text-center w-16" />
-        <ZoomIn className="px-3 py-1 -ml-2 text-gray-900">+</ZoomIn>
-        <span className="flex-grow" />
-      </div>
-
-      {/* Main Content */}
-      <div
-        className={cn(
-          "basis-0 grow min-h-0 relative grid",
-          "transition-all duration-300",
-          showThumbnails ? "grid-cols-[24rem,1fr]" : "grid-cols-[0,1fr]"
-        )}
-      >
-        {/* Thumbnails Panel */}
-        <div className="overflow-y-auto overflow-x-hidden">
-          <div className="w-96 overflow-x-hidden">
-            <Thumbnails className="flex flex-col gap-4 items-center py-4">
-              <Thumbnail className="transition-all w-48 hover:shadow-lg hover:outline hover:outline-gray-300" />
-            </Thumbnails>
-          </div>
-        </div>
-
-        {/* PDF Viewer */}
-        <Pages className="p-4 h-full">
-          <Page>
-            <CanvasLayer />
-            <TextLayer />
-          </Page>
-        </Pages>
+      <aside aria-label="Page thumbnails" style={{ width: 160, flexShrink: 0, overflow: "auto" }}>
+        <Thumbnails style={{ display: "grid", gap: 16, padding: 8 }}>
+          <Thumbnail style={{ width: 128 }} />
+        </Thumbnails>
+      </aside>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <Pages><Page><CanvasLayer /><TextLayer /></Page></Pages>
       </div>
     </Root>
   );
-};
-
-export default WithThumbnails;
+}
 ```
 
-## Features
+The sidebar scrolls independently. `minWidth: 0` allows the main viewer to shrink when the sidebar takes space. Set a CSS width on `Thumbnail`; Lector owns the canvas's drawing dimensions.
 
-- Scrollable thumbnail previews
-- Visual feedback on hover
-- Automatic page synchronization
-- Responsive sizing
+## Label individual pages
 
-## Best Practices
+For specific labels and an active-page indicator, map thumbnails yourself inside a child of `Root`:
 
-- Use proper state management for toggles
-- Include loading states for better UX
-- Implement smooth transitions
-- Add hover effects for interaction feedback
-- Optimize thumbnail rendering
+```tsx title="labeled-thumbnails.tsx"
+"use client";
+
+import { Thumbnail, usePdf } from "@anaralabs/lector";
+
+export default function LabeledThumbnails() {
+  const count = usePdf((state) => state.pdfDocumentProxy.numPages);
+  const current = usePdf((state) => state.currentPage);
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      {Array.from({ length: count }, (_, index) => {
+        const page = index + 1;
+        return (
+          <div key={page}>
+            <Thumbnail
+              pageNumber={page}
+              aria-label={`Go to page ${page}`}
+              aria-current={current === page ? "page" : undefined}
+              style={{ width: 128, outline: current === page ? "2px solid currentColor" : undefined }}
+            />
+            <span>Page {page}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+```
+
+Keep a visible focus indicator in your app's styles. The built-in keyboard handler supports Enter; if your UI needs Space activation too, provide an `onKeyDown` handler that prevents the page scroll and activates the thumbnail.
+
+`Thumbnails` creates a wrapper for every page; it is not the same virtualized list as `Pages`. Thumbnail canvas rendering is visibility-driven. For very large documents, measure the sidebar separately and consider mounting it only when opened.
+
+## Live example
+
+import WithThumbnails from "@/components/thumbnails";
+
+<WithThumbnails />
+
+## Virtual thumbnails for long documents
+
+For hundreds or thousands of pages, opt into a bounded list. Give `Thumbnails`
+a bounded height and specify the fixed height of each row, including spacing:
+
+```tsx
+<Thumbnails
+  style={{ height: 450, width: 140 }}
+  virtualize={{ itemHeight: 150, overscan: 2 }}
+>
+  <Thumbnail style={{ height: 130, width: "auto" }} />
+</Thumbnails>
+```
+
+The container owns scrolling and mounts only nearby rows. Ensure each child's
+content fits `itemHeight`; margins, padding and spacing belong inside that row.
+The default layout remains available by omitting `virtualize`.
+
+With a thumbnail focused, Arrow Up/Down moves between pages, and Home/End moves
+to the first/last page, mounting the target before focusing it. Enter opens the
+focused page. Consumer keyboard handlers can call `preventDefault()` to override
+the virtual list's navigation keys.

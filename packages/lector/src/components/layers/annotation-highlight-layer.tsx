@@ -1,8 +1,7 @@
 import type React from "react";
-import { useMemo } from "react";
 
 import type { Annotation } from "../../hooks/useAnnotations";
-import { useAnnotations } from "../../hooks/useAnnotations";
+import { usePageAnnotations } from "../../hooks/useAnnotations";
 import { usePDFPageNumber } from "../../hooks/usePdfPageNumber";
 import { usePdf } from "../../internal";
 import {
@@ -50,20 +49,10 @@ export const AnnotationHighlightLayer = ({
 	onAnnotationTooltipClose,
 	hoverTooltipClassName,
 }: AnnotationHighlightLayerProps) => {
-	const { annotations } = useAnnotations();
 	const pageNumber = usePDFPageNumber();
 	const isPageRendered = usePdf((state) => !!state.renderedPages[pageNumber]);
 
-	const pageAnnotations = useMemo(
-		() =>
-			annotations.filter(
-				(a) =>
-					a.pageNumber === pageNumber ||
-					a.highlights.some((h) => h.pageNumber === pageNumber) ||
-					a.underlines?.some((u) => u.pageNumber === pageNumber),
-			),
-		[annotations, pageNumber],
-	);
+	const pageAnnotations = usePageAnnotations(pageNumber);
 
 	if (!isPageRendered) return null;
 

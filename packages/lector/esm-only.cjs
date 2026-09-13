@@ -4,6 +4,5 @@
 // the import paths correctly, as setting exports.*.require: null in package.json didn't work.
 
 throw new Error(
-	`This package is ESM only.
-    See https://err.47ng.com/NUQS-101 for more details.`,
+	'@anaralabs/lector is ESM only. Use import instead of require("@anaralabs/lector").',
 );

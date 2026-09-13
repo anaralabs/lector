@@ -5,9 +5,9 @@ The selection tests render this content through the production `TextLayer` hook 
 Run from the repository root:
 
 ```sh
-pnpm --dir packages/lector test:unit
-LECTOR_TEST_BROWSER=firefox pnpm --dir packages/lector test:unit
-LECTOR_TEST_BROWSER=webkit pnpm --dir packages/lector test:unit
+pnpm --dir packages/lector test:browser
+LECTOR_TEST_BROWSER=firefox pnpm --dir packages/lector test:browser
+LECTOR_TEST_BROWSER=webkit pnpm --dir packages/lector test:browser
 ```
 
 Chromium uses local Chrome by default, or bundled Chromium in CI. Install the matching Playwright browsers for Firefox/WebKit. `PLAYWRIGHT_BROWSERS_PATH` and `LECTOR_BROWSER_CHANNEL` can override local browser discovery.

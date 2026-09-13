@@ -1,201 +1,93 @@
 ---
-title: PDF Form
-description: Add interactive form support to your PDFs with native form handling and real-time value display
+title: PDF forms
+description: Render interactive fields and download a PDF containing the filled values.
 ---
 
-import PdfFormLayer from "@/components/pdf-form-layer";
+Add `AnnotationLayer` with `renderForms` to render the PDF's interactive fields. Form state belongs to PDF.js's document annotation storage. Use the document proxy's `saveDocument()` method when you need PDF bytes with the edits applied.
 
-<PdfFormLayer />
+## Fill and download
 
-## Basic Usage
+Use a PDF with actual interactive form fields, such as `public/form.pdf`, and the `pdf-setup.ts` from [installation](/docs/installation).
 
-Create an interactive PDF form viewer with form submission handling and a side panel to display form values:
-
-```tsx
+```tsx title="form-viewer.tsx"
 "use client";
 
-import {
-  Root,
-  Pages,
-  Page,
-  CanvasLayer,
-  TextLayer,
-  AnnotationLayer,
-} from "@anaralabs/lector";
-import { FormEvent } from "react";
+import { AnnotationLayer, CanvasLayer, Page, Pages, Root, TextLayer, usePdf } from "@anaralabs/lector";
+import { useState } from "react";
+import "./pdf-setup";
 
-type FormValues = {
-  [key: string]: FormDataEntryValue;
-} | null;
+function DownloadFilledPDF() {
+  const document = usePdf((state) => state.pdfDocumentProxy);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-export default function PdfForm() {
-  const [formValues, setFormValues] = useState<FormValues>(null);
-
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    const values = Object.fromEntries(formData.entries());
-    setFormValues(values);
-  };
+  async function download() {
+    setSaving(true);
+    setError(null);
+    try {
+      const bytes = await document.saveDocument();
+      const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const link = window.document.createElement("a");
+      link.href = url;
+      link.download = "filled-form.pdf";
+      window.document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      setError("Couldn't save this PDF. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
-    <div className="flex">
-      <form onSubmit={handleSubmit}>
-        <button type="submit">Get form values</button>
-        <Root source="/my-form.pdf">
-          <Pages>
-            <Page>
-              <CanvasLayer />
-              <TextLayer />
-              <AnnotationLayer />
-            </Page>
-          </Pages>
-        </Root>
-      </form>
-      <div className="border-l">
-        <h2>Form Values</h2>
-        {formValues && <pre>{JSON.stringify(formValues, null, 2)}</pre>}
-      </div>
+    <div>
+      <button type="button" disabled={saving} onClick={() => void download()}>
+        {saving ? "Preparing download…" : "Download filled PDF"}
+      </button>
+      {error && <p role="alert">{error}</p>}
     </div>
+  );
+}
+
+export default function FormViewer() {
+  return (
+    <Root source="/form.pdf" style={{ height: 600, display: "flex", flexDirection: "column" }}>
+      <DownloadFilledPDF />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Pages>
+          <Page>
+            <CanvasLayer />
+            <TextLayer />
+            <AnnotationLayer renderForms />
+          </Page>
+        </Pages>
+      </div>
+    </Root>
   );
 }
 ```
 
-## Form Handling
+`saveDocument()` returns a promise for the edited PDF bytes. Downloading the source URL or calling `getData()` is not the same operation. See the [PDF.js document proxy reference](https://mozilla.github.io/pdf.js/api/draft/module-pdfjsLib-PDFDocumentProxy.html#saveDocument).
 
-Handle form submissions with FormData and filter out empty values:
+## Reading values in your application
 
-```tsx
-const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-  e.preventDefault();
-  const formData = new FormData(e.currentTarget);
+Do not use `new FormData(viewerElement)` as a complete document export. `Pages` virtualizes the document, so offscreen widgets may not exist in the DOM. `FormData` also follows HTML successful-control rules; unchecked or disabled controls can be absent.
 
-  // Filter out empty values
-  const values = Object.fromEntries(
-    Array.from(formData.entries()).filter(([, value]) => {
-      return value !== "" && value != null;
-    })
-  );
+The proxy exposes `annotationStorage` for PDF.js annotation state and `getFieldObjects()` for field metadata. If you need a business-domain JSON object, map PDF field identifiers to your schema explicitly and validate the values in your app. Storage is PDF.js state, not a ready-made object keyed by your application's field names.
 
-  setFormValues(Object.keys(values).length > 0 ? values : null);
-};
-```
+The live example below inspects currently mounted DOM form controls for demonstration. Use the download recipe above for document-wide PDF output.
 
-## Complete Example
+## Boundaries
 
-Here's a fully working form component with proper typing, form handling, and a responsive side panel:
+This supports interactive PDF form widgets, not arbitrary PDF text editing. A printed blank line in a scanned document is not a field. Test the specific form types your app accepts and verify the downloaded file in another PDF reader.
 
-```tsx
-"use client";
+Lector's custom highlight and comment overlays are separate from PDF.js form storage. `saveDocument()` does not automatically embed those overlays in the saved PDF.
 
-import {
-  AnnotationLayer,
-  CanvasLayer,
-  Page,
-  Pages,
-  Root,
-  TextLayer,
-} from "@anaralabs/lector";
-import React, { useState, FormEvent } from "react";
-import "@/lib/setup";
+## Live example
 
-const fileUrl = "/pdf/form.pdf";
+import PdfFormLayer from "@/components/pdf-form-layer";
 
-type FormValues = {
-  [key: string]: FormDataEntryValue;
-} | null;
-
-const PdfFormLayer = () => {
-  const [formValues, setFormValues] = useState<FormValues>(null);
-
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-
-    const values = Object.fromEntries(
-      Array.from(formData.entries()).filter(([, value]) => {
-        return value !== "" && value != null;
-      })
-    );
-
-    setFormValues(Object.keys(values).length > 0 ? values : null);
-  };
-
-  const formatFieldName = (fieldName: string) => {
-    return fieldName
-      .replace(/\[\d+\]/g, "")
-      .split("_")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ");
-  };
-
-  const renderFormValues = () => {
-    if (!formValues) return null;
-
-    return Object.entries(formValues).map(([key, value]) => (
-      <div key={key} className="mb-4 bg-white rounded-lg p-4 shadow-sm">
-        <div className="text-sm text-gray-600 mb-1">{formatFieldName(key)}</div>
-        <div className="text-base font-medium break-all">{String(value)}</div>
-      </div>
-    ));
-  };
-
-  return (
-    <div className="flex w-full h-screen">
-      <div className="flex-1">
-        <form onSubmit={handleSubmit}>
-          <button
-            type="submit"
-            className="mb-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          >
-            Get form values
-          </button>
-
-          <Root
-            source={fileUrl}
-            className="bg-gray-100 border rounded-md overflow-hidden relative h-[700px]"
-            loader={<div className="p-4">Loading...</div>}
-          >
-            <Pages className="p-4 h-full">
-              <Page>
-                <CanvasLayer />
-                <TextLayer />
-                <AnnotationLayer />
-              </Page>
-            </Pages>
-          </Root>
-        </form>
-      </div>
-
-      <div
-        className={`p-6 border-l bg-gray-50 transition-all duration-300 ${
-          !formValues || Object.keys(formValues).length === 0 ? "w-64" : "w-1/3"
-        }`}
-      >
-        <h2 className="text-lg font-semibold mb-4">Filled Form Values</h2>
-        {formValues && Object.keys(formValues).length > 0 ? (
-          <div className="space-y-2 max-h-[calc(100vh-8rem)] overflow-y-auto pr-2">
-            {renderFormValues()}
-          </div>
-        ) : (
-          <p className="text-gray-500">No form values have been entered yet</p>
-        )}
-      </div>
-    </div>
-  );
-};
-
-export default PdfFormLayer;
-```
-
-## Best Practices
-
-- Include a loading state for better user experience
-- Type your form event handlers properly with TypeScript
-- Use proper form semantics with submit buttons
-- Filter out empty values to keep the form data clean
-- Format field names for better readability
-- Make the values panel responsive and scrollable
-- Add smooth transitions for width changes
-- Include proper error handling and validation
-- Use semantic HTML and proper accessibility attributes
+<PdfFormLayer />

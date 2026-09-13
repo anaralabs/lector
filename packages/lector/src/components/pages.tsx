@@ -6,6 +6,8 @@ import {
 	type ReactElement,
 	useCallback,
 	useEffect,
+	useLayoutEffect,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
@@ -16,11 +18,10 @@ import { useScrollFn } from "../hooks/pages/useScrollFn";
 import { useVisiblePage } from "../hooks/pages/useVisiblePage";
 import { useViewportContainer } from "../hooks/viewport/useViewportContainer";
 import { usePdf } from "../internal";
+import { registerPdfCopy } from "../lib/selection-text";
+import type { SelectionTextOptions } from "../lib/text-normalization";
+import { USE_LAYOUT_ZOOM } from "../lib/zoom";
 import { Primitive } from "./primitive";
-
-const selectLargestPageWidth = (state: {
-	viewports: Array<{ width: number }>;
-}) => state.viewports.reduce((max, vp) => Math.max(max, vp.width), 0);
 
 const DEFAULT_HEIGHT = 600;
 const EXTRA_HEIGHT = 0;
@@ -73,6 +74,7 @@ export const Pages = ({
 	virtualizerOptions = DEFAULT_VIRTUALIZER_OPTIONS,
 	initialOffset,
 	onOffsetChange,
+	copyOptions,
 	...props
 }: HTMLProps<HTMLDivElement> & {
 	virtualizerOptions?: {
@@ -82,16 +84,39 @@ export const Pages = ({
 	children: ReactElement;
 	initialOffset?: number;
 	onOffsetChange?: (offset: number) => void;
+	/** Plain-text PDF copying. Preserve line breaks by default; false uses native copying. */
+	copyOptions?: false | SelectionTextOptions;
 }) => {
 	const [tempItems, setTempItems] = useState<VirtualItem[]>([]);
 
 	const viewports = usePdf((state) => state.viewports);
+	const selection = usePdf((state) => state.selection);
 	const numPages = usePdf((state) => state.pdfDocumentProxy.numPages);
+	const initialPage = usePdf((state) => state.initialPage);
 	const isPinching = usePdf((state) => state.isPinching);
 
 	const elementWrapperRef = useRef<HTMLDivElement>(null);
 	const elementRef = useRef<HTMLDivElement>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
+	const copyOptionsRef = useRef(copyOptions);
+	copyOptionsRef.current = copyOptions;
+	useEffect(() => {
+		const container = containerRef.current;
+		if (!container) return;
+		const disconnect = selection.connect(container);
+		const unregisterCopy = registerPdfCopy(
+			container,
+			() => copyOptionsRef.current ?? {},
+			(options) =>
+				selection.getSnapshot()
+					? (selection.getText(options) ?? undefined)
+					: null,
+		);
+		return () => {
+			unregisterCopy();
+			disconnect();
+		};
+	}, [selection]);
 
 	useViewportContainer({
 		elementRef: elementRef,
@@ -102,7 +127,7 @@ export const Pages = ({
 	const setVirtualizer = usePdf((state) => state.setVirtualizer);
 
 	const { scrollToFn } = useScrollFn();
-	const { observeElementOffset } = useObserveElement();
+	const { observeElementOffset, observeElementRect } = useObserveElement();
 
 	const viewportsRef = useRef(viewports);
 	viewportsRef.current = viewports;
@@ -116,16 +141,56 @@ export const Pages = ({
 		[], // Stable — reads from ref
 	);
 
+	const [startingOffset] = useState(
+		() =>
+			initialOffset ??
+			viewports
+				.slice(0, initialPage - 1)
+				.reduce(
+					(offset, viewport) => offset + viewport.height + EXTRA_HEIGHT + gap,
+					0,
+				),
+	);
+
 	const virtualizer = useVirtualizer({
 		count: numPages || 0,
 		getScrollElement: () => containerRef.current,
 		estimateSize,
 		observeElementOffset,
+		observeElementRect,
 		overscan: virtualizerOptions?.overscan ?? 0,
 		scrollToFn,
 		gap,
-		initialOffset: initialOffset,
+		initialOffset: startingOffset,
+		// Never trust scrollend alone to reset isScrolling: a single missed
+		// event (a documented browser flake — TanStack flipped this default to
+		// false in later 3.x) would pin isScrolling=true forever, and every
+		// consumer gated on it (text layer, detail canvas) would stop painting.
+		// false keeps the isScrollingResetDelay debounce active as a fallback.
+		useScrollendEvent: false,
 	});
+
+	const previousViewports = useRef(viewports);
+	useLayoutEffect(() => {
+		// Gesture rendering freezes virtual positions; apply accumulated corrections
+		// after the gesture commits rather than moving its original content anchor.
+		if (isPinching) return;
+		const previous = previousViewports.current;
+		previousViewports.current = viewports;
+		if (previous === viewports) return;
+		// resizeItem corrects offsets above the visible page, preserving the reading anchor
+		// when estimated dimensions resolve (including intrinsic page rotation).
+		let resized = false;
+		for (let index = 0; index < viewports.length; index++) {
+			if (previous[index]?.height !== viewports[index]?.height) {
+				virtualizer.resizeItem(index, viewports[index]!.height + EXTRA_HEIGHT);
+				resized = true;
+			}
+		}
+		// Retiring the gesture snapshot and correcting its scroll offset must
+		// paint together, rather than showing old positions for another 200 ms.
+		if (resized) setTempItems([]);
+	}, [viewports, virtualizer, isPinching]);
 
 	useEffect(() => {
 		if (onOffsetChange && virtualizer.scrollOffset)
@@ -157,14 +222,31 @@ export const Pages = ({
 	}, [isPinching, virtualizer?.measure, virtualizer?.getVirtualItems]);
 
 	const virtualizerItems = virtualizer?.getVirtualItems() ?? [];
-	const items = tempItems.length ? tempItems : virtualizerItems;
+	// Keep the gesture's existing page positions, but also mount pages newly
+	// exposed by zooming out or panning. A frozen list leaves visible holes
+	// until the gesture ends, regardless of how quickly the PDF can render.
+	const items = useMemo(() => {
+		if (!tempItems.length) return virtualizerItems;
+		const combined = new Map(
+			virtualizerItems.map((item) => [item.index, item]),
+		);
+		for (const item of tempItems) combined.set(item.index, item);
+		return [...combined.values()].sort((a, b) => a.index - b.index);
+	}, [tempItems, virtualizerItems]);
 
 	useVisiblePage({
 		items,
+		// Pass through nullish (pre-measure) rather than coercing to 0, so the
+		// hook doesn't publish a top-of-document page before the real offset
+		// (incl. a restored/deep-linked one) arrives.
+		scrollOffset: virtualizer.scrollOffset ?? null,
 	});
 
 	useFitWidth({ viewportRef: containerRef });
-	const largestPageWidth = usePdf(selectLargestPageWidth);
+	const largestPageWidth = useMemo(
+		() => viewports.reduce((max, viewport) => Math.max(max, viewport.width), 0),
+		[viewports],
+	);
 
 	useEffect(() => {
 		virtualizer.getOffsetForAlignment = (
@@ -209,10 +291,10 @@ export const Pages = ({
 	return (
 		<Primitive.div
 			ref={containerRef}
+			tabIndex={0}
 			{...props}
 			style={{
 				display: "flex",
-				justifyContent: "center",
 				height: "100%",
 				position: "relative",
 				overflow: "auto",
@@ -222,7 +304,12 @@ export const Pages = ({
 			<div
 				ref={elementWrapperRef}
 				style={{
-					width: "max-content",
+					// The absolute page list contributes no intrinsic width. Reserve
+					// its width before any zoom effect runs (including zoom === 1).
+					width: largestPageWidth,
+					marginLeft: "auto",
+					marginRight: "auto",
+					flexShrink: 0,
 				}}
 			>
 				<div
@@ -234,8 +321,7 @@ export const Pages = ({
 						alignItems: "center",
 						flexDirection: "column",
 						transformOrigin: "0 0",
-						willChange: "transform",
-						// width: "max-content",
+						willChange: USE_LAYOUT_ZOOM ? "auto" : "transform",
 						width: largestPageWidth,
 						margin: "0 auto",
 					}}

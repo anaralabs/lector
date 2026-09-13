@@ -5,16 +5,14 @@ import {
 	HighlightLayer,
 	Page,
 	Pages,
-	Root,
 	TextLayer,
 	usePdf,
 	useSelectionDimensions,
 } from "@anaralabs/lector";
-
-import "@/lib/setup";
 import { CustomSelect } from "./custom-select";
+import { ExampleRoot } from "./example-root";
 
-const fileUrl = "/pdf/pathways.pdf";
+const fileUrl = "/lector/pdf/pathways.pdf";
 
 const HighlightLayerContent = () => {
 	const selectionDimensions = useSelectionDimensions();
@@ -40,13 +38,13 @@ const HighlightLayerContent = () => {
 };
 
 const PdfHighlightSelect = () => (
-	<Root
+	<ExampleRoot
 		source={fileUrl}
-		className="flex bg-gray-50 h-[500px]"
+		className="flex bg-muted h-[500px]"
 		loader={<div className="p-4">Loading...</div>}
 	>
 		<HighlightLayerContent />
-	</Root>
+	</ExampleRoot>
 );
 
 export default PdfHighlightSelect;

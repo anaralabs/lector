@@ -1,15 +1,15 @@
 "use client";
 
-import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
-import "@/lib/setup";
+import { CanvasLayer, Page, Pages, TextLayer } from "@anaralabs/lector";
+import { ExampleRoot } from "./example-root";
 
-const fileUrl = "/pdf/large.pdf";
+const fileUrl = "/lector/pdf/large.pdf";
 
 const BasicTextLayer = () => {
 	return (
-		<Root
+		<ExampleRoot
 			source={fileUrl}
-			className="bg-gray-100 border rounded-md overflow-hidden relative h-[500px]"
+			className="bg-muted border rounded-md overflow-hidden relative h-[500px]"
 			loader={<div className="p-4">Loading...</div>}
 		>
 			<Pages className="p-4 h-full">
@@ -18,7 +18,7 @@ const BasicTextLayer = () => {
 					<TextLayer />
 				</Page>
 			</Pages>
-		</Root>
+		</ExampleRoot>
 	);
 };
 
