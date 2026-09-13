@@ -53,24 +53,34 @@ function copy(target: EventTarget = document) {
 	return { event, text: data.get("text/plain") };
 }
 
-test("cross-page copy includes selected PDF text only, with page boundaries", () => {
-	const scope = fixture(
-		'<div class="textLayer" data-page-number="1"><span>First page.</span></div><button>Delete annotation</button><div class="textLayer" data-page-number="2"><span>Second page.</span></div>',
-	);
-	const selection = select(scope);
-	expect(getPdfSelectionText(selection, scope)).toBe(
-		"First page.\n\nSecond page.",
-	);
-	expect(getPdfSelectionText(selection, scope, { lineBreaks: "space" })).toBe(
-		"First page.\n\nSecond page.",
-	);
-	const dispose = registerPdfCopy(scope, () => ({}));
-	try {
-		expect(copy().text).toBe("First page.\n\nSecond page.");
-	} finally {
-		dispose();
-	}
-});
+test.each([
+	["", "\n\n"],
+	["<br>", "\n\n"],
+	["<br><br>", "\n\n"],
+	["<br><br><br>", "\n\n\n"],
+	["<span>\n</span>", "\n\n"],
+	["<span>\n</span><br>", "\n\n"],
+])(
+	"cross-page copy preserves page boundaries with ending %j",
+	(ending, separator) => {
+		const scope = fixture(
+			`<div class="textLayer" data-page-number="1"><span>First page.</span>${ending}</div><button>Delete annotation</button><div class="textLayer" data-page-number="2"><span>Second page.</span></div>`,
+		);
+		const selection = select(scope);
+		const expected = `First page.${separator}Second page.`;
+		for (const lineBreaks of ["preserve", "space"] as const) {
+			expect(getPdfSelectionText(selection, scope, { lineBreaks })).toBe(
+				expected,
+			);
+			const dispose = registerPdfCopy(scope, () => ({ lineBreaks }));
+			try {
+				expect(copy().text).toBe(expected);
+			} finally {
+				dispose();
+			}
+		}
+	},
+);
 
 test("copy never presents missing virtualized pages as a complete passage", () => {
 	const scope = fixture(
