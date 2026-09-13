@@ -44,7 +44,29 @@ export default defineConfig({
 				process.platform === "win32"
 					? { host: "127.0.0.1", port: 3100 }
 					: undefined,
-			commands: { selectionPointer },
+			commands: {
+				selectionPointer,
+				async mouse(context, action: string, x = 0, y = 0, shift = false) {
+					if (shift) await context.page.keyboard.down("Shift");
+					try {
+						if (action === "up") await context.page.mouse.up();
+						else {
+							await selectionPointer(context, "move", x, y);
+							if (action === "down") await context.page.mouse.down();
+							if (action === "click" || action === "double") {
+								await context.page.mouse.down({
+									clickCount: action === "double" ? 2 : 1,
+								});
+								await context.page.mouse.up({
+									clickCount: action === "double" ? 2 : 1,
+								});
+							}
+						}
+					} finally {
+						if (shift) await context.page.keyboard.up("Shift");
+					}
+				},
+			},
 			provider: playwright({
 				launchOptions: {
 					executablePath:

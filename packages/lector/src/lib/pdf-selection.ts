@@ -9,6 +9,7 @@ import {
 	normalizeSelectionText,
 	type SelectionTextOptions,
 } from "./text-normalization";
+import { resolveTextSelectionCaret } from "./text-selection";
 
 /** One-based page and UTF-16 offset in that page's selectable text (BRs excluded). */
 export interface PDFTextAnchor {
@@ -85,6 +86,9 @@ export class PDFSelectionController {
 			this.listeners.delete(listener);
 		};
 	};
+	get isConnected() {
+		return this.container !== null;
+	}
 	get isDragging() {
 		return this.drag !== null;
 	}
@@ -522,6 +526,8 @@ export class PDFSelectionController {
 	}
 
 	private caret(x: number, y: number): PDFTextAnchor | null {
+		const geometry = resolveTextSelectionCaret(this.container!, x, y);
+		if (geometry) return this.anchorFor(geometry.node, geometry.offset);
 		const owner = this.container!.ownerDocument;
 		const doc = owner as Document & {
 			caretPositionFromPoint?: (
@@ -653,7 +659,11 @@ export class PDFSelectionController {
 		const down = (event: PointerEvent) => {
 			if (event.defaultPrevented) return;
 			const target = event.target instanceof Element ? event.target : null;
-			if (target?.closest("button, a, [role=button], [data-selection-tooltip]"))
+			if (
+				target?.closest(
+					'button, a, input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role=button], [role=link], [role=textbox], [data-selection-tooltip], [data-lector-selection-ignore]',
+				)
+			)
 				return;
 			if (!container.contains(event.target as Node)) {
 				this.clear();
@@ -663,6 +673,9 @@ export class PDFSelectionController {
 				event.defaultPrevented ||
 				event.button !== 0 ||
 				event.pointerType === "touch" ||
+				event.ctrlKey ||
+				event.metaKey ||
+				event.altKey ||
 				!container.contains(event.target as Node)
 			)
 				return;

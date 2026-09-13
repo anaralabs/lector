@@ -1,194 +1,9 @@
 import { useEffect, useRef } from "react";
 
 import { PDFStore, usePdf } from "../../internal";
-import { createSelectionBackground } from "../../lib/selection-background";
+import { bindTextSelection } from "../../lib/text-selection";
 import { subscribeToViewportInvalidation } from "../../lib/viewport-invalidation";
 import { usePDFPageNumber } from "../usePdfPageNumber";
-
-// Add custom property declarations
-interface TextLayerDivElement extends HTMLDivElement {
-	_textSelectionBound?: boolean;
-	_cleanupTextSelection?: () => void;
-}
-
-const createTextSelectionManager = () => {
-	const textLayers = new Map<HTMLDivElement, HTMLElement>();
-	const selectionBackground = createSelectionBackground();
-	let selectionChangeAbortController: AbortController | null = null;
-	let isPointerDown = false;
-	let prevRange: Range | null = null;
-	let isFirefox: boolean | undefined;
-
-	const removeGlobalSelectionListener = (textLayerDiv: HTMLDivElement) => {
-		selectionBackground.clear(textLayerDiv);
-		textLayers.delete(textLayerDiv);
-		if (textLayers.size === 0) {
-			selectionChangeAbortController?.abort();
-			selectionChangeAbortController = null;
-		}
-	};
-
-	const enableGlobalSelectionListener = () => {
-		if (selectionChangeAbortController) {
-			return;
-		}
-
-		selectionChangeAbortController = new AbortController();
-		const { signal } = selectionChangeAbortController;
-
-		const reset = (endDiv: HTMLElement, textLayer: HTMLDivElement) => {
-			if (endDiv.parentNode !== textLayer) {
-				textLayer.appendChild(endDiv);
-			}
-			endDiv.style.width = "";
-			endDiv.style.height = "";
-			textLayer.classList.remove("selecting");
-		};
-
-		document.addEventListener(
-			"pointerdown",
-			() => {
-				isPointerDown = true;
-			},
-			{ signal },
-		);
-
-		document.addEventListener(
-			"pointerup",
-			() => {
-				isPointerDown = false;
-				textLayers.forEach(reset);
-			},
-			{ signal },
-		);
-
-		window.addEventListener(
-			"blur",
-			() => {
-				isPointerDown = false;
-				textLayers.forEach(reset);
-			},
-			{ signal },
-		);
-
-		document.addEventListener(
-			"keyup",
-			() => {
-				if (!isPointerDown) {
-					textLayers.forEach(reset);
-				}
-			},
-			{ signal },
-		);
-
-		document.addEventListener(
-			"selectionchange",
-			() => {
-				const selection = document.getSelection();
-				selectionBackground.update(selection, textLayers.keys());
-				if (!selection || selection.rangeCount === 0) {
-					textLayers.forEach(reset);
-					return;
-				}
-
-				const activeTextLayers = new Set<HTMLDivElement>();
-				for (let i = 0; i < selection.rangeCount; i++) {
-					const range = selection.getRangeAt(i);
-					for (const textLayerDiv of textLayers.keys()) {
-						if (
-							!activeTextLayers.has(textLayerDiv) &&
-							range.intersectsNode(textLayerDiv)
-						) {
-							activeTextLayers.add(textLayerDiv);
-						}
-					}
-				}
-
-				for (const [textLayerDiv, endDiv] of textLayers) {
-					if (activeTextLayers.has(textLayerDiv)) {
-						textLayerDiv.classList.add("selecting");
-					} else {
-						reset(endDiv, textLayerDiv);
-					}
-				}
-
-				if (isFirefox === undefined) {
-					const firstTextLayer = textLayers.keys().next().value;
-					if (firstTextLayer) {
-						isFirefox =
-							getComputedStyle(firstTextLayer).getPropertyValue(
-								"-moz-user-select",
-							) === "none";
-					}
-				}
-
-				if (isFirefox) {
-					return;
-				}
-
-				try {
-					const range = selection.getRangeAt(0);
-					const modifyStart =
-						prevRange &&
-						(range.compareBoundaryPoints(Range.END_TO_END, prevRange) === 0 ||
-							range.compareBoundaryPoints(Range.START_TO_END, prevRange) === 0);
-
-					let anchor = modifyStart ? range.startContainer : range.endContainer;
-					if (anchor.nodeType === Node.TEXT_NODE) {
-						anchor = anchor.parentNode as HTMLElement;
-					}
-
-					const parentTextLayer = anchor.parentElement?.closest(
-						".textLayer",
-					) as HTMLDivElement;
-					const endDiv = textLayers.get(parentTextLayer);
-
-					if (endDiv && parentTextLayer) {
-						endDiv.style.width = parentTextLayer.style.width;
-						endDiv.style.height = parentTextLayer.style.height;
-						const insertTarget = modifyStart ? anchor : anchor.nextSibling;
-						if (anchor.parentElement && insertTarget) {
-							anchor.parentElement.insertBefore(endDiv, insertTarget);
-						}
-					}
-
-					prevRange = range.cloneRange();
-				} catch {
-					// ignore
-				}
-			},
-			{ signal },
-		);
-	};
-
-	const bindMouseEvents = (
-		textLayerDiv: TextLayerDivElement,
-		endOfContent: HTMLElement,
-	) => {
-		if (textLayerDiv._textSelectionBound) {
-			return;
-		}
-		textLayerDiv._textSelectionBound = true;
-
-		textLayers.set(textLayerDiv, endOfContent);
-		enableGlobalSelectionListener();
-
-		const handleMouseDown = () => {
-			textLayerDiv.classList.add("selecting");
-		};
-
-		textLayerDiv.addEventListener("mousedown", handleMouseDown);
-		textLayerDiv._cleanupTextSelection = () => {
-			textLayerDiv.removeEventListener("mousedown", handleMouseDown);
-			removeGlobalSelectionListener(textLayerDiv);
-			delete textLayerDiv._textSelectionBound;
-		};
-	};
-
-	return bindMouseEvents;
-};
-
-export const bindMouseEvents = createTextSelectionManager();
 
 // Pages flicked past during a fast scroll mount and unmount within a few frames.
 // Building their text layer (stream all text content from the pdf worker + lay
@@ -213,7 +28,7 @@ const TEXT_SCROLL_SETTLE_MS = 160;
 const VIEWPORT_ATTACH_MAX_FRAMES = 300;
 
 export const useTextLayer = () => {
-	const textContainerRef = useRef<TextLayerDivElement>(null);
+	const textContainerRef = useRef<HTMLDivElement>(null);
 	const textLayerRef = useRef<{
 		cancel: () => void;
 		render: () => Promise<void>;
@@ -233,6 +48,7 @@ export const useTextLayer = () => {
 
 		let isCancelled = false;
 		let unregisterSelection: (() => void) | undefined;
+		let cleanupMouseSelection: (() => void) | undefined;
 		let buildTimer: ReturnType<typeof setTimeout> | null = null;
 		let unsubscribe: (() => void) | null = null;
 
@@ -290,11 +106,11 @@ export const useTextLayer = () => {
 						return;
 					}
 
-					const endOfContent = document.createElement("div");
-					endOfContent.className = "endOfContent";
-					textContainer.appendChild(endOfContent);
-
-					bindMouseEvents(textContainer, endOfContent);
+					cleanupMouseSelection = bindTextSelection(
+						textContainer,
+						viewportRef,
+						() => selection?.isConnected ?? false,
+					);
 					const viewport = pdfPageProxy.getViewport({ scale: 1 });
 					// CSS rotates this unrotated box; explicit dimensions also work when
 					// the host has not defined PDF.js scale-round custom properties.
@@ -391,10 +207,7 @@ export const useTextLayer = () => {
 				textLayerRef.current = null;
 			}
 
-			if (textContainer?._cleanupTextSelection) {
-				textContainer._cleanupTextSelection();
-				delete textContainer._cleanupTextSelection;
-			}
+			cleanupMouseSelection?.();
 		};
 	}, [
 		pdfPageProxy.streamTextContent,

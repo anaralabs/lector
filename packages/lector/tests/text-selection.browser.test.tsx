@@ -2,8 +2,8 @@ import "pdfjs-dist/web/pdf_viewer.css";
 import { cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { page } from "vitest/browser";
-import { bindMouseEvents } from "../src/hooks/layers/useTextLayer";
 import { useSelectionDimensions } from "../src/hooks/useSelectionDimensions";
+import { bindTextSelection } from "../src/lib/text-selection";
 import { wrapperFor } from "./helpers";
 
 const layers: (HTMLDivElement & { _cleanupTextSelection?: () => void })[] = [];
@@ -42,7 +42,9 @@ function fixture() {
 	layer.append(end);
 	document.body.append(layer);
 	layers.push(layer);
-	bindMouseEvents(layer, end);
+	Object.assign(layer, {
+		_cleanupTextSelection: bindTextSelection(layer, { current: null }),
+	});
 	return layer;
 }
 
