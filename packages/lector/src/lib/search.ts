@@ -156,6 +156,12 @@ function* runSearch(
 	let deadline = cooperative ? performance.now() + budget : 0;
 
 	for (const page of pages) {
+		// A page with no matches still spends time normalizing and scanning.
+		// Check its budget even when neither matching loop reaches 128 steps.
+		if (cooperative && performance.now() >= deadline) {
+			yield;
+			deadline = performance.now() + budget;
+		}
 		const normalized = normalize(page, options);
 		const lower = normalized.text;
 		// Ranges belong to this page. Storing every covered character wastes
@@ -187,6 +193,11 @@ function* runSearch(
 			lastStart = span.start;
 			lastEnd = span.end;
 			exactCount++;
+			// Exact results are already in their final document order. One extra
+			// distinct hit proves hasMoreResults; further pages cannot change it.
+			if (maxDistance === 0 && exactCount > limit) {
+				return { exactMatches, fuzzyMatches, hasMoreResults: true };
+			}
 			if (exactMatches.length < limit) {
 				exactMatches.push(
 					createMatch(

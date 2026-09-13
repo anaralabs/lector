@@ -25,6 +25,7 @@ export default defineConfig({
 			"@use-gesture/react",
 			"@floating-ui/react",
 			"zustand/react/shallow",
+			"zustand/vanilla",
 		],
 	},
 	test: {
