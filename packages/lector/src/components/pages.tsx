@@ -90,6 +90,7 @@ export const Pages = ({
 	const [tempItems, setTempItems] = useState<VirtualItem[]>([]);
 
 	const viewports = usePdf((state) => state.viewports);
+	const selection = usePdf((state) => state.selection);
 	const numPages = usePdf((state) => state.pdfDocumentProxy.numPages);
 	const initialPage = usePdf((state) => state.initialPage);
 	const isPinching = usePdf((state) => state.isPinching);
@@ -102,8 +103,20 @@ export const Pages = ({
 	useEffect(() => {
 		const container = containerRef.current;
 		if (!container) return;
-		return registerPdfCopy(container, () => copyOptionsRef.current ?? {});
-	}, []);
+		const disconnect = selection.connect(container);
+		const unregisterCopy = registerPdfCopy(
+			container,
+			() => copyOptionsRef.current ?? {},
+			(options) =>
+				selection.getSnapshot()
+					? (selection.getText(options) ?? undefined)
+					: null,
+		);
+		return () => {
+			unregisterCopy();
+			disconnect();
+		};
+	}, [selection]);
 
 	useViewportContainer({
 		elementRef: elementRef,
@@ -268,6 +281,7 @@ export const Pages = ({
 	return (
 		<Primitive.div
 			ref={containerRef}
+			tabIndex={0}
 			{...props}
 			style={{
 				display: "flex",

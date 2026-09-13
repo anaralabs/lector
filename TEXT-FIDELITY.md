@@ -42,7 +42,9 @@ pnpm --filter docs build
 
 Install the matching Playwright browsers as described in `CONTRIBUTING.md`. This workspace reused dependencies from the existing performance worktree, with a local-only Vite allow-list override for their absolute paths; the override is not part of the change.
 
-## Remaining text-fidelity work
+## Remaining text-fidelity work (at this PR)
+
+The follow-up selection work is described in [SELECTION.md](./SELECTION.md); it supersedes the mounted-only selection limitation below.
 
 Selection still depends on mounted text layers. `getText` returns null for skipped pages or selections spanning viewers; the copy handler leaves those events to the browser. It does not materialize missing pages or persist selection endpoints across virtualization.
 

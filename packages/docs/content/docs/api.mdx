@@ -131,6 +131,7 @@ For rectangle navigation, `align` is `"start"` or `"center"` (default `"start"`)
 | `useSearch()` | Under `Root`; returns `search`, `searchAsync`, `cancelSearch`, `isSearching`, `searchResults`, `textContent`, and `keywords` (currently an empty array) |
 | `calculateHighlightRects(pageProxy, textPosition)` | Async utility returning `HighlightRect[]` for a text match |
 | `SelectionTooltip` | Under `Root`; displays children for a selection; mount once per viewer |
+| `usePdfSelection()` | Under `Root` with `Pages`; reactive selection status, persistent page/text anchors, sync/async complete text and geometry, restoration and clearing; see [text selection](/docs/code/select) |
 | `useSelectionDimensions()` | Under `Root`; `getDimension()` reads text and rectangles, `getAnnotationDimension()` also computes underlines, and `getText(options?)` reads a normalized quote without geometry |
 | `usePDFPageNumber()` | Under `Page`; current one-based page number |
 | `usePageRendered(pageNumber)` | Under `Root`; reads whether that page is marked rendered |

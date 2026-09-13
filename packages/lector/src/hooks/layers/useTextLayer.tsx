@@ -223,6 +223,7 @@ export const useTextLayer = () => {
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const viewportRef = usePdf((state) => state.viewportRef);
 	const store = PDFStore.useContext();
+	const selection = store.getState().selection;
 
 	useEffect(() => {
 		const textContainer = textContainerRef.current;
@@ -231,6 +232,7 @@ export const useTextLayer = () => {
 		}
 
 		let isCancelled = false;
+		let unregisterSelection: (() => void) | undefined;
 		let buildTimer: ReturnType<typeof setTimeout> | null = null;
 		let unsubscribe: (() => void) | null = null;
 
@@ -242,7 +244,8 @@ export const useTextLayer = () => {
 		// (cancelling an in-flight build, which would otherwise keep running on
 		// the scroll path), and the build runs exactly TEXT_BUILD_IDLE_MS after
 		// the last scroll (mirrors the visibility gating below). Once a build has
-		// COMPLETED, further scrolls are no-ops.
+		// COMPLETED, further scrolls are no-ops. Active and restored selections
+		// bypass the idle gate so their text remains available during scrolling.
 		let built = false;
 		let building = false;
 		// Bumped to abandon a cancelled build's promise chain so it can't mark
@@ -292,6 +295,18 @@ export const useTextLayer = () => {
 					textContainer.appendChild(endOfContent);
 
 					bindMouseEvents(textContainer, endOfContent);
+					const viewport = pdfPageProxy.getViewport({ scale: 1 });
+					// CSS rotates this unrotated box; explicit dimensions also work when
+					// the host has not defined PDF.js scale-round custom properties.
+					const unrotated = pdfPageProxy.getViewport({ scale: 1, rotation: 0 });
+					textContainer.style.width = `${unrotated.width}px`;
+					textContainer.style.height = `${unrotated.height}px`;
+					unregisterSelection = selection?.registerLayer(
+						textContainer,
+						pageNumber,
+						viewport.width,
+						viewport.height,
+					);
 
 					built = true;
 					building = false;
@@ -310,6 +325,12 @@ export const useTextLayer = () => {
 
 		const schedule = () => {
 			if (built) return;
+			if (selection?.isDragging || selection?.includesPage(pageNumber)) {
+				if (buildTimer) clearTimeout(buildTimer);
+				buildTimer = null;
+				if (!building) build();
+				return;
+			}
 			if (building) {
 				// A scroll started mid-build: stop the streaming render so its
 				// span-measuring work doesn't land on the scroll path, and rebuild
@@ -351,10 +372,16 @@ export const useTextLayer = () => {
 			unsubscribe = subscribeToViewportInvalidation(scrollViewport, schedule);
 		};
 		attachScrollSubscription();
+		const unsubscribeSelection = selection?.subscribe(() => {
+			if (selection.isDragging || selection.includesPage(pageNumber))
+				schedule();
+		});
 		schedule();
 
 		return () => {
 			isCancelled = true;
+			unregisterSelection?.();
+			unsubscribeSelection?.();
 			if (buildTimer) clearTimeout(buildTimer);
 			if (attachRaf !== null) cancelAnimationFrame(attachRaf);
 			unsubscribe?.();
@@ -369,7 +396,13 @@ export const useTextLayer = () => {
 				delete textContainer._cleanupTextSelection;
 			}
 		};
-	}, [pdfPageProxy.streamTextContent, pdfPageProxy.getViewport, viewportRef]);
+	}, [
+		pdfPageProxy.streamTextContent,
+		pdfPageProxy.getViewport,
+		viewportRef,
+		selection,
+		pageNumber,
+	]);
 
 	// Hide the (transparent) text layer while scrolling so its spans aren't
 	// repainted as the page moves, and restore it once scrolling settles.
@@ -407,7 +440,14 @@ export const useTextLayer = () => {
 			// Never hide under an active drag-select (scroll-driven or
 			// zoom-driven) — the guard lives here so every hide trigger
 			// respects it.
-			if (selecting) return;
+			if (
+				selecting ||
+				selection?.isDragging ||
+				selection?.includesPage(pageNumber)
+			) {
+				show();
+				return;
+			}
 			textContainer.style.visibility = "hidden";
 			if (settleTimer) clearTimeout(settleTimer);
 			settleTimer = setTimeout(restoreWhenSettled, TEXT_SCROLL_SETTLE_MS);
@@ -495,7 +535,7 @@ export const useTextLayer = () => {
 			if (settleTimer) clearTimeout(settleTimer);
 			show();
 		};
-	}, [viewportRef, store]);
+	}, [viewportRef, store, selection, pageNumber]);
 
 	return {
 		textContainerRef,

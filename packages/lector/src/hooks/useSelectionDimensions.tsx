@@ -81,6 +81,8 @@ const mapSelectionRectsToLayers = (range: Range): MappedSelectionRect[] => {
 export const useSelectionDimensions = () => {
 	const store = PDFStore.useContext();
 	const getText = (options?: SelectionTextOptions) => {
+		if (store.getState().selection?.getSnapshot())
+			return store.getState().selection.getText(options);
 		const container = store.getState().viewportRef.current;
 		return container
 			? getPdfSelectionText(
@@ -92,6 +94,8 @@ export const useSelectionDimensions = () => {
 	};
 
 	const getAnnotationDimension = () => {
+		if (store.getState().selection?.getSnapshot())
+			return store.getState().selection.getSelection() ?? undefined;
 		const selection = window.getSelection();
 		if (!selection || selection.isCollapsed) return;
 
@@ -371,6 +375,8 @@ export const useSelectionDimensions = () => {
 	};
 
 	const getDimension = () => {
+		if (store.getState().selection?.getSnapshot())
+			return store.getState().selection.getSelection() ?? undefined;
 		const selection = window.getSelection();
 		if (!selection || selection.isCollapsed) return;
 

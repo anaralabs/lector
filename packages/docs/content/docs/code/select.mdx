@@ -3,7 +3,7 @@ title: Text selection
 description: Capture selected text and page-relative rectangles with a selection action.
 ---
 
-Add `TextLayer` to make a text-based PDF selectable. `useSelectionDimensions().getDimension()` reads the current browser selection and returns the selected text and its highlight rectangles. It can return `undefined`, so check the result before using it.
+Add `TextLayer` to make a text-based PDF selectable. Lector retains page/text anchors as pages scroll out of the DOM and restores the visible browser selection when they return. Mouse dragging autoscrolls across page boundaries. While focus is inside the PDF viewport, Shift-arrow keys extend an existing selection, including after its endpoint has scrolled out of view, and Escape clears it. `Pages` is keyboard-focusable by default; its `tabIndex` prop can override this. Restoring a selection programmatically does not move focus.
 
 ## Turn a selection into a highlight
 
@@ -14,25 +14,26 @@ This example uses `pdf-setup.ts` from [installation](/docs/installation). Select
 
 import {
   CanvasLayer, HighlightLayer, Page, Pages, Root, SelectionTooltip,
-  TextLayer, usePdf, useSelectionDimensions,
+  TextLayer, usePdf, usePdfSelection,
 } from "@anaralabs/lector";
 import "./pdf-setup";
 
 function SelectionAction() {
-  const { getDimension } = useSelectionDimensions();
+  const { selection, getSelection, clearSelection } = usePdfSelection();
   const setHighlight = usePdf((state) => state.setHighlight);
 
   return (
     <SelectionTooltip>
       <button
         type="button"
+        disabled={selection?.status !== "ready"}
         style={{ background: "white", color: "black", padding: "6px 12px", border: "1px solid" }}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => {
-          const selection = getDimension();
-          if (!selection || selection.isCollapsed || !selection.highlights.length) return;
-          setHighlight(selection.highlights);
-          window.getSelection()?.removeAllRanges();
+          const result = getSelection();
+          if (!result || !result.highlights.length) return;
+          setHighlight(result.highlights);
+          clearSelection();
         }}
       >
         Highlight selection
@@ -57,7 +58,7 @@ export default function SelectionViewer() {
 }
 ```
 
-Mount one selection tooltip per viewer, outside the repeated `Page` template. Preventing the button's mouse-down default keeps the browser from discarding the selection before the click handler reads it. The result contains `text`, `highlights`, and `isCollapsed`. Rectangles use [scale-1 page pixels](/docs/code/highlight#coordinate-contract); a multi-page selection can contain multiple page numbers.
+Mount one selection tooltip per viewer, outside the repeated `Page` template. Preventing the button's mouse-down default keeps the browser from discarding the selection before the click handler reads it. The result contains `anchor`, `focus`, `text`, `highlights`, `underlines`, and `isCollapsed`. Rectangles use [scale-1 page pixels](/docs/code/highlight#coordinate-contract); a multi-page selection can contain multiple page numbers.
 
 `setHighlight` replaces the active highlight. The example does not accumulate selections or persist them.
 
@@ -88,7 +89,7 @@ function readQuote() {
 }
 ```
 
-Call it from the selection action's event handler. It returns `null` for an empty selection, a selection crossing viewers, multiple disjoint ranges, or a range that skips unmounted pages. It reads mounted PDF text layers only and excludes annotation controls between pages. The text returned by `getDimension`, `getSelection`, and `getAnnotationDimension` uses the same default normalization for supported selections; their existing fallback behavior remains for unsupported ranges.
+Call it from the selection action's event handler. It returns `null` when there is no supported selection or missing selected pages are still loading. For a selection owned by `Pages`, it includes unmounted intermediate pages and excludes annotation controls. The existing `getDimension`, `getSelection`, and `getAnnotationDimension` helpers also read the persistent selection; geometry helpers return `undefined` until it is ready. Native ranges outside this model retain their existing behavior.
 
 This preserves PDF.js's logical text order. It does not infer table structure, rearrange columns, repair a PDF with incorrect reading order, or fetch text for virtualized pages missing from the selection. If pages are missing, Lector leaves the browser copy event untouched rather than writing an incomplete reconstructed quote.
 
@@ -111,3 +112,35 @@ If text is selectable but displaced, check the PDF.js stylesheet and avoid addin
 import PdfHighlightSelect from "@/components/highlight-select";
 
 <PdfHighlightSelect />
+
+
+## Retain or restore a selection
+
+Use `usePdfSelection()` under `Root` with a mounted `Pages`. Anchors use one-based page numbers and UTF-16 offsets in the page's concatenated PDF.js selectable text, before copy normalization. Explicit line-break elements do not consume offsets. Invalid page numbers or offsets are rejected; an offset on an unloaded page is validated when that page is read. Store the anchors alongside your document identifier; they apply to the same PDF bytes and text extraction, not a revised document.
+
+```tsx
+const { selection, setSelection, getSelectionAsync, clearSelection } = usePdfSelection();
+
+setSelection(
+  { pageNumber: 2, offset: 14 },
+  { pageNumber: 5, offset: 30 },
+);
+
+try {
+  const result = await getSelectionAsync();
+  if (result) saveQuote(result.text, result.highlights);
+} catch (error) {
+  // AbortError means the selection changed before this request completed.
+  // Other errors indicate a missing page could not be read.
+}
+```
+
+`selection` is `null` or `{ anchor, focus, status, error? }`. Status is `loading`, `ready`, or `error`. `getSelection()` returns a complete result synchronously when ready; `getSelectionAsync()` waits for missing selected pages and rejects if another selection supersedes it. A collapsed selection clears the model. Use `clearSelection()` after consuming a quote or highlight.
+
+Lector builds at most two missing text layers concurrently, reads their text and rectangles, then removes them. It does not pin selected page canvases or keep the document mounted. Cached text and rectangles grow with the selected range and are released when the selection changes or clears. A copy event during loading is cancelled to avoid silently copying only the visible fragment; enable your copy/highlight action when `selection.status === "ready"`. `copyOptions={false}` opts into native copying, which only sees mounted DOM.
+
+## Selection boundaries
+
+Rectangles follow browser text ranges for individual text runs, including partial proportional-font selections and intrinsically rotated pages. They do not merge across column gutters. Reading order still follows PDF.js; this does not reconstruct malformed reading order in columns, tables, footnotes, or scanned PDFs. Scans need an external OCR text layer.
+
+Native touch selection remains in control of its handles and gestures; touch scrolling preserves stored anchors. Desktop Chromium, Firefox, and WebKit tests do not establish physical iOS/Android handle behavior. Multiple disjoint selections and selections spanning separate viewers are not supported by the persistent model.

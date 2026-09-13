@@ -2,6 +2,8 @@ import react from "@vitejs/plugin-react";
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
 
+import { selectionPointer } from "./tests/selection-commands";
+
 const browser =
 	process.env.LECTOR_TEST_BROWSER === "webkit"
 		? "webkit"
@@ -34,6 +36,7 @@ export default defineConfig({
 		],
 		browser: {
 			enabled: true,
+			commands: { selectionPointer },
 			provider: playwright({
 				launchOptions: {
 					executablePath:

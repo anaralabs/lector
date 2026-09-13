@@ -102,7 +102,11 @@ export function getPdfSelectionText(
 }
 
 type CopyOptions = false | SelectionTextOptions;
-type CopyRegistration = { container: HTMLElement; options: () => CopyOptions };
+type CopyRegistration = {
+	container: HTMLElement;
+	options: () => CopyOptions;
+	read?: (options: SelectionTextOptions) => string | null | undefined;
+};
 const documents = new WeakMap<
 	Document,
 	{
@@ -115,6 +119,7 @@ const documents = new WeakMap<
 export function registerPdfCopy(
 	container: HTMLElement,
 	options: () => CopyOptions,
+	read?: CopyRegistration["read"],
 ) {
 	const owner = container.ownerDocument;
 	let binding = documents.get(owner);
@@ -133,11 +138,19 @@ export function registerPdfCopy(
 			for (const registration of registrations) {
 				const settings = registration.options();
 				if (settings === false) continue;
-				const text = getPdfSelectionText(
-					owner.getSelection(),
-					registration.container,
-					settings,
-				);
+				const persistent = registration.read?.(settings);
+				// An owned selection still loading must never copy a truncated DOM range.
+				if (registration.read && persistent === undefined) {
+					event.preventDefault();
+					break;
+				}
+				const text =
+					persistent ??
+					getPdfSelectionText(
+						owner.getSelection(),
+						registration.container,
+						settings,
+					);
 				if (text === null) continue;
 				event.clipboardData.setData("text/plain", text);
 				event.preventDefault();
@@ -148,7 +161,7 @@ export function registerPdfCopy(
 		documents.set(owner, binding);
 		owner.addEventListener("copy", listener);
 	}
-	const registration = { container, options };
+	const registration = { container, options, read };
 	binding.registrations.add(registration);
 	return () => {
 		binding.registrations.delete(registration);
