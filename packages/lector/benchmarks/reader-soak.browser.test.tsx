@@ -1,6 +1,6 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import { cdp } from "@vitest/browser/context";
 import { afterEach, expect, test } from "vitest";
+import { cdp } from "vitest/browser";
 import { CanvasLayer } from "../src/components/layers/canvas-layer";
 import { TextLayer } from "../src/components/layers/text-layer";
 import { Page } from "../src/components/page";

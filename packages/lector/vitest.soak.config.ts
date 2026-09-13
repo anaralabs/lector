@@ -1,3 +1,4 @@
+import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
 import config from "./vitest.config";
 
@@ -17,26 +18,24 @@ export default defineConfig({
 		browser: {
 			...config.test!.browser,
 			viewport: { width: mobile ? 390 : 1100, height: mobile ? 700 : 800 },
-			instances: [
-				{
-					browser: "chromium",
-					launch: {
-						channel:
-							process.env.LECTOR_BROWSER_CHANNEL ??
-							(process.env.CI ? undefined : "chrome"),
-					},
-					context: mobile
-						? {
-								deviceScaleFactor: 3,
-								hasTouch: true,
-								isMobile: true,
-								screen: { width: 390, height: 844 },
-								userAgent:
-									"Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36",
-							}
-						: { deviceScaleFactor: 1 },
+			provider: playwright({
+				launchOptions: {
+					channel:
+						process.env.LECTOR_BROWSER_CHANNEL ??
+						(process.env.CI ? undefined : "chrome"),
 				},
-			],
+				contextOptions: mobile
+					? {
+							deviceScaleFactor: 3,
+							hasTouch: true,
+							isMobile: true,
+							screen: { width: 390, height: 844 },
+							userAgent:
+								"Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36",
+						}
+					: { deviceScaleFactor: 1 },
+			}),
+			instances: [{ browser: "chromium" }],
 		},
 	},
 });

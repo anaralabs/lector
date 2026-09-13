@@ -73,3 +73,13 @@ The standalone Chromium stress/profiling configurations use CDP; they are exclud
 - Size Limit's bundled/compressed metric changes from 50,296 bytes at `93c5bd6` to 52,489 bytes (+2,193 bytes). Relative to PR base `67c0823`, the complete PR changes it from 49,815 to 52,489 bytes.
 
 The largest remaining measured target is expensive PDF rasterization under CPU throttling. Next investigations should isolate costly image/transparency/font operations before changing quality or cache policy. Physical iOS/low-memory Android endurance, complex text/copy fidelity, total search CPU cost, and task-based screen-reader/form/navigation checks remain open. No competitor benchmark or claim of best-in-class performance is made.
+
+## September 11 review correction
+
+Automated review identified that the logical scroll offset was only refreshed on native scroll events, while the viewport dimensions already refreshed on zoom. The offset observer now republishes the current physical position divided by the new zoom immediately, preserving its scrolling/idle state. It also cancels its idle timer and store subscription on disposal. Five deterministic regressions failed before the change and pass afterward, covering vertical and horizontal/RTL offsets, scroll-before-zoom ordering, and disposal. The related 35-test suite passes in Chromium, Firefox and WebKit.
+
+The full Chromium suite now has 197 tests. Build, types, unit/package checks and lint pass. The Size Limit metric is 52,510 bytes, 21 bytes above the prior head. Earlier timing measurements in this report predate this correctness fix and have not been substituted with new timing claims.
+
+Current main (`1350375`) was then merged, preserving its security/dependency, selection and hosting changes. The two standalone CDP benchmarks now use Vitest 4's `vitest/browser` and Playwright provider options. The mobile-emulation harness passes a one-cycle compatibility/cleanup smoke test; its timing is not used as a replacement benchmark. The integrated suite contains 212 browser tests. Newer Firefox's native scroll rounding is tested separately from the exact requested coordinates. The merged build's Size Limit metric is 52,695 bytes.
+
+The toolbar/API counterpart is also covered: viewport geometry is now applied through a private registration before `updateZoom` publishes the new state. The virtualizer never observes the new scale with the old physical scroll position. Five toolbar cases exercise zoom in/out, a pending real wheel gesture, same-value cancellation, still-visible page DOM/mount continuity before native scroll events, and disposal. The resulting suite has 217 browser tests, and the final Size Limit metric is 52,877 bytes.

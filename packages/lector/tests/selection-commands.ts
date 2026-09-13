@@ -21,7 +21,7 @@ export const selectionPointer: BrowserCommand<
 	if (action === "down") await context.page.mouse.down();
 };
 
-declare module "@vitest/browser/context" {
+declare module "vitest/browser" {
 	interface BrowserCommands {
 		selectionPointer(
 			action: "down" | "move" | "up",

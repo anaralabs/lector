@@ -15,6 +15,7 @@ import type { PageResources } from "./lib/page-resources";
 import { PDFSelectionController } from "./lib/pdf-selection";
 import type { RenderColorMapRef } from "./lib/recolor-canvas-factory";
 import type { PageText } from "./lib/text-normalization";
+import { applyViewportZoom } from "./lib/viewport-zoom";
 import { getFitWidthZoom } from "./lib/zoom";
 import { createZustandContext } from "./lib/zustand";
 
@@ -170,6 +171,9 @@ export const PDFStore = createZustandContext(
 						minZoom,
 						maxZoom,
 					);
+					// Subscribers must observe the new scale and its physical scroll
+					// compensation together, including toolbar/API zoom changes.
+					applyViewportZoom(state.viewportRef.current, newZoom);
 					return newZoom === state.zoom &&
 						isZoomFitWidth === state.isZoomFitWidth
 						? state

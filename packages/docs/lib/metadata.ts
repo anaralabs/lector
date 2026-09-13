@@ -6,8 +6,8 @@ export function createMetadata(override: Metadata): Metadata {
 		openGraph: {
 			title: override.title ?? undefined,
 			description: override.description ?? undefined,
-			url: "https://lector-weld.vercel.app/",
-			images: "/banner.png",
+			url: "https://anara.com/lector",
+			images: "https://anara.com/lector/banner.png",
 			siteName: "Fumadocs",
 			...override.openGraph,
 		},
@@ -16,13 +16,10 @@ export function createMetadata(override: Metadata): Metadata {
 			creator: "@andrewdorobantu",
 			title: override.title ?? undefined,
 			description: override.description ?? undefined,
-			images: "/banner.png",
+			images: "https://anara.com/lector/banner.png",
 			...override.twitter,
 		},
 	};
 }
 
-export const baseUrl =
-	process.env.NODE_ENV === "development" || !process.env.VERCEL_URL
-		? new URL("http://localhost:3000")
-		: new URL(`https://${process.env.VERCEL_URL}`);
+export const baseUrl = new URL("https://anara.com");

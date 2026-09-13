@@ -81,12 +81,12 @@ describe("WebKit viewport scaling", () => {
 		const { rerender } = renderHook(() => useViewportContainer(refs));
 		container.scrollTop = 500;
 		container.scrollLeft = 200;
+		const before = [container.scrollTop, container.scrollLeft];
 		state.isPinching = true;
 		rerender();
 		state.isPinching = false;
 		rerender();
-		expect(container.scrollTop).toBe(500);
-		expect(container.scrollLeft).toBe(200);
+		expect([container.scrollTop, container.scrollLeft]).toEqual(before);
 	});
 });
 
@@ -156,28 +156,44 @@ describe("gesture frame scheduling", () => {
 	});
 	it("uses the newest scale when zoom direction reverses before a paint", async () => {
 		const { container, wrapper, move } = setup();
+		const topWrites = vi.spyOn(container, "scrollTop", "set");
+		const leftWrites = vi.spyOn(container, "scrollLeft", "set");
 		move(3);
 		move(1.5);
 		await new Promise<void>((resolve) =>
 			requestAnimationFrame(() => resolve()),
 		);
 		expect(wrapper.style.width).toBe("900px");
-		expect(container.scrollTop).toBeCloseTo(75);
-		expect(container.scrollLeft).toBeCloseTo(75);
+		expect(topWrites).toHaveBeenLastCalledWith(75);
+		expect(leftWrites).toHaveBeenLastCalledWith(75);
+		// Native scroll positions can snap to device pixels (newer Firefox).
+		expect(Math.abs(container.scrollTop - 75)).toBeLessThanOrEqual(
+			1 / devicePixelRatio,
+		);
+		expect(Math.abs(container.scrollLeft - 75)).toBeLessThanOrEqual(
+			1 / devicePixelRatio,
+		);
 		expect(state.updateZoom).toHaveBeenCalledTimes(1);
 	});
 	it("anchors an external zoom to the applied frame when pinch work is queued", async () => {
 		const { container, wrapper, move, rerender } = setup();
 		container.scrollTop = 300;
+		const expected = container.scrollTop * 1.5;
+		const writes = vi.spyOn(container, "scrollTop", "set");
 		move(2);
 		state.zoom = 1.5;
 		rerender();
 		expect(wrapper.style.width).toBe("900px");
-		expect(container.scrollTop).toBeCloseTo(450);
+		expect(writes).toHaveBeenLastCalledWith(expected);
+		expect(Math.abs(container.scrollTop - expected)).toBeLessThanOrEqual(
+			1 / devicePixelRatio,
+		);
+		const applied = container.scrollTop;
 		await new Promise<void>((resolve) =>
 			requestAnimationFrame(() => resolve()),
 		);
-		expect(container.scrollTop).toBeCloseTo(450);
+		expect(container.scrollTop).toBe(applied);
+		expect(writes).toHaveBeenCalledTimes(1);
 		expect(state.updateZoom).not.toHaveBeenCalled();
 	});
 	it("discards queued work on unmount", async () => {

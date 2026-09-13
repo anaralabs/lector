@@ -1,6 +1,6 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import { commands, userEvent } from "@vitest/browser/context";
 import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
+import { commands, userEvent } from "vitest/browser";
 import { TextLayer } from "../src/components/layers/text-layer";
 import { Page } from "../src/components/page";
 import { Pages } from "../src/components/pages";

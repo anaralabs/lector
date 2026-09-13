@@ -1,6 +1,6 @@
 # Search and copied-text fidelity
 
-This change builds on reader-quality PR #163 (`8f4031b`). It improves equivalent-text matching and preserves line boundaries when reading a selection. It does not implement full PDF reading-order reconstruction.
+This change builds on reader-quality PR #163, now merged into main (`3d59edc`). It improves equivalent-text matching and preserves line boundaries when reading a selection. It does not implement full PDF reading-order reconstruction.
 
 ## Reproduced failures
 
@@ -18,16 +18,16 @@ The browser selection test also failed at the actual annotation API. Selecting `
 - `Pages` now handles PDF copy events with plain text. Defaults preserve line/page breaks, case, accents and mathematical symbols. It honors cancelled events and editable controls. `copyOptions={false}` retains native copying, including native rich-text behavior. Prose joining is available through `{ lineBreaks: "space", ignoreHyphenation: true }`.
 - `useSelectionDimensions().getText(options?)` reads the selected mounted PDF text without calculating geometry. The existing geometry/annotation helpers use the same default cleanup for supported selections.
 
-Copy reads the text-layer DOM in PDF.js order, clips both endpoints, preserves `<br>` boundaries, and excludes controls between pages. A single copy listener is shared per owner document and removed when the final viewer unmounts. No new work runs on scroll or selectionchange.
+Copy reads the text-layer DOM in PDF.js order, clips both endpoints, preserves `<br>` boundaries, and excludes controls between pages. Page separators reuse trailing PDF.js line breaks so cross-page copies do not add extra blank lines; existing source blank lines are preserved. A single copy listener is shared per owner document and removed when the final viewer unmounts. No new work runs on scroll or selectionchange.
 
 ## Validation
 
 - 32 Node tests pass, including 18 new text-fidelity cases.
-- All 210 browser tests pass independently in Chromium, Firefox and WebKit, including 18 new browser cases.
+- All 240 browser tests pass independently in Chromium, Firefox and WebKit, including 23 new browser cases.
 - Generated real PDFs cover phrase search and dehyphenation through PDF.js extraction and highlight calculation at all four rotations with a crop box. Existing raster and selectable-text geometry checks also pass.
 - Browser selection tests cover quote text, partial and cross-page ranges, PDF-only copy, controls, viewer isolation, opt-out, updated options, cleanup, and logical Unicode order. Clipboard tests inspect copy-event payloads; they do not automate pasting into native desktop applications.
-- Library types, build, size limit, packed ESM import, CommonJS diagnostic, and SSR checks pass. The docs production build passes. Lint has no new errors; the existing two annotation-hook dependency warnings remain.
-- Bundled/compressed size: 52,489 → 53,936 bytes (+1,447 bytes).
+- Library types, build, size limit, packed ESM import, CommonJS diagnostic, and SSR checks pass. The docs production build and six docs tests pass. Lint has no new errors; the existing two annotation-hook dependency warnings remain.
+- Bundled/compressed size: 52,877 → 54,409 bytes (+1,532 bytes).
 
 ```sh
 pnpm --filter @anaralabs/lector test:unit

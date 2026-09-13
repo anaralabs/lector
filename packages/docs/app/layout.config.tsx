@@ -12,7 +12,7 @@ export const baseOptions: BaseLayoutProps = {
 			<>
 				<Image
 					alt=""
-					src="/anara-mark.svg"
+					src="/lector/anara-mark.svg"
 					width={28}
 					height={14}
 					className="w-7 h-auto dark:invert"

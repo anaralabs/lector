@@ -1,9 +1,16 @@
 import { useGesture } from "@use-gesture/react";
-import { type RefObject, useCallback, useEffect, useRef } from "react";
+import {
+	type RefObject,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+} from "react";
 
 import { PDFStore, usePdf } from "../../internal";
 import { clamp } from "../../lib/clamp";
 import { firstMemo } from "../../lib/memo";
+import { registerViewportZoom } from "../../lib/viewport-zoom";
 import { USE_LAYOUT_ZOOM } from "../../lib/zoom";
 
 const WHEEL_ZOOM_SENSITIVITY = 0.01;
@@ -111,6 +118,40 @@ export const useViewportContainer = ({
 		},
 		[containerRef, elementRef, elementWrapperRef, updateZoom, store],
 	);
+
+	useLayoutEffect(() => {
+		const viewport = containerRef.current;
+		if (!viewport) return;
+		return registerViewportZoom(viewport, (nextZoom) => {
+			if (
+				initializedZoomRef.current &&
+				appliedZoomRef.current === nextZoom &&
+				zoomRafRef.current === null
+			)
+				return;
+			if (zoomRafRef.current !== null) {
+				cancelAnimationFrame(zoomRafRef.current);
+				zoomRafRef.current = null;
+			}
+			lastPushedZoomRef.current = null;
+			// Before mount initialization the virtualizer's physical offset
+			// already includes the initial store scale.
+			const previousZoom = initializedZoomRef.current
+				? appliedZoomRef.current
+				: store.getState().zoom;
+			const ratio =
+				previousZoom > 0 && Number.isFinite(previousZoom)
+					? nextZoom / previousZoom
+					: 1;
+			transformations.current = {
+				zoom: nextZoom,
+				translateX: viewport.scrollLeft * ratio,
+				translateY: viewport.scrollTop * ratio,
+			};
+			initializedZoomRef.current = true;
+			updateTransform();
+		});
+	}, [containerRef, store, updateTransform]);
 
 	useEffect(() => {
 		if (USE_LAYOUT_ZOOM && gestureTransformAppliedRef.current && !isPinching)

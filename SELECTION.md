@@ -36,3 +36,9 @@ This follows PDF.js text order. Malformed column/table/footnote reading order, O
 A delayed background page load could leave status at `loading` after a mounted text layer supplied the final missing selection data. Completion now publishes `ready` from either path and cancels redundant hydration. Async readers observe selection state, so completion and cancellation settle without waiting for stalled page loads; late failures cannot overwrite a ready result. Three regressions cover the disabled action, an already-pending async read, and cancellation during a stalled load.
 
 Follow-up validation: 229 Chromium tests, all 19 selection tests in Firefox and WebKit, and 32 Node tests pass. Types, changed-file lint, library build/size, and packed export/SSR checks pass. Current compressed bundle size is 57,646 bytes.
+
+## Merge with main
+
+Merged main at `4080040` after PRs #163 and #167 landed. Conflict resolution preserves main's copy-boundary handling, viewport/toolbar zoom synchronization, selection geometry helpers, security dependency updates, and hosting changes alongside the persistent selection controller. Native pointer tests now use main's Vitest 4 browser API. A duplicate gesture-test block introduced by the automatic merge was removed.
+
+The integrated branch passes all 259 browser tests in Chromium, Firefox, and WebKit, 32 Node tests, six docs tests, types, library/package/SSR checks, and the docs production build. Lint retains only the two existing annotation-hook warnings. Compressed size is 58,217 bytes.

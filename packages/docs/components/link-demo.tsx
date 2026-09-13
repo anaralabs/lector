@@ -12,7 +12,7 @@ import { PageNavigation } from "../app/(home)/_components/page-navigation";
 import ZoomMenu from "../app/(home)/_components/zoom-menu";
 import { ExampleRoot } from "./example-root";
 
-const fileUrl = "/pdf/links.pdf";
+const fileUrl = "/lector/pdf/links.pdf";
 
 const LinkDemo = () => {
 	return (

@@ -1,5 +1,4 @@
 import {
-	debounce,
 	observeElementRect as observePhysicalElementRect,
 	type Rect,
 	type Virtualizer,
@@ -61,38 +60,48 @@ export const useObserveElement = () => {
 			return;
 		}
 
-		let offset = 0;
-		const fallback =
-			instance.options.useScrollendEvent && supportsScrollend
-				? () => undefined
-				: debounce(
-						targetWindow,
-						() => {
-							cb(offset, false);
-						},
-						instance.options.isScrollingResetDelay,
-					);
-
-		const createHandler = (isScrolling: boolean) => () => {
+		let isScrolling = false;
+		let idleTimer: number | undefined;
+		const needsIdleFallback =
+			!instance.options.useScrollendEvent || !supportsScrollend;
+		const publish = (scrolling: boolean) => {
+			isScrolling = scrolling;
 			const { horizontal, isRtl } = instance.options;
-			offset = horizontal
-				? element.scrollLeft * ((isRtl && -1) || 1)
+			const physicalOffset = horizontal
+				? element.scrollLeft * (isRtl ? -1 : 1)
 				: element.scrollTop;
-
-			const zoom = store.getState().zoom;
-			offset = offset / zoom;
-			fallback();
-
-			cb(offset, isScrolling);
+			cb(physicalOffset / store.getState().zoom, isScrolling);
+		};
+		const clearIdleTimer = () => {
+			if (idleTimer !== undefined) targetWindow.clearTimeout(idleTimer);
+			idleTimer = undefined;
+		};
+		const createHandler = (scrolling: boolean) => () => {
+			clearIdleTimer();
+			publish(scrolling);
+			if (scrolling && needsIdleFallback) {
+				idleTimer = targetWindow.setTimeout(() => {
+					idleTimer = undefined;
+					publish(false);
+				}, instance.options.isScrollingResetDelay);
+			}
 		};
 		const handler = createHandler(true);
 		const endHandler = createHandler(false);
 		endHandler();
+		// A zoom changes the logical offset even if the physical position does
+		// not move, or its native scroll event has not arrived yet. Keep the
+		// offset in the same coordinate space as the zoom-aware rect observer.
+		const unsubscribe = store.subscribe((state, previous) => {
+			if (state.zoom !== previous.zoom) publish(isScrolling);
+		});
 
 		element.addEventListener("scroll", handler, addEventListenerOptions);
 		element.addEventListener("scrollend", endHandler, addEventListenerOptions);
 
 		return () => {
+			unsubscribe();
+			clearIdleTimer();
 			element.removeEventListener("scroll", handler);
 			element.removeEventListener("scrollend", endHandler);
 		};

@@ -68,6 +68,7 @@ export function getPdfSelectionText(
 	);
 	const chunks: string[] = [];
 	let previousLayer: HTMLElement | null = null;
+	let trailingLineBreaks = 0;
 	let node: Node | null =
 		root.nodeType === Node.TEXT_NODE ? root : walker.nextNode();
 	while (node) {
@@ -82,8 +83,17 @@ export function getPdfSelectionText(
 				? node.textContent!.slice(start, end)
 				: "\n";
 		if (text) {
-			if (previousLayer && previousLayer !== layer) chunks.push("\n\n");
+			// PDF.js may already end the page with hasEOL <br> elements.
+			// Add only the missing paragraph separator; retain source blank lines.
+			if (previousLayer && previousLayer !== layer && trailingLineBreaks < 2) {
+				chunks.push("\n".repeat(2 - trailingLineBreaks));
+				trailingLineBreaks = 2;
+			}
 			chunks.push(text);
+			let trailing = 0;
+			for (let i = text.length - 1; i >= 0 && text[i] === "\n"; i--) trailing++;
+			trailingLineBreaks =
+				trailing === text.length ? trailingLineBreaks + trailing : trailing;
 			previousLayer = layer;
 		}
 		node = walker.nextNode();

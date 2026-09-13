@@ -284,3 +284,14 @@ test("HTTP rejects hostile origins, oversized chunked bodies, and unsupported me
 	);
 	assert.equal(malformed.status, 400);
 });
+
+test("catalog retains the hosting subpath in all published URLs", () => {
+	const nested = createCatalog(inputs, "https://anara.com/lector");
+	assert.equal(nested.manifest.mcpUrl, "https://anara.com/lector/mcp");
+	for (const doc of nested.docs) {
+		assert.ok(doc.url.startsWith("https://anara.com/lector/docs"));
+		assert.ok(doc.markdownUrl.startsWith("https://anara.com/lector/docs/"));
+	}
+	assert.ok(nested.llms.includes("https://anara.com/lector/llms-full.txt"));
+	assert.ok(nested.llms.includes("https://anara.com/lector/llms.json"));
+});

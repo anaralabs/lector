@@ -46,7 +46,7 @@ jobs:
           docs_pid=$!
           trap 'kill "$docs_pid" 2>/dev/null || true' EXIT
           for attempt in {1..30}; do
-            if curl --fail --silent http://localhost:3000/llms.json > /dev/null; then
+            if curl --fail --silent http://localhost:3000/lector/llms.json > /dev/null; then
               pnpm --filter docs test:agents:integration
               exit $?
             fi
