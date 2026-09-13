@@ -305,7 +305,20 @@ export async function searchDocumentAsync(
 			throw new DOMException("Search aborted", "AbortError");
 		const result = iterator.next();
 		if (result.done) return result.value;
-		// A real task boundary lets input, rendering and cancellation proceed.
-		await new Promise<void>((resolve) => setTimeout(resolve, 0));
+		// Message tasks yield to input/rendering without the nested setTimeout
+		// clamp. Close both ports after every task, including cancelled searches.
+		await new Promise<void>((resolve) => {
+			if (typeof MessageChannel === "undefined") {
+				setTimeout(resolve, 0);
+				return;
+			}
+			const channel = new MessageChannel();
+			channel.port1.onmessage = () => {
+				channel.port1.close();
+				channel.port2.close();
+				resolve();
+			};
+			channel.port2.postMessage(null);
+		});
 	}
 }

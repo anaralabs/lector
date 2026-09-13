@@ -126,29 +126,34 @@ test("exact result budgets distinguish exhausted results and deduplicated glyphs
 	}
 });
 
-test("absent async queries yield between pages and can be cancelled before indexing the document", async () => {
-	let clock = 0;
-	const inspected = new Set<number>();
-	const now = vi.spyOn(performance, "now").mockImplementation(() => clock);
-	const pages = Array.from({ length: 64 }, (_, index) => ({
-		pageNumber: index + 1,
-		get text() {
-			clock += 3;
-			inspected.add(index);
-			return "Text without the target";
-		},
-	}));
-	const controller = new AbortController();
-	try {
-		const pending = searchDocumentAsync(pages, "missing", {
-			threshold: 1,
-			signal: controller.signal,
-		});
-		const caught = pending.catch((error) => error);
-		controller.abort();
-		expect(inspected.size).toBeLessThan(pages.length);
-		expect(await caught).toMatchObject({ name: "AbortError" });
-	} finally {
-		now.mockRestore();
-	}
-});
+test.each([true, false])(
+	"absent async queries yield and cancel with MessageChannel %s",
+	async (channelAvailable) => {
+		if (!channelAvailable) vi.stubGlobal("MessageChannel", undefined);
+		let clock = 0;
+		const inspected = new Set<number>();
+		const now = vi.spyOn(performance, "now").mockImplementation(() => clock);
+		const pages = Array.from({ length: 64 }, (_, index) => ({
+			pageNumber: index + 1,
+			get text() {
+				clock += 3;
+				inspected.add(index);
+				return "Text without the target";
+			},
+		}));
+		const controller = new AbortController();
+		try {
+			const pending = searchDocumentAsync(pages, "missing", {
+				threshold: 1,
+				signal: controller.signal,
+			});
+			const caught = pending.catch((error) => error);
+			controller.abort();
+			expect(inspected.size).toBeLessThan(pages.length);
+			expect(await caught).toMatchObject({ name: "AbortError" });
+		} finally {
+			now.mockRestore();
+			vi.unstubAllGlobals();
+		}
+	},
+);

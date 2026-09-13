@@ -18,6 +18,8 @@ export default defineConfig({
 	optimizeDeps: {
 		include: [
 			"react/jsx-dev-runtime",
+			"@testing-library/react",
+			"zustand",
 			"pdfjs-dist/legacy/build/pdf.mjs",
 			"clsx",
 			"@tanstack/react-virtual",

@@ -543,8 +543,18 @@ test("mouse selection gives the PDF viewport keyboard ownership", async () => {
 	});
 	await waitFor(() => expect(r.api.getText()?.trim()).toBe("Page"));
 	expect(document.activeElement).toBe(r.viewport);
+	// Windows word selection may include the following space. Preserve the
+	// native endpoint, then verify exactly one character of keyboard extension.
+	const before = r.api.selection!;
+	expect(before.focus.offset).toBe(document.getSelection()!.focusOffset);
 	await userEvent.keyboard("{Shift>}{ArrowRight}{/Shift}");
-	await waitFor(() => expect(r.api.selection?.focus.offset).toBe(5));
+	await waitFor(() =>
+		expect(r.api.selection?.focus).toEqual({
+			...before.focus,
+			offset: before.focus.offset + 1,
+		}),
+	);
+	expect(r.api.selection?.anchor).toEqual(before.anchor);
 	await userEvent.keyboard("{Escape}");
 	await waitFor(() => expect(r.api.selection).toBeNull());
 });
