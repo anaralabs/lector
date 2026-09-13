@@ -39,6 +39,11 @@ export default defineConfig({
 		],
 		browser: {
 			enabled: true,
+			// Windows runners can reserve Vitest's default high port (63315).
+			api:
+				process.platform === "win32"
+					? { host: "127.0.0.1", port: 3100 }
+					: undefined,
 			commands: { selectionPointer },
 			provider: playwright({
 				launchOptions: {
