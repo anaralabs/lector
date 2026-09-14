@@ -1,6 +1,7 @@
 import { forwardRef, type HTMLProps, type ReactNode, useEffect } from "react";
 
 import {
+	type PDFDocumentLoadError,
 	usePDFDocumentContext,
 	type usePDFDocumentParams,
 } from "../hooks/document/document";
@@ -91,10 +92,27 @@ const PageResourcesSync = ({ resources }: { resources?: PageResources }) => {
 		};
 		const unsubscribe = resources.subscribe(update);
 		update();
-		// Give the initial reader commit its own task before acquiring unrelated pages.
-		const timer = setTimeout(resources.start, 0);
+		// Let the first visible canvas finish before unrelated metadata work
+		// competes for the PDF worker. Explicit page/search requests still run.
+		// A bounded fallback keeps metadata-only readers progressing too.
+		let started = false;
+		const start = () => {
+			if (started) return;
+			started = true;
+			clearTimeout(timer);
+			unsubscribeReady();
+			resources.start();
+		};
+		const checkReady = () => {
+			const state = store.getState();
+			if (state.renderedPages[state.initialPage]) start();
+		};
+		const unsubscribeReady = store.subscribe(checkReady);
+		const timer = setTimeout(start, 500);
+		checkReady();
 		return () => {
 			clearTimeout(timer);
+			unsubscribeReady();
 			unsubscribe();
 		};
 	}, [resources, store]);
@@ -107,8 +125,10 @@ export const Root = forwardRef(
 			children,
 			source,
 			loader,
+			errorFallback,
 			onDocumentLoad,
 			onError,
+			onDocumentProgress,
 			isZoomFitWidth,
 			zoom,
 			zoomOptions,
@@ -121,13 +141,16 @@ export const Root = forwardRef(
 		}: Omit<HTMLProps<HTMLDivElement>, "onError"> &
 			usePDFDocumentParams & {
 				loader?: ReactNode;
+				/** Replace the default document-load error message. */
+				errorFallback?: (failure: PDFDocumentLoadError) => ReactNode;
 			},
 		ref,
 	) => {
-		const { initialState } = usePDFDocumentContext({
+		const { initialState, error } = usePDFDocumentContext({
 			source,
 			onDocumentLoad,
 			onError,
+			onDocumentProgress,
 			isZoomFitWidth,
 			zoom,
 			zoomOptions,
@@ -173,8 +196,14 @@ export const Root = forwardRef(
 							{children}
 						</PDFLinkServiceContext.Provider>
 					</PDFStore.Provider>
+				) : error ? (
+					errorFallback ? (
+						errorFallback(error)
+					) : (
+						<div role="alert">Unable to load this document.</div>
+					)
 				) : (
-					(loader ?? "Loading...")
+					(loader ?? <span role="status">Loading document…</span>)
 				)}
 			</Primitive.div>
 		);

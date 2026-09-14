@@ -32,6 +32,7 @@ export default function PDFViewer() {
   return (
     <Root
       source="/sample.pdf"
+      progressive
       style={{ height: 600 }}
       loader={<p role="status">Loading PDF…</p>}
     >

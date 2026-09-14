@@ -323,3 +323,65 @@ test("replacing a progressive document ignores late resources from the disposed 
 		gate.resolve();
 	}
 }, 15000);
+
+test("background page acquisition waits for the first canvas while visible-page requests stay available", async () => {
+	const gate = deferred();
+	const requests: number[] = [];
+	let rasterStarted = false;
+	let store: ReturnType<typeof PDFStore.useContext> | undefined;
+	function Probe() {
+		store = PDFStore.useContext();
+		return null;
+	}
+	const view = render(
+		<Root
+			source={createTextPdf(24, 1)}
+			progressive
+			onDocumentLoad={({ proxy }) => {
+				const getPage = proxy.getPage.bind(proxy);
+				proxy.getPage = async (number) => {
+					requests.push(number);
+					const page = await getPage(number);
+					if (number === 1) {
+						const renderPage = page.render.bind(page);
+						page.render = (params) => {
+							rasterStarted = true;
+							const task = renderPage(params);
+							const promise = task.promise.then(() => gate.promise);
+							return new Proxy(task, {
+								get(target, property) {
+									if (property === "promise") return promise;
+									const value = Reflect.get(target, property, target);
+									return typeof value === "function"
+										? value.bind(target)
+										: value;
+								},
+							});
+						};
+					}
+					return page;
+				};
+			}}
+		>
+			<Probe />
+			<Page pageNumber={1}>
+				<CanvasLayer />
+			</Page>
+		</Root>,
+	);
+	try {
+		await waitForPdf(() => expect(rasterStarted).toBe(true));
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(requests).toEqual([1]);
+		await store!.getState().loadPdfPageProxy(20);
+		expect(requests).toEqual([1, 20]);
+		gate.resolve();
+		await waitForPdf(() =>
+			expect(store?.getState().renderedPages[1]).toBe(true),
+		);
+		await waitForPdf(() => expect(store?.getState().pagesLoaded).toBe(true));
+	} finally {
+		gate.resolve();
+		view.unmount();
+	}
+}, 15000);

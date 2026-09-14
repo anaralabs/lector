@@ -12,7 +12,9 @@ Loads one document and supplies its context. Accepts HTML `div` props in additio
 | Prop | Default | Contract |
 | --- | --- | --- |
 | `source` | Required | URL string, `URL`, typed array, `ArrayBuffer`, or PDF.js loading-parameters object |
-| `loader` | `"Loading..."` | Content shown until all page metadata is ready, or the requested page is ready in progressive mode |
+| `loader` | Accessible loading status | Content shown until all page metadata is ready, or the requested page is ready in progressive mode |
+| `errorFallback` | Accessible error message | Receives `{ error, phase, source }` to customize initialization errors; replaces the loader |
+| `onDocumentProgress` | — | Receives `{ loaded, total, source }` for download bytes; does not imply painted page readiness |
 | `onDocumentLoad` | — | Receives `{ proxy, source }` after PDF.js loads the document, before viewport generation |
 | `onError` | — | Receives `{ error, phase, source }` for initialization failures and background page failures in progressive mode |
 | `documentOptions` | Lector defaults | PDF.js loading-parameter overrides; applied on the next load |
