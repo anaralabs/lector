@@ -2,6 +2,7 @@ import type {
 	PDFDocumentLoadingTask,
 	PDFDocumentProxy,
 	PDFPageProxy,
+	PDFWorker,
 } from "pdfjs-dist";
 import type {
 	DocumentInitParameters,
@@ -42,13 +43,11 @@ export interface usePDFDocumentParams {
 	 * The callback fires in addition to the existing console.error, so existing
 	 * consumers see no behavior change.
 	 */
-	onError?: ({
-		error,
-		phase,
-		source,
-	}: {
-		error: unknown;
-		phase: "pdfjs-load" | "document-load" | "viewport-generation";
+	onError?: (failure: PDFDocumentLoadError) => void;
+	/** Download bytes only; completion does not mean page pixels have painted. */
+	onDocumentProgress?: (progress: {
+		loaded: number;
+		total: number;
 		source: Source;
 	}) => void;
 	initialRotation?: number;
@@ -78,6 +77,12 @@ export interface usePDFDocumentParams {
 	 * `foreground` replaces black text. Defaults to #141210 / #eae6e0.
 	 */
 	darkModeColors?: DarkModeColors;
+}
+
+export interface PDFDocumentLoadError {
+	error: unknown;
+	phase: "pdfjs-load" | "document-load" | "viewport-generation";
+	source: Source;
 }
 
 export type Source =
@@ -142,9 +147,17 @@ function buildDocumentInitParams(
 	return { ...defaults, ...params, ...overrides };
 }
 
+function retireWorker(worker: PDFWorker, cleanup: Promise<unknown> | null) {
+	// Transport shutdown must finish before terminating its shared worker.
+	void Promise.resolve(cleanup).then(() => {
+		if (!worker.destroyed) worker.destroy();
+	});
+}
+
 export const usePDFDocumentContext = ({
 	onDocumentLoad,
 	onError,
+	onDocumentProgress,
 	source,
 	initialRotation = 0,
 	progressive = false,
@@ -157,6 +170,14 @@ export const usePDFDocumentContext = ({
 	darkModeColors,
 }: usePDFDocumentParams) => {
 	const [initialState, setInitialState] = useState<InitialPDFState | null>();
+	const [error, setError] = useState<PDFDocumentLoadError | null>(null);
+	const initialSource = useRef(source);
+	const ownedWorker = useRef<{
+		worker: PDFWorker;
+		workerSrc: string;
+		verbosity?: number;
+	} | null>(null);
+	const pendingCleanup = useRef<Promise<unknown> | null>(null);
 	const [rotation] = useState<number>(initialRotation);
 
 	// Shared between the document's CanvasFactory (created at getDocument time)
@@ -174,6 +195,8 @@ export const usePDFDocumentContext = ({
 
 	// Same reasoning as documentOptionsRef: keep the effect stable while
 	// always invoking the latest callback.
+	const progressRef = useRef(onDocumentProgress);
+	progressRef.current = onDocumentProgress;
 	const onErrorRef = useRef(onError);
 	onErrorRef.current = onError;
 
@@ -201,6 +224,7 @@ export const usePDFDocumentContext = ({
 					console.error("Error generating PDF viewports", error);
 					onErrorRef.current?.({ error, phase: "viewport-generation", source });
 				});
+				initialSource.current = source;
 				setInitialState({
 					isZoomFitWidth,
 					viewports: pageResources.getSnapshot().viewports,
@@ -236,6 +260,7 @@ export const usePDFDocumentContext = ({
 			);
 
 			if (isDisposed) return;
+			initialSource.current = source;
 			setInitialState((prev) => ({
 				...prev,
 				isZoomFitWidth,
@@ -253,22 +278,64 @@ export const usePDFDocumentContext = ({
 
 		const loadDocument = () => {
 			setInitialState(null);
+			setError(null);
 			let loadingTask: PDFDocumentLoadingTask | null = null;
 
 			void loadPdfJs()
-				.then(({ getDocument, version }) => {
+				.then(({ getDocument, version, PDFWorker, GlobalWorkerOptions }) => {
 					if (isDisposed) {
 						return;
 					}
 
-					loadingTask = getDocument(
-						buildDocumentInitParams(
-							source,
-							version,
-							renderColorMapRef,
-							documentOptionsRef.current,
-						),
+					const params = buildDocumentInitParams(
+						source,
+						version,
+						renderColorMapRef,
+						documentOptionsRef.current,
 					);
+					// Reuse only workers owned by this reader. Explicit workers and
+					// globally configured ports retain PDF.js's existing ownership.
+					if (PDFWorker && !params.worker && !GlobalWorkerOptions?.workerPort) {
+						const current = ownedWorker.current;
+						const workerSource = GlobalWorkerOptions.workerSrc;
+						if (
+							!current ||
+							current.worker.destroyed ||
+							current.workerSrc !== workerSource ||
+							current.verbosity !== params.verbosity
+						) {
+							if (current) retireWorker(current.worker, pendingCleanup.current);
+							const worker = new PDFWorker({ verbosity: params.verbosity });
+							ownedWorker.current = {
+								worker,
+								workerSrc: workerSource,
+								verbosity: params.verbosity,
+							};
+							void worker.promise.catch(() => {
+								if (ownedWorker.current?.worker === worker)
+									ownedWorker.current = null;
+								if (!worker.destroyed) worker.destroy();
+							});
+						}
+						params.worker = ownedWorker.current!.worker;
+					} else if (
+						ownedWorker.current &&
+						params.worker !== ownedWorker.current.worker
+					) {
+						retireWorker(ownedWorker.current.worker, pendingCleanup.current);
+						ownedWorker.current = null;
+					}
+					loadingTask = getDocument(params);
+
+					loadingTask.onProgress = ({
+						loaded,
+						total,
+					}: {
+						loaded: number;
+						total: number;
+					}) => {
+						if (!isDisposed) progressRef.current?.({ loaded, total, source });
+					};
 
 					return loadingTask.promise
 						.then(async (proxy) => {
@@ -286,6 +353,7 @@ export const usePDFDocumentContext = ({
 								}
 
 								console.error("Error generating PDF viewports", error);
+								setError({ error, phase: "viewport-generation", source });
 								onErrorRef.current?.({
 									error,
 									phase: "viewport-generation",
@@ -299,6 +367,7 @@ export const usePDFDocumentContext = ({
 							}
 
 							console.error("Error loading PDF document", error);
+							setError({ error, phase: "document-load", source });
 							onErrorRef.current?.({
 								error,
 								phase: "document-load",
@@ -312,6 +381,7 @@ export const usePDFDocumentContext = ({
 					}
 
 					console.error("Error loading PDF.js", error);
+					setError({ error, phase: "pdfjs-load", source });
 					onErrorRef.current?.({
 						error,
 						phase: "pdfjs-load",
@@ -322,13 +392,26 @@ export const usePDFDocumentContext = ({
 			return () => {
 				isDisposed = true;
 				pageResources?.dispose();
-				void loadingTask?.destroy();
+				pendingCleanup.current = Promise.allSettled([
+					pendingCleanup.current,
+					loadingTask?.destroy(),
+				]).then(() => undefined);
 			};
 		};
 		return loadDocument();
 	}, [source]);
 
+	useEffect(
+		() => () => {
+			const current = ownedWorker.current;
+			ownedWorker.current = null;
+			if (current) retireWorker(current.worker, pendingCleanup.current);
+		},
+		[],
+	);
+
 	return {
-		initialState,
+		initialState: initialSource.current === source ? initialState : null,
+		error: error?.source === source ? error : null,
 	};
 };

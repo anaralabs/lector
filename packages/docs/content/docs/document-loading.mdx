@@ -101,7 +101,7 @@ By default, `Root` resolves all page proxies and dimensions before mounting its 
 </Root>
 ```
 
-`initialPage` is one-based, defaults to 1, and is clamped to the document's page count. The requested page is acquired first. Remaining pages use at most 16 concurrent requests; newly visible pages move ahead of queued background work. `initialPage` and `progressive` are read when `source` changes. `Pages.initialOffset`, when provided, takes precedence over the initial page's position.
+`initialPage` is one-based, defaults to 1, and is clamped to the document's page count. The requested page is acquired first. Background page acquisition waits for the initial canvas to finish, with a 500 ms fallback for readers without a canvas. Explicit visible-page and search requests remain available immediately. Remaining pages use at most 16 concurrent requests; newly visible pages move ahead of queued background work. `initialPage` and `progressive` are read when `source` changes. `Pages.initialOffset`, when provided, takes precedence over the initial page's position.
 
 Unknown page sizes initially use the requested page's dimensions. As real dimensions arrive, Lector corrects vertical offsets above the current reading position, including rotated pages and zoomed views. Corrections wait until an active pinch finishes. A wider page can still change horizontal centering or fit-width zoom; use the default eager mode if your layout requires every page's exact dimensions before its first paint. Progressive mode reduces time to the first usable page; it does not reduce the eventual number of page proxies retained by PDF.js.
 
@@ -109,9 +109,37 @@ Unknown page sizes initially use the requested page's dimensions. As real dimens
 
 Custom consumers can await `usePdf((state) => state.loadPdfPageProxy)` for a particular page, or `loadPdfPageProxies()` for the complete ordered array. `isPageLoaded(pageNumber)` reports availability. Synchronous `getPdfPageProxy(pageNumber)` still returns a real PDF.js proxy and throws a descriptive error for an unresolved page; await the async accessor first in progressive mode. The store's `pageProxies` array is empty until the complete ordered array is available, and `pagesLoaded` reports that state. The default eager mode preserves its existing complete array and synchronous access.
 
+`Root` reuses its own PDF.js worker when `source` changes, while still cancelling and destroying the old document. Keeping the same mounted `Root` avoids another worker download and initialization. The worker is released after document cleanup when `Root` unmounts. Explicit `documentOptions.worker` values and `GlobalWorkerOptions.workerPort` retain their existing ownership behavior.
+
+## Download progress
+
+`onDocumentProgress={({ loaded, total, source }) => …}` reports PDF.js download bytes. It calls the latest callback without rerendering the reader internally, and stops delivering events for a replaced or disposed document. When `total` is zero or unknown, show an indeterminate loading state. A completed download is not a signal that page pixels have painted; use `usePageRendered` for page readiness.
+
+Add this state and callback to a component that imports `useState` from React and the reader components shown above. Keep its `Root` in a container with a stable height.
+
+```tsx
+const [download, setDownload] = useState<{ source: unknown; percent: number | null } | null>(null);
+const progress = download?.source === source ? download.percent : null;
+
+<Root
+  source={source}
+  progressive
+  onDocumentProgress={({ loaded, total, source }) => {
+    const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : null;
+    setDownload((previous) => previous?.source === source && previous.percent === percent
+      ? previous : { source, percent });
+  }}
+  loader={<p role="status">{progress === null ? "Opening PDF…" : progress === 100 ? "Preparing PDF…" : `Downloading PDF… ${progress}%`}</p>}
+>
+  <Pages><Page><CanvasLayer /><TextLayer /></Page></Pages>
+</Root>
+```
+
+The progress state above is tagged by source so an old download percentage cannot appear for a replacement document. Progress callbacks are optional; omitting them leaves the loading path free of React updates for byte events.
+
 ## Show errors and retry
 
-`loader` is waiting content, not an error boundary. Without your own error UI, a failed load can leave it visible. `onError` receives `{ error, phase, source }`; `error` is `unknown`. Render failures outside `Root`, since its children are not mounted during loading.
+`Root` replaces its loader with an accessible error message when initialization fails. `errorFallback={({ error, phase, source }) => …}` customizes that message; `onError` remains available for reporting. The error is scoped to the current source and disappears when the source changes. `error` is `unknown`. The example below adds retry for a URL source while keeping the reader's height stable.
 
 ```tsx title="resilient-viewer.tsx"
 "use client";
@@ -121,37 +149,24 @@ import { useState } from "react";
 import "./pdf-setup";
 
 export default function ResilientViewer({ source }: { source: string }) {
-  return <DocumentSession key={source} source={source} />;
-}
-
-function DocumentSession({ source }: { source: string }) {
   const [attempt, setAttempt] = useState(0);
-  const [failed, setFailed] = useState(false);
-
-  if (failed) {
-    return (
-      <div role="alert">
-        <p>We couldn't open this PDF. Check the file or try again.</p>
-        <button type="button" onClick={() => {
-          setFailed(false);
-          setAttempt((value) => value + 1);
-        }}>
-          Try again
-        </button>
-      </div>
-    );
-  }
 
   return (
     <Root
       key={attempt}
       source={source}
+      progressive
       style={{ height: 600 }}
       loader={<p role="status">Loading PDF…</p>}
-      onError={({ error, phase }) => {
-        console.error(`PDF failed during ${phase}`, error);
-        setFailed(true);
-      }}
+      errorFallback={() => (
+        <div role="alert">
+          <p>We couldn't open this PDF. Check the file or try again.</p>
+          <button type="button" onClick={() => setAttempt((value) => value + 1)}>
+            Try again
+          </button>
+        </div>
+      )}
+      onError={({ error, phase }) => console.error(`PDF failed during ${phase}`, error)}
     >
       <Pages><Page><CanvasLayer /><TextLayer /></Page></Pages>
     </Root>
