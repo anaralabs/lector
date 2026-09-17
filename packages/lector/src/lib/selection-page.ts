@@ -6,7 +6,6 @@ export interface SelectionPageText {
 	lineBreaks: number[];
 }
 
-/** A mounted text layer. Only this object owns DOM nodes; snapshots never do. */
 export class SelectionPage {
 	readonly nodes: { node: Text; start: number; end: number }[] = [];
 	readonly content: SelectionPageText;
@@ -59,8 +58,11 @@ export class SelectionPage {
 		const item =
 			this.nodes.find((item) => (end ? item.end >= index : item.end > index)) ??
 			this.nodes.at(-1);
-		return item
-			? { node: item.node, offset: Math.max(0, index - item.start) }
+		return item && this.element.contains(item.node)
+			? {
+					node: item.node,
+					offset: Math.max(0, Math.min(index - item.start, item.node.length)),
+				}
 			: null;
 	}
 
@@ -69,21 +71,19 @@ export class SelectionPage {
 		const scaleX = bounds.width / this.width || 1;
 		const scaleY = bounds.height / this.height || 1;
 		const rects: HighlightRect[] = [];
-		// Per-text-node ranges exclude page wrappers, column gutters and BR boxes.
-		// The browser handles proportional fonts, ligatures, bidi and vertical runs.
+		// DOM text can shrink after registration; cached page offsets outlive it.
 		for (const item of this.nodes) {
-			const start = Math.max(from, item.start);
-			const end = Math.min(to, item.end);
-			if (
-				end <= start ||
-				!item.node.textContent
-					?.slice(start - item.start, end - item.start)
-					.trim()
-			)
-				continue;
+			if (!this.element.contains(item.node)) continue;
+			const start = Math.max(0, from - item.start);
+			const end = Math.min(
+				to - item.start,
+				item.end - item.start,
+				item.node.length,
+			);
+			if (end <= start || !item.node.data.slice(start, end).trim()) continue;
 			const range = this.element.ownerDocument.createRange();
-			range.setStart(item.node, start - item.start);
-			range.setEnd(item.node, end - item.start);
+			range.setStart(item.node, start);
+			range.setEnd(item.node, end);
 			for (const rect of range.getClientRects()) {
 				if (rect.width <= 0 || rect.height <= 0) continue;
 				rects.push({
@@ -99,7 +99,6 @@ export class SelectionPage {
 	}
 }
 
-/** Materialize one missing selected page as text only, never as a page canvas. */
 export async function withSelectionPage<T>(
 	proxy: PDFPageProxy,
 	owner: Document,
