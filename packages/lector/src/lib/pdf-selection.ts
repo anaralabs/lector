@@ -362,10 +362,17 @@ export class PDFSelectionController {
 		const active = owner?.activeElement;
 		// External controls may collapse or extend the native range on focus/keys.
 		// Keep the saved PDF selection intact while those controls own focus.
+		//
+		// An element that *contains* the container is not one of them: it is the
+		// host's own wrapper around the reader, and a host that gives its reading
+		// region a tabindex has it focused for every click on the document. The
+		// selection the browser then makes by itself — a double-clicked word — is
+		// the reader's, so it is captured rather than discarded.
 		if (
 			active &&
 			active !== owner?.body &&
 			!this.container?.contains(active) &&
+			!(this.container && active.contains(this.container)) &&
 			!active.closest(
 				'input, textarea, [contenteditable]:not([contenteditable="false"])',
 			)
