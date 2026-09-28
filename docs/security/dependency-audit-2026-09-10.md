@@ -37,6 +37,8 @@ Version fixes below require merge into the default branch before Dependabot clos
 
 `image-size` GHSA-w3rx-r6r6-pgpr and GHSA-5p2g-fcmc-qvqq were already dismissed as #301/#302. The sole remaining consumer is `fumadocs-core@14.6.2`, in `dist/mdx-plugins/index.js`: it measures documentation images during MDX compilation. The repository authors those files; application users cannot supply images to this build path. The published Lector library does not depend on image-size. No patched upstream version exists. This PR also raises the 1.x copy to 1.2.1 to fix the separate patched advisory. Reassess if untrusted MDX/image compilation is introduced.
 
+Update (PRD-7844): #330/#331 are resolved by overriding image-size to `2.0.4` and patching `fumadocs-core@14.6.2` to the 2.x API (`patches/fumadocs-core@14.6.2.patch`).
+
 ## Additional fixes from the full audit
 
 Removed unused `webdriverio`, which eliminated extract-zip, deepmerge-ts, tar-fs, basic-ftp and the legacy driver XML parser. Updated Next.js within 15.5, Sharp, Vitest/Playwright and transitive esbuild, glob, minimatch, Rollup, image-size and the separate example dependencies. Vitest 4 requires its explicit Playwright provider, the new browser import and constructible observer mocks.

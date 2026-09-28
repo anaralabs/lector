@@ -120,7 +120,10 @@
       "minimatch@5": "^5.1.8",
       "minimatch@9": "^9.0.7",
       "rollup@4": "^4.59.0",
-      "image-size@1": "1.2.1"
+      "image-size": "2.0.4"
+    },
+    "patchedDependencies": {
+      "fumadocs-core@14.6.2": "patches/fumadocs-core@14.6.2.patch"
     }
   }
 }

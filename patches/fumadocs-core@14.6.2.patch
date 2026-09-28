@@ -1,0 +1,23 @@
+diff --git a/dist/mdx-plugins/index.js b/dist/mdx-plugins/index.js
+index 08d4684bd3b1c47f2b28b1df31ec8831e7f4d45b..532702d9265cda56467dbd4a440733aadedc30b9 100644
+--- a/dist/mdx-plugins/index.js
++++ b/dist/mdx-plugins/index.js
+@@ -545,7 +545,8 @@ function transformerTab() {
+ // src/mdx-plugins/remark-image.ts
+ import path from "node:path";
+ import { visit } from "unist-util-visit";
+-import sizeOf from "image-size";
++import { imageSize as sizeOf } from "image-size";
++import { imageSizeFromFile } from "image-size/fromFile";
+ var VALID_BLUR_EXT = [".jpeg", ".png", ".webp", ".avif", ".jpg"];
+ var EXTERNAL_URL_REGEX = /^https?:\/\//;
+ function remarkImage({
+@@ -685,7 +686,7 @@ async function getImageSize(src, dir) {
+     base.pathname = resolvePath(base.pathname, src);
+     url = base.toString();
+   } else {
+-    return sizeOf(isRelative ? path.join(dir, src) : src);
++    return imageSizeFromFile(isRelative ? path.join(dir, src) : src);
+   }
+   const buffer = await fetch(url).then((res) => res.arrayBuffer());
+   return sizeOf(new Uint8Array(buffer));
