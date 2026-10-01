@@ -88,7 +88,11 @@ export const useTextLayer = () => {
 						return;
 
 					const textLayer = new TextLayer({
-						textContentSource: pdfPageProxy.streamTextContent(),
+						// Marked content lets PDF.js hide `Artifact` runs (running
+						// headers, footers, page numbers) from assistive technology.
+						textContentSource: pdfPageProxy.streamTextContent({
+							includeMarkedContent: true,
+						}),
 						container: textContainer,
 						viewport: pdfPageProxy.getViewport({ scale: 1 }),
 					});
