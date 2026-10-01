@@ -1,0 +1,55 @@
+# Dependency update policy.
+#
+# 7-day minimum release age: a freshly published release may be compromised
+# and not yet flagged, so we wait out the window before adopting it.
+#
+# Cadence: monthly and grouped, so updates land as a single batched PR per
+# ecosystem instead of a weekly trickle. Patch/minor updates that pass CI
+# are auto-merged by .github/workflows/dependabot-auto-merge.yml; majors
+# always require a human (kept out of the auto-merge groups via update-types,
+# so they arrive as separate PRs). Security alerts still surface in real time
+# (advisory-driven) — grouping only controls the PRs, not the alerts.
+#
+# Scope is the root workspace only. The examples/basic demo has its own
+# lockfile but is outside pnpm-workspace.yaml, so CI never installs/builds it
+# — auto-merging its updates would be unverified. Its security alerts still
+# surface repo-wide; refresh it by hand when needed.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+    groups:
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      npm-version:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+        patterns:
+          - "*"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      actions-version:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+        patterns:
+          - "*"
