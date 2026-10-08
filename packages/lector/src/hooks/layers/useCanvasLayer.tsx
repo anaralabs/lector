@@ -36,6 +36,7 @@ type CacheEntry = {
 	docId: string;
 	proxy: PDFPageProxy;
 	key: number;
+	scale: number;
 	bitmap: ImageBitmap;
 	bytes: number;
 };
@@ -112,6 +113,31 @@ function getCachedBitmap(
 	return bitmap;
 }
 
+/** A different scale of the same page and palette is useful while sharpening. */
+function getCachedPreview(
+	proxy: PDFPageProxy,
+	scale: number,
+	background: string | undefined,
+	recolorKey: string | undefined,
+): CacheEntry | undefined {
+	let closest: CacheEntry | undefined;
+	let distance = Infinity;
+	for (const entry of cacheEntries) {
+		if (
+			entry.proxy !== proxy ||
+			entry.key !== cacheKey(entry.scale, background, recolorKey)
+		)
+			continue;
+		const candidateDistance = Math.abs(Math.log(entry.scale / scale));
+		if (candidateDistance < distance) {
+			closest = entry;
+			distance = candidateDistance;
+		}
+	}
+	if (closest) getCachedBitmap(proxy, closest.scale, background, recolorKey);
+	return closest;
+}
+
 function setCachedBitmap(
 	docId: string,
 	proxy: PDFPageProxy,
@@ -139,7 +165,7 @@ function setCachedBitmap(
 		canvasBitmapCache.set(proxy, map);
 	}
 	map.set(key, bitmap);
-	cacheEntries.push({ docId, proxy, key, bitmap, bytes });
+	cacheEntries.push({ docId, proxy, key, scale, bitmap, bytes });
 	cacheBytes += bytes;
 
 	// Trim stale variants of this page (older scales/schemes), newest first.
@@ -205,7 +231,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 
 		const contentKey = `${background ?? "white"}|${recolorKey ?? ""}`;
 		const baseScale = computeBaseScale(dpr, zoom, pageWidth, pageHeight);
-		const hasCurrentFrame =
+		let hasCurrentFrame =
 			paintedRef.current?.proxy === pdfPageProxy &&
 			paintedRef.current?.key === contentKey;
 
@@ -315,6 +341,31 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 				scale: baseScale,
 			};
 			return;
+		}
+
+		if (!hasCurrentFrame) {
+			const preview = getCachedPreview(
+				pdfPageProxy,
+				baseScale,
+				background,
+				recolorKey,
+			);
+			if (preview) {
+				// Keep its native backing resolution: avoid resampling/copying a
+				// full target-size buffer just to display a temporary preview.
+				baseCanvas.width = preview.bitmap.width;
+				baseCanvas.height = preview.bitmap.height;
+				context.drawImage(preview.bitmap, 0, 0);
+				baseCanvas.style.visibility = "";
+				paintedRef.current = {
+					proxy: pdfPageProxy,
+					key: contentKey,
+					scale: preview.scale,
+				};
+				markPageRendered(pageNumber);
+				hasCurrentFrame = true;
+				if (isResizing || isPinching) return;
+			}
 		}
 
 		// Keep a same-scheme previous frame visible (CSS-stretched) while the

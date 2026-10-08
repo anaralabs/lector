@@ -1,0 +1,1430 @@
+{
+  "date": "2026-09-14",
+  "baseline": "5a0160f8ba95c6567b7797a147aabd04cbf68954",
+  "environment": "macOS ARM64, Chrome 153, 800x650, DPR 1, 6x CDP CPU throttle; unrelated host background activity",
+  "results": {
+    "baseline": {
+      "scroll": {
+        "mode": "scroll",
+        "cpuRate": 6,
+        "browser": "153.0.8005.0",
+        "coldNetwork": null,
+        "rows": [
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 1
+            },
+            "trial": 0,
+            "loading": {
+              "appMs": 82.40000009536743,
+              "proxyMs": 291,
+              "shellMs": 304.5,
+              "firstCanvasMs": 401.10000002384186,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 120
+            },
+            "network": {
+              "pdfBytesBeforeReady": 2722758,
+              "pdfRequests": 2
+            },
+            "scroll": [
+              {
+                "zoom": 1,
+                "peakOffset": 14160,
+                "viewportHeight": 650,
+                "scrollHeight": 193678,
+                "weightedBlankMs": 0,
+                "framesWithBlank": 0,
+                "frames": 120,
+                "p95Ms": 21.5,
+                "settleMs": 0.7999999523162842
+              },
+              {
+                "zoom": 1.2,
+                "peakOffset": 16992,
+                "viewportHeight": 650,
+                "scrollHeight": 232414,
+                "weightedBlankMs": 0,
+                "framesWithBlank": 0,
+                "frames": 120,
+                "p95Ms": 33.39999997615814,
+                "settleMs": 0.10000002384185791
+              }
+            ],
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 1
+            },
+            "trial": 1,
+            "loading": {
+              "appMs": 286.7000000476837,
+              "proxyMs": 847.8000000715256,
+              "shellMs": 868.9000000953674,
+              "firstCanvasMs": 1142.5,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 324
+            },
+            "network": {
+              "pdfBytesBeforeReady": 2722758,
+              "pdfRequests": 2
+            },
+            "scroll": [
+              {
+                "zoom": 1,
+                "peakOffset": 14160,
+                "viewportHeight": 650,
+                "scrollHeight": 193678,
+                "weightedBlankMs": 77.85067003164654,
+                "framesWithBlank": 9,
+                "frames": 120,
+                "p95Ms": 44.90000009536743,
+                "settleMs": 0.5
+              },
+              {
+                "zoom": 1.2,
+                "peakOffset": 16992,
+                "viewportHeight": 650,
+                "scrollHeight": 232414,
+                "weightedBlankMs": 0,
+                "framesWithBlank": 0,
+                "frames": 120,
+                "p95Ms": 36.700000047683716,
+                "settleMs": 1.100000023841858
+              }
+            ],
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 1
+            },
+            "trial": 2,
+            "loading": {
+              "appMs": 160.39999997615814,
+              "proxyMs": 568,
+              "shellMs": 598.5,
+              "firstCanvasMs": 806.1000000238419,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 228
+            },
+            "network": {
+              "pdfBytesBeforeReady": 2722758,
+              "pdfRequests": 2
+            },
+            "scroll": [
+              {
+                "zoom": 1,
+                "peakOffset": 14160,
+                "viewportHeight": 650,
+                "scrollHeight": 193678,
+                "weightedBlankMs": 460.5134289772948,
+                "framesWithBlank": 24,
+                "frames": 120,
+                "p95Ms": 78.69999992847443,
+                "settleMs": 1
+              },
+              {
+                "zoom": 1.2,
+                "peakOffset": 16992,
+                "viewportHeight": 650,
+                "scrollHeight": 232414,
+                "weightedBlankMs": 0.7789843260188952,
+                "framesWithBlank": 1,
+                "frames": 120,
+                "p95Ms": 41,
+                "settleMs": 0.10000002384185791
+              }
+            ],
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "expensive",
+              "page": 1,
+              "dark": 1
+            },
+            "trial": 0,
+            "loading": {
+              "appMs": 141.5,
+              "proxyMs": 550,
+              "shellMs": 584.2999999523163,
+              "firstCanvasMs": 1032.5,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/expensive.pdf",
+                  "numPages": 50
+                }
+              ],
+              "firstContentfulPaintMs": 204
+            },
+            "network": {
+              "pdfBytesBeforeReady": 15996840,
+              "pdfRequests": 2
+            },
+            "scroll": [
+              {
+                "zoom": 1,
+                "peakOffset": 14160,
+                "viewportHeight": 650,
+                "scrollHeight": 39639,
+                "weightedBlankMs": 3594.059996582177,
+                "framesWithBlank": 67,
+                "frames": 120,
+                "p95Ms": 115.19999992847443,
+                "settleMs": 1.3000000715255737
+              },
+              {
+                "zoom": 1.2,
+                "peakOffset": 16992,
+                "viewportHeight": 650,
+                "scrollHeight": 47567,
+                "weightedBlankMs": 1481.9972213379576,
+                "framesWithBlank": 47,
+                "frames": 120,
+                "p95Ms": 71.40000009536743,
+                "settleMs": 1
+              }
+            ],
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "expensive",
+              "page": 1,
+              "dark": 1
+            },
+            "trial": 1,
+            "loading": {
+              "appMs": 203.29999995231628,
+              "proxyMs": 622,
+              "shellMs": 658.1000000238419,
+              "firstCanvasMs": 1239.5,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/expensive.pdf",
+                  "numPages": 50
+                }
+              ],
+              "firstContentfulPaintMs": 272
+            },
+            "network": {
+              "pdfBytesBeforeReady": 15996840,
+              "pdfRequests": 2
+            },
+            "scroll": [
+              {
+                "zoom": 1,
+                "peakOffset": 14160,
+                "viewportHeight": 650,
+                "scrollHeight": 39639,
+                "weightedBlankMs": 1979.0629444944727,
+                "framesWithBlank": 58,
+                "frames": 120,
+                "p95Ms": 91.70000004768372,
+                "settleMs": 0.5
+              },
+              {
+                "zoom": 1.2,
+                "peakOffset": 16992,
+                "viewportHeight": 650,
+                "scrollHeight": 47567,
+                "weightedBlankMs": 356.5989288018334,
+                "framesWithBlank": 19,
+                "frames": 120,
+                "p95Ms": 51.39999997615814,
+                "settleMs": 0.10000002384185791
+              }
+            ],
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "expensive",
+              "page": 1,
+              "dark": 1
+            },
+            "trial": 2,
+            "loading": {
+              "appMs": 77.89999997615814,
+              "proxyMs": 271.5,
+              "shellMs": 289,
+              "firstCanvasMs": 531.7999999523163,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/expensive.pdf",
+                  "numPages": 50
+                }
+              ],
+              "firstContentfulPaintMs": 116
+            },
+            "network": {
+              "pdfBytesBeforeReady": 15996840,
+              "pdfRequests": 2
+            },
+            "scroll": [
+              {
+                "zoom": 1,
+                "peakOffset": 14160,
+                "viewportHeight": 650,
+                "scrollHeight": 39639,
+                "weightedBlankMs": 938.9772593492364,
+                "framesWithBlank": 40,
+                "frames": 120,
+                "p95Ms": 69.30000007152557,
+                "settleMs": 0.6000000238418579
+              },
+              {
+                "zoom": 1.2,
+                "peakOffset": 16992,
+                "viewportHeight": 650,
+                "scrollHeight": 47567,
+                "weightedBlankMs": 666.3247788528587,
+                "framesWithBlank": 30,
+                "frames": 120,
+                "p95Ms": 67,
+                "settleMs": 1.399999976158142
+              }
+            ],
+            "errors": []
+          }
+        ]
+      },
+      "cold": {
+        "mode": "cold",
+        "cpuRate": 6,
+        "browser": "153.0.8005.0",
+        "coldNetwork": {
+          "latencyMs": 80,
+          "downloadBytesPerSecond": 750000,
+          "uploadBytesPerSecond": 250000
+        },
+        "rows": [
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 1
+            },
+            "trial": 0,
+            "loading": {
+              "appMs": 815,
+              "proxyMs": 4478.600000023842,
+              "shellMs": 4530.600000023842,
+              "firstCanvasMs": 5742.299999952316,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 248
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1332094,
+              "pdfRequests": 9
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 1
+            },
+            "trial": 1,
+            "loading": {
+              "appMs": 803.7000000476837,
+              "proxyMs": 4380,
+              "shellMs": 4423.200000047684,
+              "firstCanvasMs": 5632.399999976158,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 240
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1312600,
+              "pdfRequests": 9
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 1
+            },
+            "trial": 2,
+            "loading": {
+              "appMs": 766.7999999523163,
+              "proxyMs": 4403.799999952316,
+              "shellMs": 4435.699999928474,
+              "firstCanvasMs": 5666.699999928474,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 204
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1318069,
+              "pdfRequests": 9
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 200
+            },
+            "trial": 0,
+            "loading": {
+              "appMs": 768.2000000476837,
+              "proxyMs": 4304.100000023842,
+              "shellMs": 4593.300000071526,
+              "firstCanvasMs": 5708.200000047684,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 220
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1473874,
+              "pdfRequests": 10
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 200
+            },
+            "trial": 1,
+            "loading": {
+              "appMs": 1084.2999999523163,
+              "proxyMs": 4707.100000023842,
+              "shellMs": 5000.600000023842,
+              "firstCanvasMs": 6045.399999976158,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 656
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1417200,
+              "pdfRequests": 9
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 200
+            },
+            "trial": 2,
+            "loading": {
+              "appMs": 819,
+              "proxyMs": 4379.799999952316,
+              "shellMs": 4672.200000047684,
+              "firstCanvasMs": 5682.600000023842,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 236
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1520577,
+              "pdfRequests": 9
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "expensive",
+              "page": 1,
+              "dark": 1
+            },
+            "trial": 0,
+            "loading": {
+              "appMs": 782.7000000476837,
+              "proxyMs": 4583.600000023842,
+              "shellMs": 4620.700000047684,
+              "firstCanvasMs": 5057.100000023842,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/expensive.pdf",
+                  "numPages": 50
+                }
+              ],
+              "firstContentfulPaintMs": 212
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1065189,
+              "pdfRequests": 5
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "expensive",
+              "page": 1,
+              "dark": 1
+            },
+            "trial": 1,
+            "loading": {
+              "appMs": 930.0999999046326,
+              "proxyMs": 4725.899999976158,
+              "shellMs": 4760.5,
+              "firstCanvasMs": 5156.799999952316,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/expensive.pdf",
+                  "numPages": 50
+                }
+              ],
+              "firstContentfulPaintMs": 204
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1019927,
+              "pdfRequests": 5
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "expensive",
+              "page": 1,
+              "dark": 1
+            },
+            "trial": 2,
+            "loading": {
+              "appMs": 779.8999999761581,
+              "proxyMs": 4495.399999976158,
+              "shellMs": 4519.5,
+              "firstCanvasMs": 4754.599999904633,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/expensive.pdf",
+                  "numPages": 50
+                }
+              ],
+              "firstContentfulPaintMs": 252
+            },
+            "network": {
+              "pdfBytesBeforeReady": 872723,
+              "pdfRequests": 5
+            },
+            "errors": []
+          }
+        ]
+      },
+      "lifecycle": {
+        "mode": "lifecycle",
+        "cpuRate": 6,
+        "rows": [
+          {
+            "workerReleased": true,
+            "trial": 0,
+            "switchToCanvasMs": 2526.399999976158,
+            "oldDownloadAborted": true,
+            "replacement": {
+              "appMs": 803.8000000715256,
+              "proxyMs": 5777.400000095367,
+              "shellMs": 5806.5,
+              "firstCanvasMs": 6145.200000047684,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/form.pdf",
+                  "numPages": 5
+                }
+              ],
+              "source": "/pdf/form.pdf",
+              "pages": 5
+            },
+            "errorFeedback": {
+              "alert": false,
+              "loading": true
+            }
+          }
+        ],
+        "incomplete": true,
+        "failure": "Second trial timed out waiting for replacement first canvas after 60000 ms; third trial did not run."
+      }
+    },
+    "final": {
+      "scroll": {
+        "mode": "scroll",
+        "cpuRate": 6,
+        "browser": "153.0.8005.0",
+        "coldNetwork": null,
+        "rows": [
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 1
+            },
+            "trial": 0,
+            "loading": {
+              "appMs": 256.89999997615814,
+              "proxyMs": 725.5,
+              "shellMs": 773.7000000476837,
+              "firstCanvasMs": 1084.8999999761581,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 300
+            },
+            "network": {
+              "pdfBytesBeforeReady": 2788294,
+              "pdfRequests": 3
+            },
+            "scroll": [
+              {
+                "zoom": 1,
+                "peakOffset": 14160,
+                "viewportHeight": 650,
+                "scrollHeight": 193678,
+                "weightedBlankMs": 158.42212108782263,
+                "framesWithBlank": 16,
+                "frames": 120,
+                "p95Ms": 51.10000002384186,
+                "settleMs": 1.600000023841858
+              },
+              {
+                "zoom": 1.2,
+                "peakOffset": 16992,
+                "viewportHeight": 650,
+                "scrollHeight": 232414,
+                "weightedBlankMs": 0,
+                "framesWithBlank": 0,
+                "frames": 120,
+                "p95Ms": 60.89999997615814,
+                "settleMs": 0.10000002384185791
+              }
+            ],
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 1
+            },
+            "trial": 1,
+            "loading": {
+              "appMs": 224.30000007152557,
+              "proxyMs": 825.8000000715256,
+              "shellMs": 871.4000000953674,
+              "firstCanvasMs": 1125.7000000476837,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 324
+            },
+            "network": {
+              "pdfBytesBeforeReady": 2722758,
+              "pdfRequests": 2
+            },
+            "scroll": [
+              {
+                "zoom": 1,
+                "peakOffset": 14160,
+                "viewportHeight": 650,
+                "scrollHeight": 193678,
+                "weightedBlankMs": 106.61392387081686,
+                "framesWithBlank": 10,
+                "frames": 120,
+                "p95Ms": 52.89999997615814,
+                "settleMs": 0.20000004768371582
+              },
+              {
+                "zoom": 1.2,
+                "peakOffset": 16992,
+                "viewportHeight": 650,
+                "scrollHeight": 232414,
+                "weightedBlankMs": 0,
+                "framesWithBlank": 0,
+                "frames": 120,
+                "p95Ms": 64.79999995231628,
+                "settleMs": 0.20000004768371582
+              }
+            ],
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 1
+            },
+            "trial": 2,
+            "loading": {
+              "appMs": 310.5,
+              "proxyMs": 912.5,
+              "shellMs": 971,
+              "firstCanvasMs": 1349.2999999523163,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 348
+            },
+            "network": {
+              "pdfBytesBeforeReady": 2788294,
+              "pdfRequests": 3
+            },
+            "scroll": [
+              {
+                "zoom": 1,
+                "peakOffset": 14160,
+                "viewportHeight": 650,
+                "scrollHeight": 193678,
+                "weightedBlankMs": 323.10176389714,
+                "framesWithBlank": 18,
+                "frames": 120,
+                "p95Ms": 61.89999997615814,
+                "settleMs": 0.09999990463256836
+              },
+              {
+                "zoom": 1.2,
+                "peakOffset": 16992,
+                "viewportHeight": 650,
+                "scrollHeight": 232414,
+                "weightedBlankMs": 0,
+                "framesWithBlank": 0,
+                "frames": 120,
+                "p95Ms": 28.100000023841858,
+                "settleMs": 0
+              }
+            ],
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "expensive",
+              "page": 1,
+              "dark": 1
+            },
+            "trial": 0,
+            "loading": {
+              "appMs": 79.70000004768372,
+              "proxyMs": 279.2000000476837,
+              "shellMs": 297.2000000476837,
+              "firstCanvasMs": 507.8000000715256,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/expensive.pdf",
+                  "numPages": 50
+                }
+              ],
+              "firstContentfulPaintMs": 124
+            },
+            "network": {
+              "pdfBytesBeforeReady": 15996840,
+              "pdfRequests": 2
+            },
+            "scroll": [
+              {
+                "zoom": 1,
+                "peakOffset": 14160,
+                "viewportHeight": 650,
+                "scrollHeight": 39639,
+                "weightedBlankMs": 806.333616360911,
+                "framesWithBlank": 35,
+                "frames": 120,
+                "p95Ms": 61.89999997615814,
+                "settleMs": 0.5
+              },
+              {
+                "zoom": 1.2,
+                "peakOffset": 16992,
+                "viewportHeight": 650,
+                "scrollHeight": 47567,
+                "weightedBlankMs": 175.28265320220032,
+                "framesWithBlank": 10,
+                "frames": 120,
+                "p95Ms": 45.60000002384186,
+                "settleMs": 0.10000002384185791
+              }
+            ],
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "expensive",
+              "page": 1,
+              "dark": 1
+            },
+            "trial": 1,
+            "loading": {
+              "appMs": 102.20000004768372,
+              "proxyMs": 325.60000002384186,
+              "shellMs": 343,
+              "firstCanvasMs": 628.1000000238419,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/expensive.pdf",
+                  "numPages": 50
+                }
+              ],
+              "firstContentfulPaintMs": 156
+            },
+            "network": {
+              "pdfBytesBeforeReady": 15996840,
+              "pdfRequests": 2
+            },
+            "scroll": [
+              {
+                "zoom": 1,
+                "peakOffset": 14160,
+                "viewportHeight": 650,
+                "scrollHeight": 39639,
+                "weightedBlankMs": 678.3166337395384,
+                "framesWithBlank": 32,
+                "frames": 120,
+                "p95Ms": 54.800000071525574,
+                "settleMs": 0.7999999523162842
+              },
+              {
+                "zoom": 1.2,
+                "peakOffset": 16992,
+                "viewportHeight": 650,
+                "scrollHeight": 47567,
+                "weightedBlankMs": 233.589736648967,
+                "framesWithBlank": 10,
+                "frames": 120,
+                "p95Ms": 51.39999997615814,
+                "settleMs": 0
+              }
+            ],
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "expensive",
+              "page": 1,
+              "dark": 1
+            },
+            "trial": 2,
+            "loading": {
+              "appMs": 74.20000004768372,
+              "proxyMs": 269.8000000715256,
+              "shellMs": 286.7000000476837,
+              "firstCanvasMs": 548.8000000715256,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/expensive.pdf",
+                  "numPages": 50
+                }
+              ],
+              "firstContentfulPaintMs": 116
+            },
+            "network": {
+              "pdfBytesBeforeReady": 15996840,
+              "pdfRequests": 2
+            },
+            "scroll": [
+              {
+                "zoom": 1,
+                "peakOffset": 14160,
+                "viewportHeight": 650,
+                "scrollHeight": 39639,
+                "weightedBlankMs": 690.8394555990645,
+                "framesWithBlank": 36,
+                "frames": 120,
+                "p95Ms": 61.10000002384186,
+                "settleMs": 0.20000004768371582
+              },
+              {
+                "zoom": 1.2,
+                "peakOffset": 16992,
+                "viewportHeight": 650,
+                "scrollHeight": 47567,
+                "weightedBlankMs": 294.2079883422417,
+                "framesWithBlank": 10,
+                "frames": 120,
+                "p95Ms": 119.10000002384186,
+                "settleMs": 0
+              }
+            ],
+            "errors": []
+          }
+        ]
+      },
+      "cold": {
+        "mode": "cold",
+        "cpuRate": 6,
+        "browser": "153.0.8005.0",
+        "coldNetwork": {
+          "latencyMs": 80,
+          "downloadBytesPerSecond": 750000,
+          "uploadBytesPerSecond": 250000
+        },
+        "rows": [
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 1
+            },
+            "trial": 0,
+            "loading": {
+              "appMs": 800.3000000715256,
+              "proxyMs": 4418.399999976158,
+              "shellMs": 4458.100000023842,
+              "firstCanvasMs": 5549.300000071526,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 216
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1238267,
+              "pdfRequests": 8
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 1
+            },
+            "trial": 1,
+            "loading": {
+              "appMs": 778.6000000238419,
+              "proxyMs": 4282.5,
+              "shellMs": 4345.300000071526,
+              "firstCanvasMs": 5503.400000095367,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 236
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1280066,
+              "pdfRequests": 8
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 1
+            },
+            "trial": 2,
+            "loading": {
+              "appMs": 780.5,
+              "proxyMs": 4291.899999976158,
+              "shellMs": 4322.700000047684,
+              "firstCanvasMs": 5386.800000071526,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 220
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1195600,
+              "pdfRequests": 8
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 200
+            },
+            "trial": 0,
+            "loading": {
+              "appMs": 803.7999999523163,
+              "proxyMs": 4420.399999976158,
+              "shellMs": 4715.299999952316,
+              "firstCanvasMs": 5663.399999976158,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 228
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1379200,
+              "pdfRequests": 8
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 200
+            },
+            "trial": 1,
+            "loading": {
+              "appMs": 772.6999999284744,
+              "proxyMs": 4114.899999976158,
+              "shellMs": 4384.899999976158,
+              "firstCanvasMs": 5118.600000023842,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 248
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1171135,
+              "pdfRequests": 8
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "large",
+              "page": 200
+            },
+            "trial": 2,
+            "loading": {
+              "appMs": 675.6000000238419,
+              "proxyMs": 4045.7000000476837,
+              "shellMs": 4337.300000071526,
+              "firstCanvasMs": 5320.600000023842,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/large.pdf",
+                  "numPages": 320
+                }
+              ],
+              "firstContentfulPaintMs": 152
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1353302,
+              "pdfRequests": 8
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "expensive",
+              "page": 1,
+              "dark": 1
+            },
+            "trial": 0,
+            "loading": {
+              "appMs": 701,
+              "proxyMs": 4573.600000023842,
+              "shellMs": 4631.5,
+              "firstCanvasMs": 5051.100000023842,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/expensive.pdf",
+                  "numPages": 50
+                }
+              ],
+              "firstContentfulPaintMs": 252
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1112919,
+              "pdfRequests": 5
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "expensive",
+              "page": 1,
+              "dark": 1
+            },
+            "trial": 1,
+            "loading": {
+              "appMs": 804.8999999761581,
+              "proxyMs": 4586.899999976158,
+              "shellMs": 4626.200000047684,
+              "firstCanvasMs": 5049.600000023842,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/expensive.pdf",
+                  "numPages": 50
+                }
+              ],
+              "firstContentfulPaintMs": 220
+            },
+            "network": {
+              "pdfBytesBeforeReady": 1092327,
+              "pdfRequests": 5
+            },
+            "errors": []
+          },
+          {
+            "scenario": {
+              "pdf": "expensive",
+              "page": 1,
+              "dark": 1
+            },
+            "trial": 2,
+            "loading": {
+              "appMs": 754.3000000715256,
+              "proxyMs": 4518.400000095367,
+              "shellMs": 4550.700000047684,
+              "firstCanvasMs": 4835.200000047684,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/expensive.pdf",
+                  "numPages": 50
+                }
+              ],
+              "firstContentfulPaintMs": 216
+            },
+            "network": {
+              "pdfBytesBeforeReady": 956919,
+              "pdfRequests": 5
+            },
+            "errors": []
+          }
+        ]
+      },
+      "lifecycle": {
+        "mode": "lifecycle",
+        "cpuRate": 6,
+        "browser": "153.0.8005.0",
+        "coldNetwork": {
+          "latencyMs": 80,
+          "downloadBytesPerSecond": 750000,
+          "uploadBytesPerSecond": 250000
+        },
+        "rows": [
+          {
+            "workerReleased": true,
+            "trial": 0,
+            "switchToCanvasMs": 407.3000000715256,
+            "oldDownloadAborted": true,
+            "replacement": {
+              "appMs": 719.7999999523163,
+              "proxyMs": 3633.7999999523163,
+              "shellMs": 3647.399999976158,
+              "firstCanvasMs": 3767.600000023842,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/form.pdf",
+                  "numPages": 5
+                }
+              ],
+              "source": "/pdf/form.pdf",
+              "pages": 5
+            },
+            "errorFeedback": {
+              "alert": true,
+              "loading": false
+            }
+          },
+          {
+            "workerReleased": true,
+            "trial": 1,
+            "switchToCanvasMs": 450.59999990463257,
+            "oldDownloadAborted": true,
+            "replacement": {
+              "appMs": 660.3999999761581,
+              "proxyMs": 3567.6999999284744,
+              "shellMs": 3580.2999999523163,
+              "firstCanvasMs": 3742.5999999046326,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/form.pdf",
+                  "numPages": 5
+                }
+              ],
+              "source": "/pdf/form.pdf",
+              "pages": 5
+            },
+            "errorFeedback": {
+              "alert": true,
+              "loading": false
+            }
+          },
+          {
+            "workerReleased": true,
+            "trial": 2,
+            "switchToCanvasMs": 457.2000000476837,
+            "oldDownloadAborted": true,
+            "replacement": {
+              "appMs": 670.6000000238419,
+              "proxyMs": 3608.100000023842,
+              "shellMs": 3620.5,
+              "firstCanvasMs": 3784,
+              "errors": [],
+              "documentLoads": [
+                {
+                  "source": "/pdf/form.pdf",
+                  "numPages": 5
+                }
+              ],
+              "source": "/pdf/form.pdf",
+              "pages": 5
+            },
+            "errorFeedback": {
+              "alert": true,
+              "loading": false
+            }
+          }
+        ]
+      }
+    }
+  },
+  "exploratory": {
+    "rangeOnly": {
+      "mode": "cold",
+      "cpuRate": 6,
+      "browser": "153.0.8005.0",
+      "coldNetwork": {
+        "latencyMs": 80,
+        "downloadBytesPerSecond": 750000,
+        "uploadBytesPerSecond": 250000
+      },
+      "rows": [
+        {
+          "scenario": {
+            "pdf": "large",
+            "page": 1
+          },
+          "trial": 0,
+          "loading": {
+            "appMs": 658.2999999523163,
+            "proxyMs": 3895.1999999284744,
+            "shellMs": 3907.5999999046326,
+            "firstCanvasMs": 5394.5,
+            "errors": [],
+            "firstContentfulPaintMs": 120
+          },
+          "network": {
+            "pdfBytesBeforeReady": 951381,
+            "pdfRequests": 13
+          },
+          "errors": []
+        },
+        {
+          "scenario": {
+            "pdf": "large",
+            "page": 200
+          },
+          "trial": 0,
+          "loading": {
+            "appMs": 662,
+            "proxyMs": 3882.899999976158,
+            "shellMs": 4067.2000000476837,
+            "firstCanvasMs": 5686.5,
+            "errors": [],
+            "firstContentfulPaintMs": 124
+          },
+          "network": {
+            "pdfBytesBeforeReady": 1013050,
+            "pdfRequests": 14
+          },
+          "errors": []
+        },
+        {
+          "scenario": {
+            "pdf": "expensive",
+            "page": 1,
+            "dark": 1
+          },
+          "trial": 0,
+          "loading": {
+            "appMs": 660.3999999761581,
+            "proxyMs": 4039.399999976158,
+            "shellMs": 4053.7000000476837,
+            "firstCanvasMs": 4388.5,
+            "errors": [],
+            "firstContentfulPaintMs": 132
+          },
+          "network": {
+            "pdfBytesBeforeReady": 290669,
+            "pdfRequests": 6
+          },
+          "errors": []
+        }
+      ]
+    },
+    "streaming": {
+      "mode": "cold",
+      "cpuRate": 6,
+      "browser": "153.0.8005.0",
+      "coldNetwork": {
+        "latencyMs": 80,
+        "downloadBytesPerSecond": 750000,
+        "uploadBytesPerSecond": 250000
+      },
+      "rows": [
+        {
+          "scenario": {
+            "pdf": "large",
+            "page": 1
+          },
+          "trial": 0,
+          "loading": {
+            "appMs": 657.5999999046326,
+            "proxyMs": 3987.6999999284744,
+            "shellMs": 4000.1999999284744,
+            "firstCanvasMs": 4904.399999976158,
+            "errors": [],
+            "firstContentfulPaintMs": 132
+          },
+          "network": {
+            "pdfBytesBeforeReady": 1041566,
+            "pdfRequests": 8
+          },
+          "errors": []
+        },
+        {
+          "scenario": {
+            "pdf": "large",
+            "page": 200
+          },
+          "trial": 0,
+          "loading": {
+            "appMs": 659.8999999761581,
+            "proxyMs": 3991.899999976158,
+            "shellMs": 4263.199999928474,
+            "firstCanvasMs": 4993.399999976158,
+            "errors": [],
+            "firstContentfulPaintMs": 128
+          },
+          "network": {
+            "pdfBytesBeforeReady": 1185302,
+            "pdfRequests": 8
+          },
+          "errors": []
+        },
+        {
+          "scenario": {
+            "pdf": "expensive",
+            "page": 1,
+            "dark": 1
+          },
+          "trial": 0,
+          "loading": {
+            "appMs": 664.5,
+            "proxyMs": 4218.199999928474,
+            "shellMs": 4232.799999952316,
+            "firstCanvasMs": 4350.399999976158,
+            "errors": [],
+            "firstContentfulPaintMs": 132
+          },
+          "network": {
+            "pdfBytesBeforeReady": 752723,
+            "pdfRequests": 5
+          },
+          "errors": []
+        }
+      ]
+    }
+  },
+  "diagnostics": [
+    "Some exploratory cold batches timed out with the PDF worker script still pending, including unchanged main. Retained cold results contain three completed trials per scenario and condition.",
+    "The lifecycle harness was corrected to synchronize cancellation checks on the CDP request event and to wait for the error page app to initialize. Error feedback is checked without network throttling after the timed replacement.",
+    "Source replacement baseline includes a 60000 ms censored timeout; only its completed trial is summarized, alongside all three completed final trials."
+  ],
+  "candidateRuntimeSha256": {
+    "packages/lector/src/components/root.tsx": "22d85c5881344cb41825b6d1e39e523854111766cc69a9cfdaa992ad742d3ba5",
+    "packages/lector/src/hooks/document/document.ts": "4fe4c3f8c807f17fc0d33534688c0f694e2dd1872cd091316b8467628596865f",
+    "packages/lector/src/hooks/layers/useCanvasLayer.tsx": "43e0209e9991a4ee6864e8851becc23be190dc06d8b6970a66b30b496ecb23ec"
+  },
+  "validation": {
+    "rebasedMain": "ca1962b1b8bf11808231c283dda771ff06371048",
+    "browserTestsPerEngine": 308,
+    "engines": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "unitTests": 37,
+    "checks": [
+      "build",
+      "types",
+      "size",
+      "packed ESM/SSR",
+      "lint (two existing annotation warnings)",
+      "docs build",
+      "6 agent-docs tests",
+      "public docs example typecheck"
+    ],
+    "combinedCompressedBytes": 59995
+  }
+}
