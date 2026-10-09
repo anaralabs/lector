@@ -36,7 +36,7 @@ overrides:
   vite@6: ^6.4.3
   '@babel/core': ^7.29.7
   socks: ^2.8.9
-  ip-address@10: 10.5.1
+  ip-address@10: 10.7.1
   sharp: 0.35.4
   '@emnapi/runtime': 1.11.2
   browserslist@4: ^4.28.7
@@ -3434,8 +3434,8 @@ packages:
     resolution: {integrity: sha512-2dYz766i9HprMBasCMvHMuazJ7u4WzhJwo5kb3iPSiW/iRYV6uPari3zHoqZlnuaR7V1bEiNMxikhp37rdBXbw==}
     engines: {node: '>=12'}
 
-  ip-address@10.5.1:
-    resolution: {integrity: sha512-EXujUp9jyOI/chPgtqk6uy7fDq8AeCB/WlfEuPg9LN0fN9lzKAKfuDYi60SMhHwgUiEhZvVYsbGZN+RUU1INiA==}
+  ip-address@10.7.1:
+    resolution: {integrity: sha512-4OUAqU9Z1i3vCnS05hzGiFnEMDpQ+62pAD/MVQOp83fYyNC8GleCqaS0QikQBmcWCrKFiUs/B8ztRRiYOAXuCA==}
     engines: {node: '>= 12'}
 
   ipaddr.js@1.9.1:
@@ -8104,7 +8104,7 @@ snapshots:
     dependencies:
       debug: 4.4.3
       express: 5.2.1
-      ip-address: 10.5.1
+      ip-address: 10.7.1
     transitivePeerDependencies:
       - supports-color
 
@@ -8599,7 +8599,7 @@ snapshots:
       from2: 2.3.0
       p-is-promise: 3.0.0
 
-  ip-address@10.5.1: {}
+  ip-address@10.7.1: {}
 
   ipaddr.js@1.9.1: {}
 
