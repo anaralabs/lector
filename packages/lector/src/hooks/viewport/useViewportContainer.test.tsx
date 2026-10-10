@@ -76,6 +76,28 @@ describe("WebKit viewport scaling", () => {
 		expect(element.style.willChange).toBe("auto");
 	});
 
+	it("publishes the settled layout zoom for text layers to counter", () => {
+		const { element, refs } = fixture();
+		const { rerender } = renderHook(() => useViewportContainer(refs));
+		const published = () => [
+			element.style.getPropertyValue("--lector-layout-zoom"),
+			element.style.getPropertyValue("--lector-layout-zoom-inverse"),
+		];
+		expect(published()).toEqual(["5", "0.2"]);
+
+		// The gesture scales with a transform; CSS zoom (and so the
+		// published value) only changes once it settles.
+		state.isPinching = true;
+		rerender();
+		state.zoom = 4;
+		rerender();
+		expect(published()).toEqual(["5", "0.2"]);
+
+		state.isPinching = false;
+		rerender();
+		expect(published()).toEqual(["4", "0.25"]);
+	});
+
 	it("keeps a native scroll position when a pinch ends without changing zoom", () => {
 		const { container, refs } = fixture();
 		const { rerender } = renderHook(() => useViewportContainer(refs));
