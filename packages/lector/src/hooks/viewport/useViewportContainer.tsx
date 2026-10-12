@@ -11,7 +11,6 @@ import { PDFStore, usePdf } from "../../internal";
 import { clamp } from "../../lib/clamp";
 import { firstMemo } from "../../lib/memo";
 import {
-	LAYOUT_ZOOM_INVERSE_PROPERTY,
 	LAYOUT_ZOOM_PROPERTY,
 	registerViewportZoom,
 } from "../../lib/viewport-zoom";
@@ -103,10 +102,6 @@ export const useViewportContainer = ({
 					// WebKit downsamples canvases under transformed ancestors: https://bugs.webkit.org/show_bug.cgi?id=264954
 					element.style.zoom = String(zoom);
 					element.style.setProperty(LAYOUT_ZOOM_PROPERTY, String(zoom));
-					element.style.setProperty(
-						LAYOUT_ZOOM_INVERSE_PROPERTY,
-						String(1 / zoom),
-					);
 					element.style.transform = "none";
 					element.style.willChange = "auto";
 					gestureTransformAppliedRef.current = false;
