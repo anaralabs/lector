@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@anaralabs/lector": "workspace:*",
-    "@modelcontextprotocol/server": "^2.0.0",
+    "@modelcontextprotocol/server": "2.2.0",
     "@radix-ui/react-dropdown-menu": "^2.1.4",
     "@radix-ui/react-popover": "^1.1.4",
     "@radix-ui/react-slot": "^1.1.0",
@@ -24,7 +24,7 @@
     "fumadocs-mdx": "11.1.2",
     "fumadocs-ui": "14.6.2",
     "lucide-react": "^0.469.0",
-    "next": "^15.5.24",
+    "next": "15.5.27",
     "next-themes": "^0.4.4",
     "pdfjs-dist": "^5.5.207",
     "react": "^19.0.0",
@@ -37,8 +37,8 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "^2.0.0",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/client": "2.2.0",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "@types/mdast": "^4",
     "@types/mdx": "^2.0.13",
     "@types/node": "22.10.2",
