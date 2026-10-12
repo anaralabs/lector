@@ -54,7 +54,9 @@ test.each([
 		vi.useFakeTimers();
 		const { callback, stop } = observe(horizontal, rtl);
 		try {
-			expect(callback).toHaveBeenLastCalledWith(800, false);
+			// Subscribing must not publish: the virtualizer's own initialOffset
+			// scroll comes after it (see useObserveElement).
+			expect(callback).not.toHaveBeenCalled();
 			store.setState({ zoom: 2 });
 			expect(callback).toHaveBeenLastCalledWith(400, false);
 			store.setState({ zoom: 0.5 });
