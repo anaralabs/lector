@@ -51,11 +51,18 @@ export const useTextLayer = () => {
 		// would fall back to `inset: 0`. Under layout zoom TextLayer counters the
 		// page zoom, and that fallback box comes out zoom times too big, with
 		// PDF.js placing spans by percent of it. So pin the page size before any
-		// build and again whenever PDF.js resets it. CSS rotates this unrotated box.
+		// build and again whenever PDF.js resets it. CSS rotates this unrotated
+		// box by `data-main-rotation`, which the PDF.js constructor would only set
+		// at build time: set it now too, or a rotated page's empty layer overhangs
+		// the page and adds scrollable space that vanishes once text is built.
 		const sizeToPage = () => {
 			const unrotated = pdfPageProxy.getViewport({ scale: 1, rotation: 0 });
 			textContainer.style.width = `${unrotated.width}px`;
 			textContainer.style.height = `${unrotated.height}px`;
+			textContainer.setAttribute(
+				"data-main-rotation",
+				String(pdfPageProxy.getViewport({ scale: 1 }).rotation),
+			);
 		};
 		sizeToPage();
 

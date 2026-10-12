@@ -81,18 +81,22 @@ for (const zoom of [0.5, 2]) {
 			// Before its text is built the layer must already cover exactly the
 			// page: spans are placed by percent of this box as they stream in.
 			const canvas = view.container.querySelector("canvas")!;
-			const dims = (box: DOMRect) =>
-				[box.width, box.height].sort((a, b) => a - b);
 			const layer = view.container.querySelector(".textLayer")!;
 			// Test browsers zoom text correctly either way, so pin the counter
 			// itself: its absence is only visible in Safari.
 			const counter = getComputedStyle(layer);
 			expect(Number(counter.zoom)).toBeCloseTo(1 / zoom);
 			expect(Number(counter.scale)).toBeCloseTo(zoom);
-			const layerDims = dims(layer.getBoundingClientRect());
-			const pageDims = dims(canvas.getBoundingClientRect());
-			expect(layerDims[0]).toBeCloseTo(pageDims[0]!, 0);
-			expect(layerDims[1]).toBeCloseTo(pageDims[1]!, 0);
+			// Compare boxes unsorted: an unrotated layer on a rotated page has the
+			// same dimensions swapped, and overhangs it.
+			const expectLayerOnPage = () => {
+				const layerBox = layer.getBoundingClientRect();
+				const pageBox = canvas.getBoundingClientRect();
+				for (const key of ["left", "top", "width", "height"] as const) {
+					expect(layerBox[key]).toBeCloseTo(pageBox[key], 0);
+				}
+			};
+			expectLayerOnPage();
 			const span = await waitFor(() => {
 				const found = [
 					...view.container.querySelectorAll(".textLayer span"),
@@ -100,6 +104,7 @@ for (const zoom of [0.5, 2]) {
 				expect(found).toBeTruthy();
 				return found!;
 			});
+			expectLayerOnPage();
 			const range = document.createRange();
 			range.selectNodeContents(span);
 			const text = range.getBoundingClientRect();
