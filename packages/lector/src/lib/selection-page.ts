@@ -6,8 +6,11 @@ export interface SelectionPageText {
 	lineBreaks: number[];
 }
 
+type SelectionNode = { node: Text; start: number; end: number };
+
 export class SelectionPage {
-	readonly nodes: { node: Text; start: number; end: number }[] = [];
+	readonly nodes: SelectionNode[] = [];
+	private readonly index = new Map<Node, SelectionNode>();
 	readonly content: SelectionPageText;
 	constructor(
 		readonly element: HTMLElement,
@@ -26,11 +29,13 @@ export class SelectionPage {
 			if (node.nodeType === Node.TEXT_NODE) {
 				const text = node.textContent ?? "";
 				if (!text) continue;
-				this.nodes.push({
+				const item: SelectionNode = {
 					node: node as Text,
 					start: offset,
 					end: offset + text.length,
-				});
+				};
+				this.nodes.push(item);
+				this.index.set(item.node, item);
 				chunks.push(text);
 				offset += text.length;
 			} else if ((node as Element).tagName === "BR") lineBreaks.push(offset);
@@ -38,9 +43,23 @@ export class SelectionPage {
 		this.content = { text: chunks.join(""), lineBreaks };
 	}
 
+	/** Index of the first node whose end passes `offset`; ends ascend, so this
+	 * is the node a linear scan would have stopped on. */
+	private seek(offset: number, inclusive: boolean): number {
+		let low = 0;
+		let high = this.nodes.length;
+		while (low < high) {
+			const middle = (low + high) >> 1;
+			const end = this.nodes[middle]!.end;
+			if (inclusive ? end >= offset : end > offset) high = middle;
+			else low = middle + 1;
+		}
+		return low;
+	}
+
 	offset(node: Node, offset: number): number | null {
 		if (!this.element.contains(node)) return null;
-		const item = this.nodes.find((item) => item.node === node);
+		const item = this.index.get(node);
 		if (item)
 			return item.start + Math.max(0, Math.min(offset, item.end - item.start));
 		const range = this.element.ownerDocument.createRange();
@@ -55,9 +74,7 @@ export class SelectionPage {
 
 	point(offset: number, end = false): { node: Text; offset: number } | null {
 		const index = Math.max(0, Math.min(offset, this.content.text.length));
-		const item =
-			this.nodes.find((item) => (end ? item.end >= index : item.end > index)) ??
-			this.nodes.at(-1);
+		const item = this.nodes[this.seek(index, end)] ?? this.nodes.at(-1);
 		return item && this.element.contains(item.node)
 			? {
 					node: item.node,
@@ -72,7 +89,9 @@ export class SelectionPage {
 		const scaleY = bounds.height / this.height || 1;
 		const rects: HighlightRect[] = [];
 		// DOM text can shrink after registration; cached page offsets outlive it.
-		for (const item of this.nodes) {
+		for (let i = this.seek(from, false); i < this.nodes.length; i++) {
+			const item = this.nodes[i]!;
+			if (item.start >= to) break;
 			if (!this.element.contains(item.node)) continue;
 			const start = Math.max(0, from - item.start);
 			const end = Math.min(

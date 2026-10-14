@@ -69,7 +69,7 @@ type Rect = { left: number; top: number; width: number; height: number };
 // unrelated lines or columns. PDF word/sentence spaces can exist only as gaps
 // between positioned runs. Allow up to half a text-run height to include those
 // spaces (including justified text), while leaving wider column gutters open.
-const connected = (a: Rect, b: Rect) => {
+export const connected = (a: Rect, b: Rect) => {
 	const overlap =
 		Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top);
 	const gap =
@@ -80,27 +80,52 @@ const connected = (a: Rect, b: Rect) => {
 	);
 };
 
+type Group<T> = {
+	members: T[];
+	left: number;
+	top: number;
+	right: number;
+	bottom: number;
+};
+
 export const mergeTextRuns = <T extends Rect>(rects: T[]): T[] => {
-	const groups: T[][] = [];
+	const groups: Group<T>[] = [];
 	for (const rect of rects) {
-		const group = [rect];
+		const group: Group<T> = {
+			members: [rect],
+			left: rect.left,
+			top: rect.top,
+			right: rect.left + rect.width,
+			bottom: rect.top + rect.height,
+		};
+		// connected() needs vertical overlap and a gap of at most half the shorter
+		// height, so a group whose own box is already out of reach holds no match.
+		const reach = rect.height * 0.5;
 		for (let i = groups.length - 1; i >= 0; i--) {
-			if (groups[i]!.some((member) => connected(member, rect))) {
-				group.push(...groups[i]!);
+			const other = groups[i]!;
+			if (
+				rect.top > other.bottom ||
+				rect.top + rect.height < other.top ||
+				rect.left > other.right + reach ||
+				rect.left + rect.width < other.left - reach
+			)
+				continue;
+			if (other.members.some((member) => connected(member, rect))) {
+				group.members.push(...other.members);
+				group.left = Math.min(group.left, other.left);
+				group.top = Math.min(group.top, other.top);
+				group.right = Math.max(group.right, other.right);
+				group.bottom = Math.max(group.bottom, other.bottom);
 				groups.splice(i, 1);
 			}
 		}
 		groups.push(group);
 	}
-	return groups.map((group) => {
-		const left = Math.min(...group.map((rect) => rect.left));
-		const top = Math.min(...group.map((rect) => rect.top));
-		return {
-			...group[0]!,
-			left,
-			top,
-			width: Math.max(...group.map((rect) => rect.left + rect.width)) - left,
-			height: Math.max(...group.map((rect) => rect.top + rect.height)) - top,
-		};
-	});
+	return groups.map(({ members, left, top, right, bottom }) => ({
+		...members[0]!,
+		left,
+		top,
+		width: right - left,
+		height: bottom - top,
+	}));
 };
