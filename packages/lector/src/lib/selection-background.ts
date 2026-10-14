@@ -54,9 +54,9 @@ export const createSelectionBackground = () => {
 	let colorEpoch = 0;
 	let style: HTMLStyleElement | undefined;
 
-	// A style sheet added, removed or edited can change ::selection; records are
-	// drained synchronously on read, so a consumer that restyles and then selects
-	// in the same task still gets the new colour.
+	// A style sheet added, removed, edited, disabled or re-pointed can change
+	// ::selection; records are drained synchronously on read, so a consumer that
+	// restyles and then selects in the same task still gets the new colour.
 	const sheets =
 		typeof MutationObserver === "undefined"
 			? undefined
@@ -65,7 +65,20 @@ export const createSelectionBackground = () => {
 		childList: true,
 		subtree: true,
 		characterData: true,
+		attributes: true,
+		attributeFilter: ["media", "disabled", "href", "rel"],
 	});
+
+	const forget = () => {
+		colorEpoch += 1;
+	};
+	// A media query the consumer styles ::selection with answers differently
+	// without anything in the DOM changing.
+	const scheme =
+		typeof matchMedia === "function"
+			? matchMedia("(prefers-color-scheme: dark)")
+			: undefined;
+	scheme?.addEventListener("change", forget);
 
 	// Installed once and kept: removing a stylesheet restyles the whole document,
 	// and the rule matches nothing while no layer carries the attribute.
@@ -205,10 +218,13 @@ export const createSelectionBackground = () => {
 			layer.setAttribute("data-lector-selection-active", "");
 		}
 	};
-	/** Drop the cached ::selection colors. Called on every pointer reset, which
-	 * is the last point a consumer could have restyled the selection. */
-	const forget = () => {
-		colorEpoch += 1;
+	/** Give up the document-level handles: the suppression stylesheet, the head
+	 * observer and the color-scheme listener. For the last layer going away. */
+	const destroy = () => {
+		sheets?.disconnect();
+		scheme?.removeEventListener("change", forget);
+		style?.remove();
+		style = undefined;
 	};
-	return { update, clear, forget };
+	return { update, clear, forget, destroy };
 };

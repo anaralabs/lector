@@ -172,6 +172,43 @@ describe("selection background colour cache", () => {
 		expect(fill()).toBe("rgb(12, 34, 56)");
 	});
 
+	test("taking a style sheet out of its media re-reads the colour", () => {
+		const layer = buildLayer();
+		const selection = selectAll(layer);
+		const background = createSelectionBackground();
+		cleanup.push(() => background.clear(layer));
+		const fill = () =>
+			layer
+				.querySelector("svg[data-lector-selection] path")!
+				.getAttribute("fill");
+
+		const night = addStyle(
+			".textLayer ::selection { background-color: rgb(9, 9, 9); }",
+		);
+		background.update(selection, [layer]);
+		expect(fill()).toBe("rgb(9, 9, 9)");
+
+		night.setAttribute("media", "print");
+		expect(
+			countSelectionReads(() => background.update(selection, [layer])),
+		).toBe(1);
+		expect(fill()).toBe("rgb(0, 100, 255)");
+	});
+
+	test("destroy() releases the stylesheet and stops watching", () => {
+		const layer = buildLayer();
+		const selection = selectAll(layer);
+		const background = createSelectionBackground();
+		const before = selectionStyle().length;
+
+		background.update(selection, [layer]);
+		expect(selectionStyle()).toHaveLength(before + 1);
+
+		background.clear(layer);
+		background.destroy();
+		expect(selectionStyle()).toHaveLength(before);
+	});
+
 	test("clearing the last overlay keeps the stylesheet installed", () => {
 		const layer = buildLayer();
 		const selection = selectAll(layer);

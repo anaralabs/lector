@@ -345,6 +345,7 @@ function createSelectionManager(
 				if (drag && layer.contains(drag.anchor.node)) reset();
 				if (!layers.size) {
 					reset();
+					background.destroy();
 					controller.abort();
 					managers.delete(viewport);
 					if (container) viewportManagers.delete(container);
