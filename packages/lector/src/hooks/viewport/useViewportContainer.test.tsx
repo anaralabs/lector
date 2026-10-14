@@ -142,8 +142,9 @@ describe("stable zoom", () => {
 		rerender();
 		expect(reads).not.toHaveBeenCalled();
 		reads.mockRestore();
-		expect(container.scrollTop).toBe(600);
-		expect(container.scrollLeft).toBe(200);
+		// Firefox snaps scroll offsets to 1/60 px.
+		expect(container.scrollTop).toBeCloseTo(600, 0);
+		expect(container.scrollLeft).toBeCloseTo(200, 0);
 	});
 
 	it("skips scroll writes that would not move the viewport", () => {
