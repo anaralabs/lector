@@ -81,7 +81,7 @@
       "brace-expansion@1": "1.1.21",
       "brace-expansion@2": "2.1.7",
       "fast-xml-parser": "^4.5.4",
-      "handlebars": "^4.7.9",
+      "handlebars": "4.7.10",
       "@babel/helpers": "^7.26.10",
       "@babel/runtime": "^7.26.10",
       "@octokit/endpoint": "^10.1.3",
