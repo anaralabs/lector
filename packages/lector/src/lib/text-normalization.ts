@@ -54,7 +54,13 @@ function replace(source: NormalizedText, replacements: Iterable<Replacement>) {
 
 function* replacements(text: string, pattern: RegExp, value: string) {
 	for (const match of text.matchAll(pattern)) {
-		yield { index: match.index, length: match[0].length, text: value };
+		// A leading capture group is context the match keeps, not text it replaces.
+		const kept = match[1]?.length ?? 0;
+		yield {
+			index: match.index + kept,
+			length: match[0].length - kept,
+			text: value,
+		};
 	}
 }
 
@@ -75,10 +81,12 @@ function* insertLineBreaks(text: string, lineBreaks: readonly number[]) {
 
 const ligatures = ["ff", "fi", "fl", "ffi", "ffl", "st", "st"];
 const softHyphen = /\u00ad(?:[^\S\r\n]*\r?\n[^\S\r\n]*(?=\p{L}))?/gu;
+// No lookbehind anywhere: Safari < 16.4 throws on it when the module loads.
+// These capture the preceding character instead and keep it via $1.
 const wrappedHyphen =
-	/(?<=[\p{L}\p{M}])[-\u2010][^\S\r\n]*\r?\n[^\S\r\n]*(?=\p{Ll})/gu;
+	/([\p{L}\p{M}])[-\u2010][^\S\r\n]*\r?\n[^\S\r\n]*(?=\p{Ll})/gu;
 const cjkLineBreak =
-	/(?<=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])\r?\n(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])/gu;
+	/([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])\r?\n(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}])/gu;
 
 export interface SelectionTextOptions {
 	/** Preserve line and page breaks by default; space joins single line breaks. */
@@ -93,9 +101,11 @@ export function normalizeSelectionText(
 	options: SelectionTextOptions = {},
 ) {
 	let result = normalizeUnicode(text).replace(softHyphen, "");
-	if (options.ignoreHyphenation) result = result.replace(wrappedHyphen, "");
+	if (options.ignoreHyphenation) result = result.replace(wrappedHyphen, "$1");
 	if (options.lineBreaks === "space") {
-		result = result.replace(cjkLineBreak, "").replace(/(?<!\n)\n(?!\n)/g, " ");
+		result = result
+			.replace(cjkLineBreak, "$1")
+			.replace(/(^|[^\n])\n(?!\n)/g, "$1 ");
 	}
 	return result;
 }
