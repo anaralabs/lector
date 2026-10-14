@@ -37,6 +37,7 @@ export const useTextLayer = () => {
 	const pageNumber = usePDFPageNumber();
 	const pdfPageProxy = usePdf((state) => state.getPdfPageProxy(pageNumber));
 	const viewportRef = usePdf((state) => state.viewportRef);
+	const stableZoom = usePdf((state) => state.stableZoom);
 	const store = PDFStore.useContext();
 	const selection = store.getState().selection;
 
@@ -140,7 +141,8 @@ export const useTextLayer = () => {
 		};
 
 		const schedule = () => {
-			if (built) return;
+			// Stable zoom lets an in-flight build finish rather than restarting it on scroll.
+			if (built || (building && stableZoom)) return;
 			if (selection?.isDragging || selection?.includesPage(pageNumber)) {
 				if (buildTimer) clearTimeout(buildTimer);
 				buildTimer = null;
@@ -215,13 +217,14 @@ export const useTextLayer = () => {
 		viewportRef,
 		selection,
 		pageNumber,
+		stableZoom,
 	]);
 
 	// Hide the (transparent) text layer while scrolling so its spans aren't
 	// repainted as the page moves, and restore it once scrolling settles.
 	useEffect(() => {
 		const textContainer = textContainerRef.current;
-		if (!textContainer) return;
+		if (!textContainer || stableZoom) return;
 
 		let settleTimer: ReturnType<typeof setTimeout> | null = null;
 		// `selecting` is true only while a drag-select is actively extending the
@@ -348,7 +351,7 @@ export const useTextLayer = () => {
 			if (settleTimer) clearTimeout(settleTimer);
 			show();
 		};
-	}, [viewportRef, store, selection, pageNumber]);
+	}, [viewportRef, store, selection, pageNumber, stableZoom]);
 
 	return {
 		textContainerRef,

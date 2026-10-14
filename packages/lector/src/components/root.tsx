@@ -117,10 +117,18 @@ export const Root = forwardRef(
 			initialPage,
 			colorScheme,
 			darkModeColors,
+			stableZoom,
 			...props
 		}: Omit<HTMLProps<HTMLDivElement>, "onError"> &
 			usePDFDocumentParams & {
 				loader?: ReactNode;
+				/**
+				 * Where the browser zooms with CSS `zoom`, zooming out keeps the
+				 * sharper layout and frames already painted and scales them down,
+				 * instead of re-laying out and re-rendering every page. The text layer
+				 * also stays visible while scrolling. Read once on mount.
+				 */
+				stableZoom?: boolean;
 			},
 		ref,
 	) => {
@@ -163,7 +171,7 @@ export const Root = forwardRef(
 		return (
 			<Primitive.div ref={ref} {...props}>
 				{initialState ? (
-					<PDFStore.Provider initialValue={initialState}>
+					<PDFStore.Provider initialValue={{ ...initialState, stableZoom }}>
 						<PageResourcesSync resources={initialState.pageResources} />
 						<ColorSchemeSync
 							colorScheme={colorScheme}

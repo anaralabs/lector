@@ -94,6 +94,7 @@ export const Pages = ({
 	const numPages = usePdf((state) => state.pdfDocumentProxy.numPages);
 	const initialPage = usePdf((state) => state.initialPage);
 	const isPinching = usePdf((state) => state.isPinching);
+	const stableZoom = usePdf((state) => state.stableZoom);
 
 	const elementWrapperRef = useRef<HTMLDivElement>(null);
 	const elementRef = useRef<HTMLDivElement>(null);
@@ -307,6 +308,9 @@ export const Pages = ({
 					// The absolute page list contributes no intrinsic width. Reserve
 					// its width before any zoom effect runs (including zoom === 1).
 					width: largestPageWidth,
+					// A stable-zoom layout can be larger than its scaled-down box.
+					position: stableZoom ? "relative" : undefined,
+					overflow: stableZoom ? "clip" : undefined,
 					marginLeft: "auto",
 					marginRight: "auto",
 					flexShrink: 0,
