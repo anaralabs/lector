@@ -21,7 +21,10 @@ afterEach(cleanup);
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function reader(stableZoom: boolean) {
+async function reader(
+	stableZoom: boolean,
+	options: { initialPage?: number; initialOffset?: number } = {},
+) {
 	let store!: ReturnType<typeof PDFStore.useContext>;
 	function Probe() {
 		store = PDFStore.useContext();
@@ -32,10 +35,11 @@ async function reader(stableZoom: boolean) {
 			source={createTextPdf(3, 20)}
 			zoom={2}
 			stableZoom={stableZoom}
+			initialPage={options.initialPage}
 			style={{ height: 600, width: 800 }}
 		>
 			<Probe />
-			<Pages>
+			<Pages initialOffset={options.initialOffset}>
 				<Page>
 					<CanvasLayer />
 					<TextLayer />
@@ -78,6 +82,15 @@ describe.each([true, false])("stableZoom=%s", (stableZoom) => {
 		}
 	});
 
+	test.each([
+		["initialPage", { initialPage: 3 }],
+		["initialOffset", { initialOffset: 2000 }],
+	] as const)("restores %s on open", async (_, options) => {
+		const r = await reader(stableZoom, options);
+		await sleep(300);
+		expect(r.viewport().scrollTop).toBeGreaterThan(1000);
+	});
+
 	test("scrolling hides the text layer only without stable zoom", async () => {
 		const r = await reader(stableZoom);
 		await waitFor(
@@ -93,4 +106,40 @@ describe.each([true, false])("stableZoom=%s", (stableZoom) => {
 		await sleep(50);
 		expect(r.textLayer().style.visibility).toBe(stableZoom ? "" : "hidden");
 	});
+});
+
+test("pages land in the same place with and without stable zoom", async () => {
+	const place = async (stableZoom: boolean) => {
+		const r = await reader(stableZoom);
+		const rows: Array<{ page: number[]; scrollWidth: number }> = [];
+		for (const zoom of [3, 1, 0.5]) {
+			act(() => r.store.getState().updateZoom(() => zoom));
+			await waitFor(
+				() =>
+					expect(r.textLayer().getBoundingClientRect().width).toBeCloseTo(
+						612 * zoom,
+						0,
+					),
+				{ timeout: 5000 },
+			);
+			const { left, top, width, height } = r
+				.textLayer()
+				.getBoundingClientRect();
+			rows.push({
+				page: [left, top, width, height, r.viewport().scrollHeight],
+				scrollWidth: r.viewport().scrollWidth,
+			});
+		}
+		cleanup();
+		return rows;
+	};
+	const stable = await place(true);
+	const plain = await place(false);
+	stable.forEach((row, i) =>
+		row.page.forEach((value, j) =>
+			expect(value).toBeCloseTo(plain[i]!.page[j]!, 0),
+		),
+	);
+	// Zoomed back out, the 612 px page fits the 800 px viewport: no horizontal scroll.
+	expect(stable.at(-1)!.scrollWidth).toBeLessThanOrEqual(800);
 });

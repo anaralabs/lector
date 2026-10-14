@@ -137,14 +137,15 @@ describe("stable zoom", () => {
 		container.scrollTop = 300;
 		container.scrollLeft = 100;
 		container.dispatchEvent(new Event("scroll"));
+		// Firefox snaps scroll offsets, so anchor on what it reported.
+		const [top, left] = [container.scrollTop, container.scrollLeft];
 		const reads = vi.spyOn(container, "scrollTop", "get");
 		state.zoom = 4;
 		rerender();
 		expect(reads).not.toHaveBeenCalled();
 		reads.mockRestore();
-		// Firefox snaps scroll offsets to 1/60 px.
-		expect(container.scrollTop).toBeCloseTo(600, 0);
-		expect(container.scrollLeft).toBeCloseTo(200, 0);
+		expect(Math.abs(container.scrollTop - top * 2)).toBeLessThan(1);
+		expect(Math.abs(container.scrollLeft - left * 2)).toBeLessThan(1);
 	});
 
 	it("skips scroll writes that would not move the viewport", () => {

@@ -147,6 +147,12 @@ export const useViewportContainer = ({
 			elementWrapperRef.current.style.width = `${naturalWidth * zoom}px`;
 			elementWrapperRef.current.style.height = `${naturalHeight * zoom}px`;
 			if (stableZoom) {
+				// A stable layout can be larger than its scaled-down box. Clip only once
+				// the wrapper has its height, or the initial scroll restore clamps to 0.
+				elementWrapperRef.current.style.position = "relative";
+				elementWrapperRef.current.style.overflow = "clip";
+			}
+			if (stableZoom) {
 				const container = containerRef.current;
 				if (scrollPositionRef.current.top !== translateY)
 					container.scrollTop = translateY;
