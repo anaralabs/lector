@@ -47,16 +47,66 @@ const layerRotation = (layer: HTMLElement) => {
  * composite their translucent backgrounds on top of each other. */
 export const createSelectionBackground = () => {
 	const overlays = new Map<HTMLElement, SVGSVGElement>();
+	const colors = new WeakMap<
+		HTMLElement,
+		{ key: string; epoch: number; color: string }
+	>();
+	let colorEpoch = 0;
 	let style: HTMLStyleElement | undefined;
+
+	// A style sheet added, removed or edited can change ::selection; records are
+	// drained synchronously on read, so a consumer that restyles and then selects
+	// in the same task still gets the new colour.
+	const sheets =
+		typeof MutationObserver === "undefined"
+			? undefined
+			: new MutationObserver(() => {});
+	sheets?.observe(document.head, {
+		childList: true,
+		subtree: true,
+		characterData: true,
+	});
+
+	// Installed once and kept: removing a stylesheet restyles the whole document,
+	// and the rule matches nothing while no layer carries the attribute.
+	const ensureStyle = () => {
+		if (style) return;
+		style = document.createElement("style");
+		style.textContent =
+			".textLayer[data-lector-selection-active] ::selection { background-color: transparent !important; }";
+		document.head.append(style);
+		sheets?.takeRecords();
+	};
+
+	/** Read the consumer's selection color before suppressing native paint.
+	 * Transparent ::selection is respected for existing CustomSelection users.
+	 *
+	 * Reading it means dropping the attribute that suppresses it, and that
+	 * attribute gates a descendant `::selection` rule, so the toggle invalidates
+	 * every span in the layer while the getComputedStyle below forces the recalc.
+	 * On a dense text layer that is tens of milliseconds per selectionchange, so
+	 * the answer is cached until something can change it: a style sheet, the
+	 * theming hooks on the document element, or a pointer interaction (`forget`). */
+	const selectionColor = (layer: HTMLElement, element: Element) => {
+		if (sheets?.takeRecords().length) colorEpoch += 1;
+		const root = document.documentElement;
+		const key = `${root.className}|${root.dataset.theme ?? ""}|${
+			root.dataset.colorScheme ?? ""
+		}`;
+		const cached = colors.get(layer);
+		if (cached?.key === key && cached.epoch === colorEpoch) return cached.color;
+		const active = layer.hasAttribute("data-lector-selection-active");
+		if (active) layer.removeAttribute("data-lector-selection-active");
+		const color = getComputedStyle(element, "::selection").backgroundColor;
+		if (active) layer.setAttribute("data-lector-selection-active", "");
+		colors.set(layer, { key, epoch: colorEpoch, color });
+		return color;
+	};
 
 	const clear = (layer: HTMLElement) => {
 		overlays.get(layer)?.remove();
 		overlays.delete(layer);
 		layer.removeAttribute("data-lector-selection-active");
-		if (overlays.size === 0) {
-			style?.remove();
-			style = undefined;
-		}
 	};
 
 	const update = (
@@ -98,13 +148,7 @@ export const createSelectionBackground = () => {
 				clear(layer);
 				continue;
 			}
-			// Read the consumer's selection color before suppressing native paint.
-			// Transparent ::selection is respected for existing CustomSelection users.
-			layer.removeAttribute("data-lector-selection-active");
-			const color = getComputedStyle(
-				entry.element,
-				"::selection",
-			).backgroundColor;
+			const color = selectionColor(layer, entry.element);
 			if (!color || color === "transparent" || color === "rgba(0, 0, 0, 0)") {
 				clear(layer);
 				continue;
@@ -157,14 +201,14 @@ export const createSelectionBackground = () => {
 					.join(" "),
 			);
 			path.setAttribute("fill", color);
-			if (!style) {
-				style = document.createElement("style");
-				style.textContent =
-					".textLayer[data-lector-selection-active] ::selection { background-color: transparent !important; }";
-				document.head.append(style);
-			}
+			ensureStyle();
 			layer.setAttribute("data-lector-selection-active", "");
 		}
 	};
-	return { update, clear };
+	/** Drop the cached ::selection colors. Called on every pointer reset, which
+	 * is the last point a consumer could have restyled the selection. */
+	const forget = () => {
+		colorEpoch += 1;
+	};
+	return { update, clear, forget };
 };

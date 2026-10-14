@@ -115,6 +115,7 @@ function createSelectionManager(
 	const reset = () => {
 		drag = null;
 		boxes = null;
+		background.forget();
 		win.cancelAnimationFrame(frame);
 		frame = 0;
 		for (const layer of layers) layer.classList.remove("selecting");
