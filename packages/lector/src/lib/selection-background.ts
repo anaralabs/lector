@@ -2,6 +2,37 @@ import { getTextNodeClientRects, mergeTextRuns } from "./selection-rects";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+type Box = { left: number; top: number; width: number; height: number };
+
+/** Maps a client rect into the text layer's own unrotated coordinates. Client
+ * rects already include the page rotation, so it has to be undone here. */
+export const toLayerRect = (
+	rect: Box,
+	bounds: Box,
+	layerWidth: number,
+	layerHeight: number,
+	rotation: number,
+): Box => {
+	const x = (rect.left - bounds.left) / bounds.width;
+	const y = (rect.top - bounds.top) / bounds.height;
+	const w = rect.width / bounds.width;
+	const h = rect.height / bounds.height;
+	const [left, top, width, height] =
+		rotation === 90
+			? [y, 1 - x - w, h, w]
+			: rotation === 180
+				? [1 - x - w, 1 - y - h, w, h]
+				: rotation === 270
+					? [1 - y - h, x, h, w]
+					: [x, y, w, h];
+	return {
+		left: left * layerWidth,
+		top: top * layerHeight,
+		width: width * layerWidth,
+		height: height * layerHeight,
+	};
+};
+
 /** Paint native selection once per page; overlapping PDF spans must not
  * composite their translucent backgrounds on top of each other. */
 export const createSelectionBackground = () => {
@@ -78,15 +109,16 @@ export const createSelectionBackground = () => {
 				clear(layer);
 				continue;
 			}
-			const scaleX = bounds.width / layer.clientWidth;
-			const scaleY = bounds.height / layer.clientHeight;
-			const rects = mergeTextRuns(
-				entry.rects.map((rect) => ({
-					left: (rect.left - bounds.left) / scaleX,
-					top: (rect.top - bounds.top) / scaleY,
-					width: rect.width / scaleX,
-					height: rect.height / scaleY,
-				})),
+			const rotation = Number(layer.getAttribute("data-main-rotation") || 0);
+			// Merge in screen space, where a line still runs horizontally at every rotation.
+			const rects = mergeTextRuns(entry.rects).map((rect) =>
+				toLayerRect(
+					rect,
+					bounds,
+					layer.clientWidth,
+					layer.clientHeight,
+					rotation,
+				),
 			);
 
 			let overlay = overlays.get(layer);
