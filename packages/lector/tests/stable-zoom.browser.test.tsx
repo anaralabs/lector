@@ -135,11 +135,9 @@ test("pages land in the same place with and without stable zoom", async () => {
 	};
 	const stable = await place(true);
 	const plain = await place(false);
-	stable.forEach((row, i) =>
-		row.page.forEach((value, j) =>
-			expect(value).toBeCloseTo(plain[i]!.page[j]!, 0),
-		),
-	);
+	for (const [i, row] of stable.entries())
+		for (const [j, value] of row.page.entries())
+			expect(value).toBeCloseTo(plain[i]!.page[j]!, 0);
 	// Zoomed back out, the 612 px page fits the 800 px viewport: no horizontal scroll.
 	expect(stable.at(-1)!.scrollWidth).toBeLessThanOrEqual(800);
 });
