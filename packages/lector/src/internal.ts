@@ -75,6 +75,8 @@ interface PDFState {
 	setTextContent: (textContents: TextContent[]) => void;
 
 	zoomOptions: Required<ZoomOptions>;
+	/** Set once from Root; see its `stableZoom` prop. */
+	stableZoom: boolean;
 
 	virtualizer: PDFVirtualizer | null;
 	setVirtualizer: (virtualizer: PDFVirtualizer) => void;
@@ -124,6 +126,7 @@ export interface InitialPDFState {
 	zoom: number;
 	isZoomFitWidth?: boolean;
 	zoomOptions?: ZoomOptions;
+	stableZoom?: boolean;
 	colorScheme?: ColorScheme;
 	darkModeColors?: DarkModeColors;
 	renderColorMapRef?: RenderColorMapRef;
@@ -295,6 +298,7 @@ export const PDFStore = createZustandContext(
 					),
 				})),
 
+			stableZoom: initialState.stableZoom ?? false,
 			colorScheme: initialColorScheme,
 			darkModeColors: initialDarkModeColors,
 			renderColorMapRef,

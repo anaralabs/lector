@@ -7,6 +7,7 @@ const { state, store } = vi.hoisted(() => {
 	const state = {
 		zoom: 5,
 		isPinching: false,
+		stableZoom: false,
 		zoomOptions: { minZoom: 0.2, maxZoom: 5 },
 		viewportRef: { current: null as HTMLDivElement | null },
 		setIsPinching: vi.fn(),
@@ -87,6 +88,73 @@ describe("WebKit viewport scaling", () => {
 		state.isPinching = false;
 		rerender();
 		expect([container.scrollTop, container.scrollLeft]).toEqual(before);
+	});
+});
+
+describe("stable zoom", () => {
+	beforeEach(() => {
+		state.zoom = 2;
+		state.isPinching = false;
+		state.stableZoom = true;
+		state.viewportRef.current = null;
+		vi.clearAllMocks();
+	});
+	afterEach(() => {
+		state.stableZoom = false;
+		cleanup();
+		document.body.replaceChildren();
+		vi.restoreAllMocks();
+	});
+
+	it("only raises CSS zoom and scales the layout down when zooming out", () => {
+		const { element, wrapper, refs } = fixture();
+		const { rerender } = renderHook(() => useViewportContainer(refs));
+		expect(element.style.zoom).toBe("2");
+		expect(element.style.transform).toBe("none");
+
+		state.zoom = 4;
+		rerender();
+		expect(element.style.zoom).toBe("4");
+		expect(element.style.transform).toBe("none");
+		expect(element.style.willChange).toBe("auto");
+
+		state.zoom = 1;
+		rerender();
+		expect(element.style.zoom).toBe("4");
+		expect(element.style.transform).toBe("scale3d(0.25, 0.25, 1)");
+		expect(element.style.willChange).toBe("transform");
+		expect(wrapper.style.width).toBe("600px");
+
+		state.zoom = 4;
+		rerender();
+		expect(element.style.zoom).toBe("4");
+		expect(element.style.transform).toBe("none");
+	});
+
+	it("anchors zoom on the tracked scroll position without reading scrollTop", () => {
+		const { container, refs } = fixture();
+		const { rerender } = renderHook(() => useViewportContainer(refs));
+		container.scrollTop = 300;
+		container.scrollLeft = 100;
+		container.dispatchEvent(new Event("scroll"));
+		// Firefox snaps scroll offsets, so anchor on what it reported.
+		const [top, left] = [container.scrollTop, container.scrollLeft];
+		const reads = vi.spyOn(container, "scrollTop", "get");
+		state.zoom = 4;
+		rerender();
+		expect(reads).not.toHaveBeenCalled();
+		reads.mockRestore();
+		expect(Math.abs(container.scrollTop - top * 2)).toBeLessThan(1);
+		expect(Math.abs(container.scrollLeft - left * 2)).toBeLessThan(1);
+	});
+
+	it("skips scroll writes that would not move the viewport", () => {
+		const { container, refs } = fixture();
+		const { rerender } = renderHook(() => useViewportContainer(refs));
+		const writes = vi.spyOn(container, "scrollTop", "set");
+		state.zoom = 3;
+		rerender();
+		expect(writes).not.toHaveBeenCalled();
 	});
 });
 

@@ -185,6 +185,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 	const unmarkPageRendered = usePdf((state) => state.unmarkPageRendered);
 	const colorScheme = usePdf((state) => state.colorScheme);
 	const darkModeColors = usePdf((state) => state.darkModeColors);
+	const stableZoom = usePdf((state) => state.stableZoom);
 
 	// Memoized per palette — stable identity, safe as an effect dependency.
 	const recolor =
@@ -244,6 +245,14 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		// (style writes don't clear the canvas): budget-clamped zooms share a
 		// scale, and a stale inverse factor would leave the net transform at
 		// zoomNew/zoomOld instead of identity.
+		// Stable zoom keeps a sharper frame when zooming out. Its inverse-scale
+		// geometry is page-exact at any zoom, so it needs no update either.
+		if (
+			stableZoom &&
+			hasCurrentFrame &&
+			paintedRef.current!.scale >= baseScale - 1e-3
+		)
+			return;
 		if (hasCurrentFrame && paintedRef.current?.scale === baseScale) {
 			applyGeometry();
 			return;
@@ -548,6 +557,7 @@ export const useCanvasLayer = ({ background }: { background?: string }) => {
 		recolor,
 		recolorKey,
 		store,
+		stableZoom,
 	]);
 
 	useEffect(() => {

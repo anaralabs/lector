@@ -43,6 +43,7 @@ export const useViewportContainer = ({
 	});
 
 	const { maxZoom, minZoom } = usePdf((state) => state.zoomOptions);
+	const stableZoom = usePdf((state) => state.stableZoom);
 	const zoom = usePdf((state) => state.zoom);
 	const viewportRef = usePdf((state) => state.viewportRef);
 
@@ -62,6 +63,30 @@ export const useViewportContainer = ({
 		translateY: 0,
 		zoom: 1,
 	});
+
+	// Stable zoom tracks scroll from events instead of reading scrollTop, which
+	// forces a synchronous layout right after the zoom style writes.
+	const scrollPositionRef = useRef({ left: 0, top: 0 });
+	useEffect(() => {
+		const container = containerRef.current;
+		if (!container || !stableZoom) return;
+		const remember = () => {
+			scrollPositionRef.current = {
+				left: container.scrollLeft,
+				top: container.scrollTop,
+			};
+		};
+		remember();
+		container.addEventListener("scroll", remember, { passive: true });
+		return () => container.removeEventListener("scroll", remember);
+	}, [containerRef, stableZoom]);
+	const readScrollPosition = useCallback(
+		(container: HTMLDivElement) =>
+			stableZoom
+				? scrollPositionRef.current
+				: { left: container.scrollLeft, top: container.scrollTop },
+		[stableZoom],
+	);
 
 	const zoomRafRef = useRef<number | null>(null);
 	const lastPushedZoomRef = useRef<number | null>(null);
@@ -95,6 +120,20 @@ export const useViewportContainer = ({
 					element.style.transform = `scale3d(${gestureScale}, ${gestureScale}, 1)`;
 					element.style.willChange = "transform";
 					gestureTransformAppliedRef.current = true;
+				} else if (stableZoom) {
+					// Only ever raise CSS zoom: lowering it re-lays out every page, so
+					// zooming out scales the existing layout down with a transform.
+					const previousLayoutZoom = parseFloat(element.style.zoom) || zoom;
+					const layoutZoom = Math.max(previousLayoutZoom, zoom);
+					const layoutZoomChanged =
+						!element.style.zoom ||
+						Math.abs(previousLayoutZoom - layoutZoom) > 1e-6;
+					if (layoutZoomChanged) element.style.zoom = String(layoutZoom);
+					const scale = zoom / layoutZoom;
+					element.style.transform =
+						scale === 1 ? "none" : `scale3d(${scale}, ${scale}, 1)`;
+					element.style.willChange = layoutZoomChanged ? "auto" : "transform";
+					gestureTransformAppliedRef.current = false;
 				} else {
 					// WebKit downsamples canvases under transformed ancestors: https://bugs.webkit.org/show_bug.cgi?id=264954
 					element.style.zoom = String(zoom);
@@ -107,8 +146,23 @@ export const useViewportContainer = ({
 			}
 			elementWrapperRef.current.style.width = `${naturalWidth * zoom}px`;
 			elementWrapperRef.current.style.height = `${naturalHeight * zoom}px`;
-			containerRef.current.scrollTop = translateY;
-			containerRef.current.scrollLeft = translateX;
+			if (stableZoom) {
+				// A stable layout can be larger than its scaled-down box. Clip only once
+				// the wrapper has its height, or the initial scroll restore clamps to 0.
+				elementWrapperRef.current.style.position = "relative";
+				elementWrapperRef.current.style.overflow = "clip";
+			}
+			if (stableZoom) {
+				const container = containerRef.current;
+				if (scrollPositionRef.current.top !== translateY)
+					container.scrollTop = translateY;
+				if (scrollPositionRef.current.left !== translateX)
+					container.scrollLeft = translateX;
+				scrollPositionRef.current = { left: translateX, top: translateY };
+			} else {
+				containerRef.current.scrollTop = translateY;
+				containerRef.current.scrollLeft = translateX;
+			}
 			appliedZoomRef.current = zoom;
 
 			if (zoomUpdate) {
@@ -116,7 +170,14 @@ export const useViewportContainer = ({
 				updateZoom(() => zoom);
 			}
 		},
-		[containerRef, elementRef, elementWrapperRef, updateZoom, store],
+		[
+			containerRef,
+			elementRef,
+			elementWrapperRef,
+			updateZoom,
+			store,
+			stableZoom,
+		],
 	);
 
 	useLayoutEffect(() => {
@@ -143,15 +204,16 @@ export const useViewportContainer = ({
 				previousZoom > 0 && Number.isFinite(previousZoom)
 					? nextZoom / previousZoom
 					: 1;
+			const scroll = readScrollPosition(viewport);
 			transformations.current = {
 				zoom: nextZoom,
-				translateX: viewport.scrollLeft * ratio,
-				translateY: viewport.scrollTop * ratio,
+				translateX: scroll.left * ratio,
+				translateY: scroll.top * ratio,
 			};
 			initializedZoomRef.current = true;
 			updateTransform();
 		});
-	}, [containerRef, store, updateTransform]);
+	}, [containerRef, store, updateTransform, readScrollPosition]);
 
 	useEffect(() => {
 		if (USE_LAYOUT_ZOOM && gestureTransformAppliedRef.current && !isPinching)
@@ -172,10 +234,11 @@ export const useViewportContainer = ({
 			// The virtualizer restores its offset during layout, already scaled
 			// by the initial store zoom. Apply geometry without scaling that
 			// physical scroll position a second time.
+			const scroll = readScrollPosition(containerRef.current);
 			transformations.current = {
 				zoom,
-				translateX: containerRef.current.scrollLeft,
-				translateY: containerRef.current.scrollTop,
+				translateX: scroll.left,
+				translateY: scroll.top,
 			};
 			updateTransform();
 			return;
@@ -196,11 +259,12 @@ export const useViewportContainer = ({
 		lastPushedZoomRef.current = null;
 
 		// A newer gesture value may still be queued for the next frame.
+		const scroll = readScrollPosition(containerRef.current);
 		const prevZoom = appliedZoomRef.current;
 		if (!prevZoom || !Number.isFinite(prevZoom)) {
 			transformations.current = {
-				translateX: containerRef.current.scrollLeft,
-				translateY: containerRef.current.scrollTop,
+				translateX: scroll.left,
+				translateY: scroll.top,
 				zoom,
 			};
 			updateTransform();
@@ -210,13 +274,13 @@ export const useViewportContainer = ({
 		const dZoom = zoom / prevZoom;
 
 		transformations.current = {
-			translateX: containerRef.current.scrollLeft * dZoom,
-			translateY: containerRef.current.scrollTop * dZoom,
+			translateX: scroll.left * dZoom,
+			translateY: scroll.top * dZoom,
 			zoom,
 		};
 
 		updateTransform();
-	}, [containerRef, zoom, updateTransform]);
+	}, [containerRef, zoom, updateTransform, readScrollPosition]);
 
 	useEffect(() => {
 		const preventDefault = (e: TouchEvent) => e.preventDefault();
