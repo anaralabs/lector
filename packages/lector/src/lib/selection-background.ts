@@ -33,6 +33,16 @@ export const toLayerRect = (
 	};
 };
 
+// pdf_viewer.css rotates layers by data-main-rotation; without it the layer stays upright.
+const layerRotation = (layer: HTMLElement) => {
+	const { transform } = getComputedStyle(layer);
+	if (!transform || transform === "none") return 0;
+	const { a, b } = new DOMMatrix(transform);
+	return (
+		(((Math.round(Math.atan2(b, a) / (Math.PI / 2)) * 90) % 360) + 360) % 360
+	);
+};
+
 /** Paint native selection once per page; overlapping PDF spans must not
  * composite their translucent backgrounds on top of each other. */
 export const createSelectionBackground = () => {
@@ -109,15 +119,17 @@ export const createSelectionBackground = () => {
 				clear(layer);
 				continue;
 			}
-			const rotation = Number(layer.getAttribute("data-main-rotation") || 0);
-			// Merge in screen space, where a line still runs horizontally at every rotation.
-			const rects = mergeTextRuns(entry.rects).map((rect) =>
-				toLayerRect(
-					rect,
-					bounds,
-					layer.clientWidth,
-					layer.clientHeight,
-					rotation,
+			const rotation = layerRotation(layer);
+			// Merge after mapping: lines only run horizontally in the layer's own space.
+			const rects = mergeTextRuns(
+				entry.rects.map((rect) =>
+					toLayerRect(
+						rect,
+						bounds,
+						layer.clientWidth,
+						layer.clientHeight,
+						rotation,
+					),
 				),
 			);
 
