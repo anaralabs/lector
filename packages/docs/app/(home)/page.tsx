@@ -12,6 +12,8 @@ import { codeToHtml } from "shiki";
 import { CopyButton } from "./_components/landing-controls";
 import { ViewerDemo } from "./_components/viewer-demo";
 
+export const metadata = { alternates: { canonical: "/lector" } };
+
 const snippet = `import {
   Root, Pages, Page,
   CanvasLayer, TextLayer,
