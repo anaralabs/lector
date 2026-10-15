@@ -7,6 +7,7 @@ import {
 } from "fumadocs-ui/page";
 import { notFound } from "next/navigation";
 import { markdownPath } from "@/lib/agent-docs/catalog";
+import { createMetadata } from "@/lib/metadata";
 import { source } from "@/lib/source";
 
 export default async function Page(props: {
@@ -40,13 +41,16 @@ export async function generateMetadata(props: {
 	const page = source.getPage(params.slug);
 	if (!page) notFound();
 
-	return {
+	const url = `/lector${page.url}`;
+	return createMetadata({
 		title: page.data.title,
 		description: page.data.description,
+		openGraph: { url },
 		alternates: {
+			canonical: url,
 			types: {
 				"text/markdown": `/lector${markdownPath(page.slugs.join("/") || "index")}`,
 			},
 		},
-	};
+	});
 }

@@ -8,7 +8,7 @@ export function createMetadata(override: Metadata): Metadata {
 			description: override.description ?? undefined,
 			url: "https://anara.com/lector",
 			images: "https://anara.com/lector/banner.png",
-			siteName: "Fumadocs",
+			siteName: "Lector",
 			...override.openGraph,
 		},
 		twitter: {

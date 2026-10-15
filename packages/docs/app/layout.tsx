@@ -32,7 +32,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 export const metadata = createMetadata({
 	title: {
 		template: "%s | Lector",
-		default: "Lector",
+		default: "Lector: headless React PDF viewer",
 	},
 	description: "Headless React PDF viewer for the web",
 	metadataBase: baseUrl,
