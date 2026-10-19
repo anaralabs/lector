@@ -172,6 +172,52 @@ describe("selection background colour cache", () => {
 		expect(fill()).toBe("rgb(12, 34, 56)");
 	});
 
+	test("a style sheet edit observed before the next update re-reads the colour", async () => {
+		const layer = buildLayer();
+		const selection = selectAll(layer);
+		const background = createSelectionBackground();
+		cleanup.push(() => background.clear(layer));
+		const fill = () =>
+			layer
+				.querySelector("svg[data-lector-selection] path")!
+				.getAttribute("fill");
+
+		background.update(selection, [layer]);
+		addStyle(".textLayer ::selection { background-color: rgb(1, 2, 3); }");
+		await Promise.resolve();
+		expect(
+			countSelectionReads(() => background.update(selection, [layer])),
+		).toBe(1);
+		expect(fill()).toBe("rgb(1, 2, 3)");
+	});
+
+	test("a selection starting in a differently styled span re-reads the colour", () => {
+		const layer = buildLayer();
+		const spans = layer.querySelectorAll("span");
+		spans[2]!.className = "accent";
+		addStyle(
+			".textLayer .accent::selection { background-color: rgb(7, 8, 9); }",
+		);
+		const background = createSelectionBackground();
+		cleanup.push(() => background.clear(layer));
+		const fill = () =>
+			layer
+				.querySelector("svg[data-lector-selection] path")!
+				.getAttribute("fill");
+
+		background.update(selectAll(layer), [layer]);
+		expect(fill()).toBe("rgb(0, 100, 255)");
+
+		const range = document.createRange();
+		range.setStart(spans[2]!.firstChild!, 0);
+		range.setEnd(spans[3]!.firstChild!, 4);
+		const selection = document.getSelection()!;
+		selection.removeAllRanges();
+		selection.addRange(range);
+		background.update(selection, [layer]);
+		expect(fill()).toBe("rgb(7, 8, 9)");
+	});
+
 	test("taking a style sheet out of its media re-reads the colour", () => {
 		const layer = buildLayer();
 		const selection = selectAll(layer);

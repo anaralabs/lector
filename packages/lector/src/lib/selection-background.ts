@@ -52,6 +52,9 @@ export const createSelectionBackground = () => {
 		{ key: string; epoch: number; color: string }
 	>();
 	let colorEpoch = 0;
+	const forget = () => {
+		colorEpoch += 1;
+	};
 	let style: HTMLStyleElement | undefined;
 
 	// A style sheet added, removed, edited, disabled or re-pointed can change
@@ -60,7 +63,7 @@ export const createSelectionBackground = () => {
 	const sheets =
 		typeof MutationObserver === "undefined"
 			? undefined
-			: new MutationObserver(() => {});
+			: new MutationObserver(forget);
 	sheets?.observe(document.head, {
 		childList: true,
 		subtree: true,
@@ -69,9 +72,6 @@ export const createSelectionBackground = () => {
 		attributeFilter: ["media", "disabled", "href", "rel"],
 	});
 
-	const forget = () => {
-		colorEpoch += 1;
-	};
 	// A media query the consumer styles ::selection with answers differently
 	// without anything in the DOM changing.
 	const scheme =
@@ -105,7 +105,7 @@ export const createSelectionBackground = () => {
 		const root = document.documentElement;
 		const key = `${root.className}|${root.dataset.theme ?? ""}|${
 			root.dataset.colorScheme ?? ""
-		}`;
+		}|${element.className}|${element.parentElement?.className ?? ""}`;
 		const cached = colors.get(layer);
 		if (cached?.key === key && cached.epoch === colorEpoch) return cached.color;
 		const active = layer.hasAttribute("data-lector-selection-active");
