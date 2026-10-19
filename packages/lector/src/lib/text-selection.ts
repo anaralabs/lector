@@ -115,6 +115,7 @@ function createSelectionManager(
 	const reset = () => {
 		drag = null;
 		boxes = null;
+		background.forget();
 		win.cancelAnimationFrame(frame);
 		frame = 0;
 		for (const layer of layers) layer.classList.remove("selecting");
@@ -344,6 +345,7 @@ function createSelectionManager(
 				if (drag && layer.contains(drag.anchor.node)) reset();
 				if (!layers.size) {
 					reset();
+					background.destroy();
 					controller.abort();
 					managers.delete(viewport);
 					if (container) viewportManagers.delete(container);
