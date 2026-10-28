@@ -125,7 +125,8 @@
       "source-map-js@1": "1.2.2",
       "postcss-selector-parser@7": "7.1.6",
       "hono@4": "4.13.11",
-      "zod@4": "4.6.6"
+      "zod@4": "4.6.6",
+      "qs@6": "6.16.1"
     },
     "patchedDependencies": {
       "fumadocs-core@14.6.2": "patches/fumadocs-core@14.6.2.patch"
