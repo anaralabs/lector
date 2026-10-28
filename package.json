@@ -89,7 +89,7 @@
       "@octokit/request-error": "^6.1.7",
       "@octokit/request": "^9.2.1",
       "ajv@8": "^8.18.0",
-      "fast-uri@3": "3.1.7",
+      "fast-uri@3": "3.1.9",
       "estree-util-value-to-estree": "^3.3.3",
       "js-yaml@3": "3.15.2",
       "js-yaml@4": "4.3.2",
@@ -105,15 +105,15 @@
       "uuid": "^11.1.1",
       "ws@8": "^8.20.1",
       "yaml@2": "^2.8.3",
-      "vite@5": "^6.4.3",
-      "vite@6": "^6.4.3",
+      "vite@5": "6.4.4",
+      "vite@6": "6.4.4",
       "@babel/core": "^7.29.7",
       "socks": "^2.8.9",
-      "ip-address@10": "10.7.1",
+      "ip-address@10": "10.7.4",
       "sharp": "0.35.5",
       "@emnapi/runtime": "1.11.2",
       "browserslist@4": "^4.28.7",
-      "postcss-selector-parser@6": "^6.1.3",
+      "postcss-selector-parser@6": "6.1.5",
       "esbuild@<0.25.0": "0.25.10",
       "glob@10": "^10.5.0",
       "minimatch@3": "^3.1.4",
@@ -124,7 +124,8 @@
       "proxy-addr@2": "2.0.8",
       "source-map-js@1": "1.2.2",
       "postcss-selector-parser@7": "7.1.6",
-      "hono@4": "4.13.11"
+      "hono@4": "4.13.11",
+      "zod@4": "4.6.6"
     },
     "patchedDependencies": {
       "fumadocs-core@14.6.2": "patches/fumadocs-core@14.6.2.patch"
