@@ -17,6 +17,8 @@ const raf: (cb: (t: number) => void) => void =
 		? (cb) => self.requestAnimationFrame(cb)
 		: (cb) => setTimeout(() => cb(performance.now()), 1000 / 120);
 
+self.postMessage({ t: "boot" });
+
 self.onmessage = (ev: MessageEvent<Msg>) => {
 	const m = ev.data;
 	if (m.t === "init") {

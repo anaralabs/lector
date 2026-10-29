@@ -16,14 +16,14 @@ export interface LectorViewProps extends Omit<ViewerOptions, "onEvent" | keyof C
 }
 
 export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function LectorView(
-	{ source, options, onEvent, onViewer, className, style, wasmUrl, workers, offscreen, onLink },
+	{ source, options, onEvent, onViewer, className, style, wasmUrl, workers, offscreen, onLink, createWorker },
 	ref,
 ) {
 	const container = useRef<HTMLDivElement>(null);
 	const [viewer, setViewer] = useState<Viewer | null>(null);
-	const latest = useRef({ onEvent, onViewer, onLink, options });
+	const latest = useRef({ onEvent, onViewer, onLink, options, createWorker });
 	useLayoutEffect(() => {
-		latest.current = { onEvent, onViewer, onLink, options };
+		latest.current = { onEvent, onViewer, onLink, options, createWorker };
 	});
 
 	useEffect(() => {
@@ -35,6 +35,7 @@ export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function Le
 			wasmUrl,
 			workers,
 			offscreen,
+			createWorker: latest.current.createWorker,
 			...latest.current.options,
 			onEvent: (e) => latest.current.onEvent?.(e),
 			onLink: latest.current.onLink ? (url) => latest.current.onLink?.(url) : undefined,

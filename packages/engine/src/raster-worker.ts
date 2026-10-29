@@ -247,6 +247,10 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 	send({ t: "opened", pages: pageSizes });
 }
 
+// Hosts may load this module through a wrapper (dynamic import from a blob
+// loader), so announce readiness instead of assuming the first message lands.
+self.postMessage({ t: "boot" });
+
 self.onmessage = (ev: MessageEvent<ToRaster>) => {
 	if (ev.data.t !== "init") return;
 	open(ev.data).catch((err) => {

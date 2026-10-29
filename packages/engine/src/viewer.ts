@@ -22,6 +22,12 @@ export interface ViewerOptions extends Partial<CoreOptions> {
 	/** run the compositor in a worker with an OffscreenCanvas (default: when supported) */
 	offscreen?: boolean;
 	onEvent?: (e: CoreEvent) => void;
+	/**
+	 * Creates the engine's module workers. Override to wrap them (e.g. a blob
+	 * loader that dynamic-imports `url`, which survives extensions that re-wrap
+	 * module workers). The engine waits for each worker's `boot` message.
+	 */
+	createWorker?: (url: URL, name: string) => Worker;
 	/** external link clicked; default opens it in a new tab */
 	onLink?: (url: string) => void;
 }
@@ -60,7 +66,19 @@ async function fetchPdf(url: string) {
 const NAV_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", "Home", "End", " ", "Escape"]);
 
 export async function createViewer(container: HTMLElement, source: string | ArrayBuffer | Uint8Array, options: ViewerOptions): Promise<Viewer> {
-	const { wasmUrl, workers: workerCount, offscreen: wantOffscreen, onEvent, onLink, ...coreOptions } = options;
+	const { wasmUrl, workers: workerCount, offscreen: wantOffscreen, onEvent, onLink, createWorker, ...coreOptions } = options;
+	const spawn = (url: URL, name: string) => {
+		const worker = createWorker ? createWorker(url, name) : new Worker(url, { type: "module", name });
+		const booted = new Promise<void>((resolve) => {
+			const onBoot = (ev: MessageEvent) => {
+				if ((ev.data as { t?: string } | null)?.t !== "boot") return;
+				worker.removeEventListener("message", onBoot);
+				resolve();
+			};
+			worker.addEventListener("message", onBoot);
+		});
+		return { worker, booted };
+	};
 	const bytes = typeof source === "string" ? await fetchPdf(source) : source instanceof Uint8Array ? source : new Uint8Array(source);
 
 	const canvas = document.createElement("canvas");
@@ -78,10 +96,10 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	const rasterWorkers: Worker[] = [];
 	const corePorts: MessagePort[] = [];
 	for (let i = 0; i < n; i++) {
-		const worker = new Worker(new URL("./raster-worker.ts", import.meta.url), { type: "module", name: `lector-raster-${i}` });
+		const { worker, booted } = spawn(new URL("./raster-worker.ts", import.meta.url), `lector-raster-${i}`);
 		const channel = new MessageChannel();
 		const copy = bytes.slice().buffer;
-		worker.postMessage({ t: "init", bytes: copy, port: channel.port1, wasmUrl }, [copy, channel.port1]);
+		booted.then(() => worker.postMessage({ t: "init", bytes: copy, port: channel.port1, wasmUrl }, [copy, channel.port1]));
 		rasterWorkers.push(worker);
 		corePorts.push(channel.port2);
 	}
@@ -105,12 +123,23 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 
 	const useOffscreen = (wantOffscreen ?? true) && typeof canvas.transferControlToOffscreen === "function";
 	let coreWorker: Worker | null = null;
+	let postToCore: (msg: unknown) => void = () => {};
 	let core: ViewerCore | null = null;
 	if (useOffscreen) {
 		const offscreen = canvas.transferControlToOffscreen();
-		coreWorker = new Worker(new URL("./core-worker.ts", import.meta.url), { type: "module", name: "lector-compositor" });
-		coreWorker.onmessage = (ev: MessageEvent<CoreEvent>) => handleEvent(ev.data);
-		coreWorker.postMessage({ t: "init", canvas: offscreen, ports: corePorts, options: coreOptions }, [offscreen, ...corePorts]);
+		const spawned = spawn(new URL("./core-worker.ts", import.meta.url), "lector-compositor");
+		coreWorker = spawned.worker;
+		coreWorker.onmessage = (ev: MessageEvent<CoreEvent | { t: "boot" }>) => {
+			if ("type" in ev.data) handleEvent(ev.data);
+		};
+		// Input posted before boot queues inside the worker until init arrives.
+		const pendingInput: unknown[] = [];
+		postToCore = (msg) => pendingInput.push(msg);
+		spawned.booted.then(() => {
+			coreWorker!.postMessage({ t: "init", canvas: offscreen, ports: corePorts, options: coreOptions }, [offscreen, ...corePorts]);
+			for (const msg of pendingInput) coreWorker!.postMessage(msg);
+			postToCore = (msg) => coreWorker!.postMessage(msg);
+		});
 	} else {
 		core = new ViewerCore(canvas, corePorts, handleEvent, (cb) => requestAnimationFrame(cb), coreOptions);
 		(globalThis as { __core?: ViewerCore }).__core = core;
@@ -118,11 +147,11 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 
 	const send = (msg: InputMsg) => {
 		if (core) core.handle(msg);
-		else coreWorker!.postMessage({ t: "input", msg });
+		else postToCore({ t: "input", msg });
 	};
 	const command = (cmd: Command) => {
 		if (core) core.command(cmd);
-		else coreWorker!.postMessage({ t: "command", cmd });
+		else postToCore({ t: "command", cmd });
 	};
 	let nextRequest = 1;
 	const request = <T>(req: Request) =>
