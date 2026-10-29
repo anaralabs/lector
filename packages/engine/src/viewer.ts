@@ -18,7 +18,7 @@ import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
 import type { OutlineItem } from "./protocol";
 import { getEngineSupport } from "./support";
-import type { Rect } from "./text";
+import type { Rect, TextPoint } from "./text";
 import { TextLayer, type TextLayerLine } from "./text-layer";
 
 export interface ViewerOptions extends Partial<CoreOptions> {
@@ -76,7 +76,10 @@ export interface Viewer {
 	reveal(page: number, rect: Rect, options?: RevealOptions): Promise<boolean>;
 	/** animate highlights by id: "ripple" (default, ~1s outward fade) or "flash" (whole-page blink) */
 	pulse(ids: string | string[], options?: { kind?: PulseKind; duration?: number }): void;
+	/** select chars [from, to) on a page (loads its text first if needed) */
 	select(page: number, from: number, to: number): void;
+	/** restore a selection across pages, e.g. a persisted `SelectionInfo.range`; null clears */
+	setSelection(range: { start: TextPoint; end: TextPoint } | null): void;
 	/** select the page in view ("page"), every page ("document"), or Cmd/Ctrl+A behaviour ("auto": page, then document) */
 	selectAll(scope?: "page" | "document" | "auto"): void;
 	/**
@@ -475,8 +478,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		send({ type: "key", key: e.key, mod, shift: e.shiftKey });
 	});
 
+	let copyEnabled = coreOptions.copyOptions !== false;
 	on(document, "copy", (e: ClipboardEvent) => {
-		if (!selectedText || !container.contains(document.activeElement)) return;
+		if (!copyEnabled || !selectedText || !container.contains(document.activeElement)) return;
 		e.clipboardData?.setData("text/plain", selectedText);
 		e.preventDefault();
 	});
@@ -490,6 +494,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		reveal: (page, rect, o) => flight((id) => ({ type: "reveal", page, rect, animate: o?.animate, align: o?.align, ifNeeded: o?.ifNeeded, flight: id })),
 		pulse: (ids, o) => command({ type: "pulse", ids: Array.isArray(ids) ? ids : [ids], kind: o?.kind, duration: o?.duration }),
 		select: (page, from, to) => command({ type: "select", page, from, to }),
+		setSelection: (range) => command({ type: "set-selection", range }),
 		selectAll: (scope) => command({ type: "select-all", scope }),
 		search: (query, limit, o) =>
 			runSearch<SearchHit[]>({ type: "search", query, limit, pages: o?.pages, matchDiacritics: o?.matchDiacritics, ignoreHyphenation: o?.ignoreHyphenation }, o?.signal),
@@ -515,7 +520,10 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		},
 		setHighlights: (items) => command({ type: "highlights", items }),
 		clearSelection: () => command({ type: "clear-selection" }),
-		setOptions: (o) => command({ type: "options", options: o }),
+		setOptions: (o) => {
+			if ("copyOptions" in o) copyEnabled = o.copyOptions !== false;
+			command({ type: "options", options: o });
+		},
 		unlock: (password) =>
 			opened
 				? Promise.resolve(true)

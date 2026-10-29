@@ -6,7 +6,7 @@ import { Compositor } from "./gl";
 import type { ErrorCode, ErrorPhase, Link, OutlineItem, PageSize } from "./protocol";
 import { RasterPool, type TextResult, type TileResult } from "./raster-pool";
 import { boundedDistance, foldQuery, insertRanked, matchPage, type RawMatch, type SearchOptions, splitLimit } from "./search";
-import { PageText, type Rect, type TextPoint, comparePoints } from "./text";
+import { PageText, type Rect, type SelectionTextOptions, type TextPoint, comparePoints } from "./text";
 
 export type Color = [number, number, number, number];
 
@@ -34,6 +34,8 @@ export interface CoreOptions {
 	ink: [number, number, number];
 	/** camera flights (animated reveal/goto) jump instantly; set from prefers-reduced-motion */
 	reducedMotion: boolean;
+	/** how selected text is copied (lector's `copyOptions`); false leaves Cmd/Ctrl+C to the browser */
+	copyOptions: false | SelectionTextOptions;
 }
 
 export const defaultOptions: CoreOptions = {
@@ -51,6 +53,7 @@ export const defaultOptions: CoreOptions = {
 	paper: [0.12, 0.12, 0.13],
 	ink: [0.88, 0.88, 0.86],
 	reducedMotion: false,
+	copyOptions: {},
 };
 
 export type PointerKind = "mouse" | "touch" | "pen";
@@ -157,6 +160,8 @@ export type Command =
 	/** stop a running request (searches); it answers with `{ error: "cancelled" }` */
 	| { type: "cancel"; id: number }
 	| { type: "select"; page: number; from: number; to: number }
+	/** select across pages (e.g. restoring a saved `SelectionInfo.range`); null clears */
+	| { type: "set-selection"; range: { start: TextPoint; end: TextPoint } | null }
 	| { type: "highlights"; items: Highlight[] }
 	| { type: "clear-selection" }
 	/** pan by css px (e.g. the browser scrolled the hidden text layer to a find match) */
@@ -188,7 +193,10 @@ export interface Camera {
 }
 
 export interface SelectionInfo {
+	/** selected text, as copied (see `copyOptions`) */
 	text: string;
+	/** start (inclusive) and end (exclusive) caret positions: persist these to restore the selection with `setSelection` */
+	range: { start: TextPoint; end: TextPoint };
 	/** per-page rects in page points (top-left origin) */
 	pages: { page: number; rects: Rect[] }[];
 	/** bounding box of the selection's last line, in viewport css px (for tooltips) */
@@ -1088,7 +1096,11 @@ export class ViewerCore {
 				return;
 			}
 			case "select":
-				this.selectRange(cmd.page, cmd.from, cmd.to);
+				void this.selectPoints({ page: cmd.page, index: cmd.from }, { page: cmd.page, index: cmd.to });
+				return;
+			case "set-selection":
+				if (cmd.range) void this.selectPoints(cmd.range.start, cmd.range.end);
+				else this.clearSelection();
 				return;
 			case "cancel":
 				this.cancelled.add(cmd.id);
@@ -1112,10 +1124,14 @@ export class ViewerCore {
 			case "select-all":
 				void this.selectAll(cmd.scope ?? "auto");
 				return;
-			case "options":
+			case "options": {
+				const copyChanged = "copyOptions" in cmd.options && JSON.stringify(cmd.options.copyOptions) !== JSON.stringify(this.opts.copyOptions);
 				this.opts = { ...this.opts, ...cmd.options };
+				// The copied text follows the new options.
+				if (copyChanged && this.selRange && !this.dragging) this.emitSelection(true);
 				this.requestFrame();
 				return;
+			}
 		}
 	}
 
@@ -1352,7 +1368,29 @@ export class ViewerCore {
 		this.requestFrame();
 	}
 
-	/** Programmatic selection of chars [from, to) on one page (e.g. from search). */
+	/**
+	 * Programmatic selection between two caret positions. Text for every page
+	 * in the range is loaded first, so a restored selection gets its rects and
+	 * text even for pages that were never on screen.
+	 */
+	private async selectPoints(a: TextPoint, b: TextPoint) {
+		const [s, e] = comparePoints(a, b) <= 0 ? [a, b] : [b, a];
+		const last = this.pages.length - 1;
+		if (last < 0) return;
+		const s0 = Math.max(0, Math.min(last, s.page));
+		const e0 = Math.max(0, Math.min(last, e.page));
+		const texts = await Promise.all(Array.from({ length: e0 - s0 + 1 }, (_, i) => this.loadText(s0 + i)));
+		const clamp = (p: number, i: number) => Math.max(0, Math.min(texts[p - s0]!.length, i));
+		const start = { page: s0, index: clamp(s0, s.index) };
+		const end = { page: e0, index: clamp(e0, e.index) };
+		this.handles = false;
+		this.selAnchor = [start, start];
+		this.selRange = null; // recompute rects even if the range is unchanged
+		this.setRange(comparePoints(start, end) === 0 ? null : [start, end]);
+		this.emitSelection(true);
+	}
+
+	/** Programmatic selection of chars [from, to) on one page (text must be loaded). */
 	selectRange(page: number, from: number, to: number) {
 		this.selAnchor = [
 			{ page, index: from },
@@ -1410,6 +1448,7 @@ export class ViewerCore {
 			final,
 			selection: {
 				text: final ? this.selectedText() : "",
+				range: { start: { ...this.selRange[0] }, end: { ...this.selRange[1] } },
 				pages: this.selRects.map((p) => ({ page: p.page, rects: p.rects.map((r) => ({ ...r })) })),
 				anchor: this.selectionScreenAnchor(),
 			},
@@ -1418,14 +1457,15 @@ export class ViewerCore {
 
 	private selectedText() {
 		if (!this.selRange) return "";
+		const copy = this.opts.copyOptions || {};
 		const [s, e] = this.selRange;
 		const parts: string[] = [];
 		for (let page = s.page; page <= e.page; page++) {
 			const text = this.texts.get(page);
 			if (!text) continue;
-			parts.push(text.text(page === s.page ? s.index : 0, page === e.page ? e.index : text.length));
+			parts.push(text.text(page === s.page ? s.index : 0, page === e.page ? e.index : text.length, copy));
 		}
-		return parts.join("\n");
+		return parts.join(copy.lineBreaks === "space" ? " " : "\n");
 	}
 
 	private updateCursor(sx: number, sy: number) {

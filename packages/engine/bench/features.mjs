@@ -102,6 +102,47 @@ const docAll = await page.evaluate(() => window.__viewer.selectedText.length);
 check("Cmd/Ctrl+A: page, then document", pageAll > 1000 && docAll > pageAll * 10, `${pageAll} then ${docAll} chars`);
 await page.evaluate(() => window.__viewer.clearSelection());
 
+// Selection: copy options (lector's copyOptions) and restoring a saved range on unloaded pages.
+const copy = await page.evaluate(async () => {
+	const v = window.__viewer;
+	const m = await v.pageTextMap(0);
+	const at = m.text.indexOf("programmable matter by");
+	const from = m.chars[at];
+	const to = m.chars[at + "programmable matter by".length];
+	const sel = () => new Promise((r) => {
+		const t = setInterval(() => {
+			const e = window.__all.findLast((x) => x.type === "selection" && x.final && x.selection);
+			if (e && e !== window.__lastSel) {
+				window.__lastSel = e;
+				clearInterval(t);
+				r(e.selection);
+			}
+		}, 20);
+	});
+	const clip = () => {
+		const ev = new ClipboardEvent("copy", { clipboardData: new DataTransfer(), bubbles: true, cancelable: true });
+		document.dispatchEvent(ev);
+		return ev.clipboardData.getData("text/plain");
+	};
+	document.getElementById("viewer").focus();
+	window.__lastSel = window.__all.findLast((x) => x.type === "selection");
+	v.select(0, from, to);
+	const preserve = (await sel()).text;
+	const copied = clip();
+	v.setOptions({ copyOptions: { lineBreaks: "space", ignoreHyphenation: true } });
+	const joined = (await sel()).text;
+	v.setOptions({ copyOptions: {} });
+	await sel();
+	// Restore a two-page range whose text has never been loaded.
+	v.setSelection({ start: { page: 20, index: 5 }, end: { page: 21, index: 40 } });
+	const restored = await sel();
+	v.clearSelection();
+	return { preserve, copied, joined, restored: { pages: restored.pages.map((p) => `${p.page}:${p.rects.length}`), len: restored.text.length, range: restored.range } };
+});
+check("copy keeps hyphen + line break (lector default)", copy.preserve === "program-\nmable matter by" && copy.copied === copy.preserve, JSON.stringify(copy.preserve));
+check("copyOptions: spaces, ignore hyphenation", copy.joined === "programmable matter by", JSON.stringify(copy.joined));
+check("restore selection on unloaded pages", copy.restored.pages.length === 2 && copy.restored.len > 40 && copy.restored.range.start.page === 20, `${copy.restored.pages.join(" ")} ${copy.restored.len} chars`);
+
 // Reads screenshot pixels (css px) through an <img> in the page: no PNG decoder needed.
 const pixels = async (points) => {
 	const png = (await page.screenshot()).toString("base64");

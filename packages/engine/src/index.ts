@@ -3,6 +3,6 @@ export type { Camera, Color, Command, CoreEvent, CoreOptions, Cursor, Highlight,
 export type { SearchOptions } from "./search";
 export type { ErrorCode, ErrorPhase, Link, OutlineItem, PageSize } from "./protocol";
 export { EngineError } from "./errors";
-export type { Rect } from "./text";
+export type { Rect, SelectionTextOptions, TextPoint } from "./text";
 export { type EngineFeature, type EngineSupport, getEngineSupport, isEngineSupported } from "./support";
 export type { TextLayerLine } from "./text-layer";

@@ -28,6 +28,15 @@ export interface TextPoint {
 import { buildHaystack, type Haystack, type SearchOptions } from "./search";
 
 const NEWLINE = new Set([0x0a, 0x0d]);
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+
+/** How selected text is copied, like @anaralabs/lector's `copyOptions`. */
+export interface SelectionTextOptions {
+	/** "preserve" (default) keeps line breaks; "space" joins lines with a space */
+	lineBreaks?: "preserve" | "space";
+	/** join words hyphenated across a line break ("pro-⏎gram" → "program"); default false */
+	ignoreHyphenation?: boolean;
+}
 
 export class PageText {
 	readonly lines: Line[] = [];
@@ -169,12 +178,30 @@ export class PageText {
 		return out;
 	}
 
-	text(from: number, to: number) {
+	/**
+	 * Text of chars [from, to). By default line-end hyphens stay joined (as
+	 * PDFium reports them) and line breaks are kept; `options` follow lector's
+	 * copy options (SelectionTextOptions).
+	 */
+	text(from: number, to: number, options: SelectionTextOptions = { ignoreHyphenation: true }) {
+		const space = options.lineBreaks === "space";
 		let s = "";
-		for (let i = Math.max(0, from); i < Math.min(to, this.codes.length); i++) {
+		const end = Math.min(to, this.codes.length);
+		for (let i = Math.max(0, from); i < end; i++) {
 			const c = this.codes[i]!;
 			if (c === 0x0d) continue;
-			if (c === 0x02) continue; // PDFium soft-hyphen marker
+			if (c === 0x02) {
+				// PDFium's marker for a hyphen it joined across a line break.
+				if (!options.ignoreHyphenation) s += space ? "- " : "-\n";
+				continue;
+			}
+			if (c === 0x0a && space) {
+				// Chinese/Japanese wrap without a separator; everything else gets a space.
+				const prev = s.codePointAt(s.length - 1) ?? 0;
+				const next = this.codes[i + 1] ?? 0;
+				if (!(CJK.test(String.fromCodePoint(prev)) && CJK.test(String.fromCodePoint(next)))) s += " ";
+				continue;
+			}
 			s += String.fromCodePoint(c || 0x20);
 		}
 		return s;
