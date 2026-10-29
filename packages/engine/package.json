@@ -81,6 +81,7 @@
 	},
 	"homepage": "https://github.com/anaralabs/lector/tree/main/packages/engine",
 	"release": {
+		"extends": "semantic-release-monorepo",
 		"tagFormat": "lector-engine-v${version}"
 	}
 }

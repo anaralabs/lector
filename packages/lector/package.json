@@ -107,5 +107,9 @@
 				"react"
 			]
 		}
-	]
+	],
+	"release": {
+		"extends": "semantic-release-monorepo",
+		"tagFormat": "v${version}"
+	}
 }

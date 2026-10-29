@@ -17,6 +17,7 @@
     "@biomejs/biome": "^2.2.4",
     "@commitlint/config-conventional": "^19.6.0",
     "commitlint": "^19.6.1",
+    "semantic-release-monorepo": "^8.0.2",
     "turbo": "^2.9.14"
   },
   "keywords": [

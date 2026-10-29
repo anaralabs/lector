@@ -160,7 +160,8 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # Separate tags (lector-engine-v*, see packages/engine/package.json "release").
+      # Separate tags (lector-engine-v*). Each package's "release" config extends
+      # semantic-release-monorepo, so it only counts commits touching its own folder.
       - name: Build engine package
         run: pnpm --filter @anaralabs/lector-engine build
 
