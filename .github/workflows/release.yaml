@@ -93,9 +93,27 @@ jobs:
       - run: pnpm --filter @anaralabs/lector test:browser
       - run: pnpm --filter @anaralabs/lector test:size
 
+  engine:
+    name: Engine package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @anaralabs/lector-engine...
+      - name: Build engine
+        run: pnpm --filter @anaralabs/lector-engine build
+      - name: Check types and packed exports
+        run: |
+          pnpm --filter @anaralabs/lector-engine test:types
+          pnpm --filter @anaralabs/lector-engine test:package
+
   release:
     name: Release
-    needs: [lint, test, windows-test]
+    needs: [lint, test, windows-test, engine]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -127,7 +145,7 @@ jobs:
           cache-dependency-path: ./pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install --ignore-scripts --frozen-lockfile --filter lector...
+        run: pnpm install --ignore-scripts --frozen-lockfile --filter lector... --filter @anaralabs/lector-engine...
 
       - name: Build package
         run: pnpm build --filter @anaralabs/lector
@@ -138,6 +156,17 @@ jobs:
       - name: Semantic Release
         run: ../../node_modules/.bin/semantic-release
         working-directory: packages/lector
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Separate tags (lector-engine-v*, see packages/engine/package.json "release").
+      - name: Build engine package
+        run: pnpm --filter @anaralabs/lector-engine build
+
+      - name: Semantic Release (engine)
+        run: ../../node_modules/.bin/semantic-release
+        working-directory: packages/engine
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -199,11 +199,10 @@ importers:
         version: 11.0.5
 
   packages/engine:
-    dependencies:
+    devDependencies:
       '@embedpdf/pdfium':
         specifier: 2.15.1
         version: 2.15.1
-    devDependencies:
       '@types/react':
         specifier: '19'
         version: 19.0.1
@@ -213,6 +212,9 @@ importers:
       react:
         specifier: '19'
         version: 19.2.0
+      tsup:
+        specifier: ^8.3.5
+        version: 8.3.5(@microsoft/api-extractor@7.48.1(@types/node@22.10.2))(@swc/core@1.10.1)(jiti@2.4.1)(postcss@8.5.23)(tsx@4.23.13)(typescript@5.9.3)(yaml@2.9.0)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -10524,6 +10526,35 @@ snapshots:
       '@swc/core': 1.10.1
       postcss: 8.5.23
       typescript: 5.7.2
+    transitivePeerDependencies:
+      - jiti
+      - supports-color
+      - tsx
+      - yaml
+
+  tsup@8.3.5(@microsoft/api-extractor@7.48.1(@types/node@22.10.2))(@swc/core@1.10.1)(jiti@2.4.1)(postcss@8.5.23)(tsx@4.23.13)(typescript@5.9.3)(yaml@2.9.0):
+    dependencies:
+      bundle-require: 5.0.0(esbuild@0.25.10)
+      cac: 6.7.14
+      chokidar: 4.0.1
+      consola: 3.2.3
+      debug: 4.4.0
+      esbuild: 0.25.10
+      joycon: 3.1.1
+      picocolors: 1.1.1
+      postcss-load-config: 6.0.1(jiti@2.4.1)(postcss@8.5.23)(tsx@4.23.13)(yaml@2.9.0)
+      resolve-from: 5.0.0
+      rollup: 4.60.4
+      source-map: 0.8.0-beta.0
+      sucrase: 3.35.0
+      tinyexec: 0.3.1
+      tinyglobby: 0.2.10
+      tree-kill: 1.2.2
+    optionalDependencies:
+      '@microsoft/api-extractor': 7.48.1(@types/node@22.10.2)
+      '@swc/core': 1.10.1
+      postcss: 8.5.23
+      typescript: 5.9.3
     transitivePeerDependencies:
       - jiti
       - supports-color
