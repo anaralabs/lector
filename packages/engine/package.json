@@ -1,0 +1,25 @@
+{
+	"name": "@anaralabs/lector-engine",
+	"version": "0.0.0",
+	"private": true,
+	"description": "120fps PDF viewer engine: PDFium WASM raster workers, tiled WebGL2 compositor, GPU text selection",
+	"license": "MIT",
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"dev": "vite demo",
+		"build:demo": "vite build demo",
+		"typecheck": "tsc --noEmit",
+		"bench": "node bench/frames.mjs"
+	},
+	"dependencies": {
+		"@embedpdf/pdfium": "2.15.1"
+	},
+	"devDependencies": {
+		"playwright-core": "^1.64.1",
+		"typescript": "^5.9.3",
+		"vite": "^7.1.0"
+	}
+}

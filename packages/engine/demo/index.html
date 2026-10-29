@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Lector Engine</title>
+<style>
+  html, body { margin: 0; height: 100%; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background: #ededf0; }
+  #viewer { position: fixed; inset: 0; outline: none; }
+  #hud { position: fixed; top: 8px; right: 8px; padding: 8px 10px; background: rgba(20,20,24,.82); color: #e8e8ec; border-radius: 8px; pointer-events: none; white-space: pre; min-width: 220px; }
+  #bar { position: fixed; top: 8px; left: 8px; display: flex; gap: 6px; }
+  #bar button, #bar label { font: inherit; padding: 4px 8px; border-radius: 6px; border: 1px solid #c8c8d0; background: #fff; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="viewer"></div>
+<div id="bar">
+  <button id="zin">+</button><button id="zout">−</button><button id="fit">fit</button>
+  <button id="jank" title="Block the main thread 50ms every 100ms, to prove frames don't depend on it">jank: off</button>
+  <label>open <input id="file" type="file" accept="application/pdf" hidden /></label>
+</div>
+<div id="hud">loading…</div>
+<script type="module" src="./main.ts"></script>
+</body>
+</html>
