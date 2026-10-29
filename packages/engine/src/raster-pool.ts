@@ -20,6 +20,8 @@ interface Lane {
 	ready: boolean;
 	busy: Job | null;
 	recentPages: number[];
+	/** last reported WASM heap + block cache bytes */
+	heap: number;
 }
 
 export class RasterPool {
@@ -32,7 +34,7 @@ export class RasterPool {
 	onError: (message: string, code: ErrorCode, phase: ErrorPhase) => void = (m) => console.error(m);
 
 	constructor(ports: MessagePort[]) {
-		this.lanes = ports.map((port) => ({ port, ready: false, busy: null, recentPages: [] }));
+		this.lanes = ports.map((port) => ({ port, ready: false, busy: null, recentPages: [], heap: 0 }));
 		this.lanes.forEach((lane, i) => {
 			lane.port.onmessage = (ev: MessageEvent<FromRaster>) => this.receive(lane, i, ev.data);
 		});
@@ -44,6 +46,11 @@ export class RasterPool {
 
 	get workers() {
 		return this.lanes.length;
+	}
+
+	/** memory held by all PDFium workers (heaps + block caches), bytes */
+	get heapBytes() {
+		return this.lanes.reduce((sum, l) => sum + l.heap, 0);
 	}
 
 	has(key: string) {
@@ -127,6 +134,7 @@ export class RasterPool {
 			if (job) job.onDone(msg);
 			return;
 		}
+		if ("heap" in msg) lane.heap = msg.heap;
 		const job = this.inflight.get(msg.id);
 		this.inflight.delete(msg.id);
 		lane.busy = null;

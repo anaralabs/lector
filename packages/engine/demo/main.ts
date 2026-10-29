@@ -38,10 +38,12 @@ const onEvent = (e: CoreEvent) => {
 		info.fps = `${s.fps.toFixed(0)} fps  p95 ${s.p95FrameMs.toFixed(1)}ms  worst ${s.worstFrameMs.toFixed(1)}ms`;
 		info.cpu = `frame cpu ${s.avgCpuMs.toFixed(2)}ms`;
 		info.tiles = `tiles ${s.tiles}  gpu ${s.textureMB.toFixed(0)}MB  queue ${s.pendingJobs}`;
-		info.raster = `tile raster ${s.avgTileMs.toFixed(1)}ms  ×${s.workers} workers  scale ${s.targetScale.toFixed(2)}`;
+		info.raster = `tile raster ${s.avgTileMs.toFixed(1)}ms  ×${s.workers} workers (${s.workerMB.toFixed(0)}MB)  scale ${s.targetScale.toFixed(2)}`;
 	} else if (e.type === "view") {
 		zoom = e.zoom;
 		info.view = `page ${e.page + 1}/${e.pageCount}  zoom ${(e.zoom * 100).toFixed(0)}%`;
+	} else if (e.type === "painted") {
+		(w as unknown as { __paintedMs: number }).__paintedMs = performance.now() - t0;
 	} else if (e.type === "ready") {
 		w.__firstPaintMs = performance.now() - t0;
 		info.ready = `ready in ${w.__firstPaintMs.toFixed(0)}ms`;
@@ -63,7 +65,9 @@ async function open(source: string | ArrayBuffer) {
 	const password = params.get("password") ?? undefined;
 	const interceptFind = params.get("interceptFind") === "1";
 	const textLayer = params.get("textLayer") !== "0";
-	const viewer = await createViewer(el, source, { wasmUrl, offscreen, workers, onEvent, password, interceptFind, textLayer, ...dark, ...(params.get("loader") === "0" ? {} : { createWorker, workerUrls }) });
+	const rangeLoading = params.get("range") === "1";
+	const autoFetch = params.get("autoFetch") !== "0";
+	const viewer = await createViewer(el, source, { wasmUrl, offscreen, workers, onEvent, password, interceptFind, textLayer, rangeLoading, autoFetch, ...dark, ...(params.get("loader") === "0" ? {} : { createWorker, workerUrls }) });
 	w.__viewer = viewer;
 	info.mode = `compositor: ${viewer.offscreen ? "worker (OffscreenCanvas)" : "main thread"}`;
 	el.focus();

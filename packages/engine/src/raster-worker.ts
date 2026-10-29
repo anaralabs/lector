@@ -3,7 +3,7 @@
 // document, so workers never share memory and need no cross-origin isolation.
 
 import { init } from "@embedpdf/pdfium";
-import type { ErrorCode, FromRaster, Link, OutlineItem, ToRaster } from "./protocol";
+import type { DocSource, ErrorCode, FromRaster, Link, OutlineItem, ToRaster } from "./protocol";
 
 type Pdfium = Awaited<ReturnType<typeof init>>;
 
@@ -18,8 +18,27 @@ let P: Pdfium;
 // Re-read on every use: the WASM heap buffer is replaced when memory grows.
 const heap = () => (P.pdfium as unknown as { HEAPU8: Uint8Array }).HEAPU8;
 let doc = 0;
+let pageCount = 0;
 let port: MessagePort;
 const pageSizes: { w: number; h: number }[] = [];
+/**
+ * Only the first worker reads every page size up front (the core's layout
+ * needs them; each one parses a page dictionary, which with range loading can
+ * mean a request per page). The others read sizes as pages are used.
+ */
+let allSizes = true;
+function sizeOf(index: number) {
+	let size = pageSizes[index];
+	if (!size) {
+		const mem = P.pdfium.wasmExports.malloc(8);
+		P.FPDF_GetPageSizeByIndexF(doc, index, mem);
+		const wh = new Float32Array(heap().buffer, mem, 2);
+		size = { w: wh[0]!, h: wh[1]! };
+		P.pdfium.wasmExports.free(mem);
+		pageSizes[index] = size;
+	}
+	return size;
+}
 const pages = new Map<number, number>(); // LRU: page index -> FPDF_PAGE
 
 function loadPage(index: number): number {
@@ -46,7 +65,7 @@ function send(msg: FromRaster, transfer: Transferable[] = []) {
 function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 	const t0 = performance.now();
 	const page = loadPage(msg.page);
-	const size = pageSizes[msg.page]!;
+	const size = sizeOf(msg.page);
 	const { w, h } = msg;
 	const bmp = P.FPDFBitmap_Create(w, h, 1);
 	P.FPDFBitmap_FillRect(bmp, 0, 0, w, h, 0xffffffff);
@@ -74,7 +93,7 @@ function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 		buf = out.buffer;
 	}
 	P.FPDFBitmap_Destroy(bmp);
-	send({ t: "tile", id: msg.id, buf, w, h, ms: performance.now() - t0 }, [buf]);
+	send({ t: "tile", id: msg.id, buf, w, h, ms: performance.now() - t0, heap: heapBytes() }, [buf]);
 }
 
 type Xf = (x: number, y: number) => [number, number];
@@ -88,7 +107,7 @@ function transformFor(index: number): Xf {
 	const hit = transforms.get(index);
 	if (hit) return hit;
 	const page = loadPage(index);
-	const { w, h } = pageSizes[index]!;
+	const { w, h } = sizeOf(index);
 	const K = 64; // device units per point: 1/64pt precision from integer output
 	const out = P.pdfium.wasmExports.malloc(8);
 	const map = (x: number, y: number): [number, number] => {
@@ -126,7 +145,7 @@ function readDest(dest: number): Link["dest"] {
 	if (P.FPDFDest_GetLocationInPage(dest, mem, mem + 4, mem + 8, mem + 12, mem + 16, mem + 20)) {
 		const ints = new Int32Array(heap().buffer, mem, 3);
 		const floats = new Float32Array(heap().buffer, mem + 12, 3);
-		if (ints[1] && pageSizes[page]) top = Math.max(0, transformFor(page)(ints[0] ? floats[0]! : 0, floats[1]!)[1]);
+		if (ints[1] && page < pageCount) top = Math.max(0, transformFor(page)(ints[0] ? floats[0]! : 0, floats[1]!)[1]);
 	}
 	P.pdfium.wasmExports.free(mem);
 	return { page, top };
@@ -215,7 +234,7 @@ function extractText(msg: Extract<ToRaster, { t: "text" }>) {
 	const links = readLinks(page, xf);
 	const { images, scans } = readImages(page, msg.page, xf);
 	send(
-		{ t: "text", id: msg.id, page: msg.page, codes, boxes, links, images, scans, ms: performance.now() - t0 },
+		{ t: "text", id: msg.id, page: msg.page, codes, boxes, links, images, scans, ms: performance.now() - t0, heap: heapBytes() },
 		[codes.buffer, boxes.buffer, images.buffer],
 	);
 }
@@ -424,7 +443,7 @@ function readImages(page: number, index: number, xf: Xf): { images: Float32Array
 	};
 	walk(P.FPDFPage_CountObjects(page), (i) => P.FPDFPage_GetObject(page, i), [1, 0, 0, 1, 0, 0]);
 	P.pdfium.wasmExports.free(mem);
-	const size = pageSizes[index]!;
+	const size = sizeOf(index);
 	const scans = scanImages(page, found, size.w, size.h);
 	const out: number[] = [];
 	found.forEach((im, i) => {
@@ -436,13 +455,108 @@ function readImages(page: number, index: number, xf: Xf): { images: Float32Array
 /** FPDF_GetLastError -> ErrorCode */
 const LOAD_ERRORS: Record<number, ErrorCode> = { 2: "file", 3: "format", 4: "password", 5: "security" };
 
-// The document bytes live in the WASM heap for the document's lifetime
-// (FPDF_LoadMemDocument does not copy them), so a password retry reuses them.
-let bytesPtr = 0;
-let bytesLen = 0;
+// ---------------------------------------------------------------- byte source
+// PDFium pulls bytes through FPDF_LoadCustomDocument's synchronous GetBlock
+// callback. Blocks come from a Blob shared by all workers (FileReaderSync) or
+// from HTTP range requests (sync XHR, allowed in workers), through a small LRU
+// cache. No worker holds a copy of the whole file.
+const BLOB_BLOCK = 64 * 1024;
+const URL_BLOCK = 256 * 1024;
+const CACHE_MAX = 24 * 1024 * 1024;
+
+let source: DocSource | null = null;
+let fileLen = 0;
+let blockSize = BLOB_BLOCK;
+const blocks = new Map<number, Uint8Array>();
+let cacheBytes = 0;
+let fileAccess = 0;
+let reader: FileReaderSync | null = null;
+
+const heapBytes = () => heap().length + cacheBytes;
+
+function fetchBlock(start: number, end: number): Uint8Array {
+	const src = source!;
+	if (src.kind === "blob") {
+		reader ??= new FileReaderSync();
+		return new Uint8Array(reader.readAsArrayBuffer(src.blob.slice(start, end)));
+	}
+	const xhr = new XMLHttpRequest();
+	xhr.open("GET", src.url, false);
+	xhr.withCredentials = src.credentials;
+	xhr.responseType = "arraybuffer";
+	xhr.setRequestHeader("Range", `bytes=${start}-${end - 1}`);
+	xhr.send();
+	const buf = xhr.response as ArrayBuffer | null;
+	if (xhr.status === 206 && buf && buf.byteLength === end - start) return new Uint8Array(buf);
+	if (xhr.status === 200 && buf && buf.byteLength === fileLen) {
+		// The server ignored the range and sent everything: read from that from now on.
+		source = { kind: "blob", blob: new Blob([buf]) };
+		blockSize = BLOB_BLOCK;
+		blocks.clear();
+		cacheBytes = 0;
+		return new Uint8Array(buf, start, end - start).slice();
+	}
+	throw new Error(`range request ${start}-${end - 1} failed (HTTP ${xhr.status})`);
+}
+
+function block(index: number): Uint8Array {
+	const hit = blocks.get(index);
+	if (hit) {
+		blocks.delete(index);
+		blocks.set(index, hit);
+		return hit;
+	}
+	const start = index * blockSize;
+	const data = fetchBlock(start, Math.min(fileLen, start + blockSize));
+	blocks.set(index, data);
+	cacheBytes += data.length;
+	while (cacheBytes > CACHE_MAX && blocks.size > 1) {
+		const [k, v] = blocks.entries().next().value as [number, Uint8Array];
+		blocks.delete(k);
+		cacheBytes -= v.length;
+	}
+	return data;
+}
+
+/** int GetBlock(void* param, unsigned long position, unsigned char* buf, unsigned long size) */
+function getBlock(_param: number, position: number, buf: number, size: number): number {
+	try {
+		let pos = position >>> 0;
+		let out = buf;
+		let left = size >>> 0;
+		if (pos + left > fileLen) return 0;
+		while (left > 0) {
+			const size0 = blockSize;
+			const index = Math.floor(pos / size0);
+			const data = block(index);
+			// `block` may switch the source (and block size): recompute from the new block.
+			if (blockSize !== size0) continue;
+			const offset = pos - index * blockSize;
+			const n = Math.min(left, data.length - offset);
+			if (n <= 0) return 0;
+			heap().set(data.subarray(offset, offset + n), out);
+			pos += n;
+			out += n;
+			left -= n;
+		}
+		return 1;
+	} catch (err) {
+		console.error(`lector-engine: ${String((err as Error)?.message ?? err)}`);
+		return 0;
+	}
+}
 
 function loadDocument(password: string | undefined) {
-	doc = P.FPDF_LoadMemDocument(bytesPtr, bytesLen, password ?? "");
+	if (!fileAccess) {
+		// FPDF_FILEACCESS { unsigned long m_FileLen; GetBlock* m_GetBlock; void* m_Param; }
+		const fn = (P.pdfium as unknown as { addFunction: (f: (...a: number[]) => number, sig: string) => number }).addFunction(getBlock, "iiiii");
+		fileAccess = P.pdfium.wasmExports.malloc(12);
+		const view = new Uint32Array(heap().buffer, fileAccess, 3);
+		view[0] = fileLen;
+		view[1] = fn;
+		view[2] = 0;
+	}
+	doc = P.FPDF_LoadCustomDocument(fileAccess, password ?? "");
 	if (!doc) {
 		const err = P.FPDF_GetLastError();
 		const code = LOAD_ERRORS[err] ?? "unknown";
@@ -455,16 +569,10 @@ function loadDocument(password: string | undefined) {
 		send({ t: "error", message, code, phase: "document-load" });
 		return;
 	}
-	const count = P.FPDF_GetPageCount(doc);
+	pageCount = P.FPDF_GetPageCount(doc);
 	// Sizes come from the page tree without parsing page content.
-	const size = P.pdfium.wasmExports.malloc(8);
-	for (let i = 0; i < count; i++) {
-		P.FPDF_GetPageSizeByIndexF(doc, i, size);
-		const wh = new Float32Array(heap().buffer, size, 2);
-		pageSizes.push({ w: wh[0]!, h: wh[1]! });
-	}
-	P.pdfium.wasmExports.free(size);
-	send({ t: "opened", pages: pageSizes });
+	if (allSizes) for (let i = 0; i < pageCount; i++) sizeOf(i);
+	send({ t: "opened", pages: allSizes ? pageSizes : [] });
 }
 
 async function open(msg: Extract<ToRaster, { t: "init" }>) {
@@ -475,7 +583,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 			if (m.t === "tile") renderTile(m);
 			else if (m.t === "text") extractText(m);
 			else if (m.t === "outline") send({ t: "outline", id: m.id, items: readOutline(0, 0) });
-			else if (m.t === "unlock" && P && !doc && bytesPtr) loadDocument(m.password);
+			else if (m.t === "unlock" && P && !doc && fileAccess) loadDocument(m.password);
 		} catch (err) {
 			const id = "id" in m ? m.id : undefined;
 			send({ t: "error", message: String((err as Error)?.stack ?? err), code: "unknown", phase: m.t === "tile" ? "render" : "text", id });
@@ -492,10 +600,15 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 		send({ t: "error", message: `lector-engine: pdfium.wasm failed to load from ${msg.wasmUrl}: ${String((err as Error)?.message ?? err)}`, code: "worker", phase: "engine-load" });
 		return;
 	}
-	const bytes = new Uint8Array(msg.bytes);
-	bytesLen = bytes.length;
-	bytesPtr = P.pdfium.wasmExports.malloc(bytes.length);
-	heap().set(bytes, bytesPtr);
+	source = msg.source;
+	allSizes = msg.sizes !== false;
+	if (source.kind === "blob") {
+		fileLen = source.blob.size;
+		blockSize = BLOB_BLOCK;
+	} else {
+		fileLen = source.length;
+		blockSize = URL_BLOCK;
+	}
 	loadDocument(msg.password);
 }
 
@@ -504,6 +617,11 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 self.postMessage({ t: "boot" });
 
 self.onmessage = (ev: MessageEvent<ToRaster>) => {
+	if (ev.data.t === "source") {
+		// The full file arrived: no more network round-trips. Cached blocks stay valid.
+		if (source?.kind === "url" && ev.data.blob.size === fileLen) source = { kind: "blob", blob: ev.data.blob };
+		return;
+	}
 	if (ev.data.t !== "init") return;
 	open(ev.data).catch((err) => {
 		const message = String((err as Error)?.stack ?? err);

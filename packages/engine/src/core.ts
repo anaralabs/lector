@@ -183,6 +183,8 @@ export interface Stats {
 	avgTileMs: number;
 	targetScale: number;
 	workers: number;
+	/** PDFium memory across raster workers (WASM heaps + block caches) */
+	workerMB: number;
 }
 
 export interface Camera {
@@ -207,6 +209,8 @@ export type Cursor = "default" | "text" | "pointer";
 
 export type CoreEvent =
 	| { type: "ready"; pages: PageSize[]; layout: Rect[] }
+	/** the first page bitmap reached the screen (once per document) */
+	| { type: "painted"; page: number }
 	| { type: "view"; zoom: number; page: number; pageCount: number; fitWidth: boolean }
 	| { type: "camera"; camera: Camera; moving: boolean }
 	| { type: "selection"; selection: SelectionInfo | null; final: boolean }
@@ -1724,6 +1728,7 @@ export class ViewerCore {
 	}
 
 	private frameId = 0;
+	private painted = false;
 
 	private frame(now: number) {
 		if (!this.dirty || !this.camReady) return;
@@ -1846,6 +1851,10 @@ export class ViewerCore {
 					}
 					gl.drawTexture(t.tex!, x, y, t.w * k, t.h * k, gamma);
 					t.lastUsed = this.frameId;
+					if (!this.painted) {
+						this.painted = true;
+						this.emit({ type: "painted", page: p });
+					}
 				}
 			};
 			const drawMarks = (dark: boolean) => {
@@ -2017,6 +2026,7 @@ export class ViewerCore {
 				avgTileMs: avg(this.tileMs),
 				targetScale: this.targetScale,
 				workers: this.pool.workers,
+				workerMB: this.pool.heapBytes / 1048576,
 			},
 		});
 		this.frameTimes = [];

@@ -17,8 +17,20 @@ export type ErrorCode = "password" | "format" | "security" | "file" | "fetch" | 
 /** When it failed, like lector's `onError` phases. */
 export type ErrorPhase = "engine-load" | "document-load" | "render" | "text";
 
+/**
+ * Where a raster worker reads the document from. Workers never hold a full
+ * copy: they read blocks on demand, synchronously, as PDFium asks for them.
+ * - blob: one Blob shared by every worker (structured clone does not copy it)
+ * - url: HTTP range requests (sync XHR) until the main thread posts the whole
+ *   file as a Blob (`source` message)
+ */
+export type DocSource = { kind: "blob"; blob: Blob } | { kind: "url"; url: string; length: number; credentials: boolean };
+
 export type ToRaster =
-	| { t: "init"; bytes: ArrayBuffer; port: MessagePort; wasmUrl: string; password?: string }
+	/** sizes: false for all but one worker (page sizes are read lazily there) */
+	| { t: "init"; source: DocSource; port: MessagePort; wasmUrl: string; password?: string; sizes?: boolean }
+	/** sent to the worker itself (not the port): the full file arrived, read from it from now on */
+	| { t: "source"; blob: Blob }
 	/** retry opening the document with a password (after a `password` error) */
 	| { t: "unlock"; password: string }
 	| {
@@ -53,7 +65,8 @@ export interface OutlineItem {
 export type FromRaster =
 	| { t: "opened"; pages: PageSize[] }
 	| { t: "error"; message: string; code: ErrorCode; phase: ErrorPhase; id?: number }
-	| { t: "tile"; id: number; buf: ArrayBuffer; w: number; h: number; ms: number }
+	/** heap: the worker's WASM heap plus its block cache, in bytes */
+	| { t: "tile"; id: number; buf: ArrayBuffer; w: number; h: number; ms: number; heap: number }
 	| {
 			t: "text";
 			id: number;
@@ -68,5 +81,6 @@ export type FromRaster =
 			/** images classified as scan paper (tone-mapped in dark mode, so not in `images`) */
 			scans: number;
 			ms: number;
+			heap: number;
 	  }
 	| { t: "outline"; id: number; items: OutlineItem[] };

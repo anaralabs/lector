@@ -203,6 +203,12 @@ else {
 	check("password option", (await page.evaluate(() => window.__errors.length)) === 0);
 }
 
+// HTTP range loading: same document through range requests, getData fetches the whole file.
+await page.goto(fixture("cadbots.pdf", "&range=1&autoFetch=0"));
+await page.waitForFunction(() => window.__paintedMs !== undefined);
+const ranged = await page.evaluate(async () => ({ hits: (await window.__viewer.search("programmable matter")).length, bytes: (await window.__viewer.getData()).length }));
+check("range loading", ranged.hits === 11 && ranged.bytes > 1e6, `${ranged.hits} hits, getData ${ranged.bytes} bytes`);
+
 // interceptFind: Cmd/Ctrl+F becomes a `find` event while the viewer has focus.
 await page.goto(fixture("cadbots.pdf", "&interceptFind=1"));
 await page.waitForFunction(() => window.__firstPaintMs !== undefined);

@@ -16,7 +16,7 @@ import {
 } from "./core";
 import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
-import type { OutlineItem } from "./protocol";
+import type { DocSource, OutlineItem } from "./protocol";
 import { getEngineSupport } from "./support";
 import type { Rect, TextPoint } from "./text";
 import { TextLayer, type TextLayerLine } from "./text-layer";
@@ -43,6 +43,17 @@ export interface ViewerOptions extends Partial<CoreOptions> {
 	workerUrls?: { raster: string; core: string };
 	/** external link clicked; default opens it in a new tab */
 	onLink?: (url: string) => void;
+	/**
+	 * URL sources: load with HTTP range requests, so the first page renders
+	 * before the whole file has downloaded (default false). Needs a server that
+	 * answers `Range` with 206 and no content encoding (and CORS exposing
+	 * Content-Range for other origins); otherwise the engine falls back to a
+	 * full download. The whole file still streams in the background after the
+	 * first paint (see `autoFetch`).
+	 */
+	rangeLoading?: boolean;
+	/** with `rangeLoading`: download the whole file after the first paint, then stop range requests (default true) */
+	autoFetch?: boolean;
 	/** password for an encrypted document (else an `error` event with code `password`; see `unlock`) */
 	password?: string;
 	/**
@@ -130,15 +141,33 @@ export interface RevealOptions {
 }
 
 /** Errors mirror pdf.js wording so hosts that pattern-match load failures keep working. */
-async function fetchPdf(url: string) {
+async function fetchPdf(url: string, init: RequestInit = {}) {
 	let res: Response;
 	try {
-		res = await fetch(url, { credentials: "same-origin" });
+		res = await fetch(url, { credentials: "same-origin", ...init });
 	} catch (err) {
 		throw new EngineError(`Failed to fetch PDF "${url}": ${String((err as Error)?.message ?? err)}`, "fetch", "document-load", url);
 	}
 	if (!res.ok) throw new EngineError(`Unexpected server response (${res.status}) while retrieving PDF "${url}".`, "fetch", "document-load", url);
-	return new Uint8Array(await res.arrayBuffer());
+	return res;
+}
+
+/**
+ * Probe for range support with a 1KB request. A 206 with a total length means
+ * range loading works; a 200 means the server sent the whole file, which is
+ * then used as is (nothing is downloaded twice).
+ */
+async function openUrl(url: string, range: boolean): Promise<{ blob: Blob } | { length: number }> {
+	if (!range) return { blob: await (await fetchPdf(url)).blob() };
+	const res = await fetchPdf(url, { headers: { Range: "bytes=0-1023" } });
+	const total = Number(/\/(\d+)\s*$/.exec(res.headers.get("Content-Range") ?? "")?.[1]);
+	const encoded = (res.headers.get("Content-Encoding") ?? "identity") !== "identity";
+	if (res.status === 206 && total > 0 && !encoded) {
+		void res.body?.cancel();
+		return { length: total };
+	}
+	if (res.status === 206) return { blob: await (await fetchPdf(url)).blob() };
+	return { blob: await res.blob() };
 }
 
 const NAV_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", "Home", "End", " ", "Escape"]);
@@ -161,6 +190,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		createWorker,
 		workerUrls,
 		password,
+		rangeLoading = false,
+		autoFetch = true,
 		textLayer: wantTextLayer = true,
 		interceptFind = false,
 		...coreOptions
@@ -191,7 +222,31 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		});
 		return { worker, booted };
 	};
-	const bytes = typeof source === "string" ? await fetchPdf(source) : source instanceof Uint8Array ? source : new Uint8Array(source);
+	// One Blob shared by every raster worker (posting a Blob does not copy it);
+	// workers read blocks from it on demand. Range loading starts from the URL.
+	let blob: Blob | null = null;
+	let docSource: DocSource;
+	if (typeof source === "string") {
+		const absolute = new URL(source, location.href).href;
+		const opened = await openUrl(absolute, rangeLoading);
+		if ("blob" in opened) blob = opened.blob;
+		docSource = blob ? { kind: "blob", blob } : { kind: "url", url: absolute, length: (opened as { length: number }).length, credentials: new URL(absolute).origin === location.origin };
+	} else {
+		blob = new Blob([(source instanceof Uint8Array ? source : new Uint8Array(source)) as Uint8Array<ArrayBuffer>], { type: "application/pdf" });
+		docSource = { kind: "blob", blob };
+	}
+	let fullFetch: Promise<Blob> | null = null;
+	const fetchAll = () => {
+		if (blob) return Promise.resolve(blob);
+		fullFetch ??= fetchPdf((docSource as { url: string }).url)
+			.then((res) => res.blob())
+			.then((b) => {
+				blob = b;
+				for (const w of rasterWorkers) w.postMessage({ t: "source", blob: b });
+				return b;
+			});
+		return fullFetch;
+	};
 
 	const canvas = document.createElement("canvas");
 	// Sized in px from `resized` events, so the browser never stretches a stale
@@ -208,9 +263,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	canvas.setAttribute("aria-hidden", "true");
 	container.appendChild(canvas);
 
-	// Raster workers. Each gets its own copy of the bytes and a port to the core.
-	// Phones and tablets: each worker holds a copy of the PDF plus PDFium's heap,
-	// and iOS kills tabs that hold a few hundred MB, so use fewer of everything.
+	// Raster workers, each with a port to the core. They share the document
+	// source. Phones and tablets: each worker still holds PDFium's heap, and iOS
+	// kills tabs that hold a few hundred MB, so use fewer of everything.
 	const touchDevice = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
 	// Camera flights jump instantly for people who asked for less motion.
 	const motionQuery = coreOptions.reducedMotion === undefined && typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
@@ -222,8 +277,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	for (let i = 0; i < n; i++) {
 		const { worker, booted } = spawn("raster", `lector-raster-${i}`);
 		const channel = new MessageChannel();
-		const copy = bytes.slice().buffer;
-		booted.then(() => worker.postMessage({ t: "init", bytes: copy, port: channel.port1, wasmUrl, password }, [copy, channel.port1]));
+		booted.then(() => worker.postMessage({ t: "init", source: docSource, port: channel.port1, wasmUrl, password, sizes: i === 0 }, [channel.port1]));
 		rasterWorkers.push(worker);
 		corePorts.push(channel.port2);
 	}
@@ -250,6 +304,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		} else if (e.type === "flight") {
 			flights.get(e.id)?.(e.landed);
 			flights.delete(e.id);
+		} else if (e.type === "painted") {
+			// Range loading: the first page is up; now fetch the rest in the background.
+			if (autoFetch && !blob) void fetchAll().catch(() => {});
 		} else if (e.type === "ready") {
 			opened = true;
 			textLayer?.setLayout(e.layout);
@@ -512,7 +569,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		pageText: (page) => request<string>({ type: "page-text", page }),
 		pageTextMap: (page) => request<{ text: string; chars: Int32Array }>({ type: "page-text-map", page }),
 		rects: (page, from, to) => request<Rect[]>({ type: "rects", page, from, to }),
-		getData: async () => bytes.slice(),
+		getData: async () => new Uint8Array(await (await fetchAll()).arrayBuffer()),
 		thumbnail: async (page, width) => {
 			const res = await request<{ buf: ArrayBuffer; w: number; h: number } | null>({ type: "thumbnail", page, width });
 			if (!res) return null;
