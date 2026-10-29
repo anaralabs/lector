@@ -213,9 +213,9 @@ function extractText(msg: Extract<ToRaster, { t: "text" }>) {
 	P.pdfium.wasmExports.free(rect);
 	P.FPDFText_ClosePage(tp);
 	const links = readLinks(page, xf);
-	const images = readImages(page, xf);
+	const { images, scans } = readImages(page, msg.page, xf);
 	send(
-		{ t: "text", id: msg.id, page: msg.page, codes, boxes, links, images, ms: performance.now() - t0 },
+		{ t: "text", id: msg.id, page: msg.page, codes, boxes, links, images, scans, ms: performance.now() - t0 },
 		[codes.buffer, boxes.buffer, images.buffer],
 	);
 }
@@ -234,17 +234,157 @@ function concat(m: Matrix, n: Matrix): Matrix {
 	];
 }
 
+// Scan detection (ported from @anaralabs/lector's scan-invert policy). A scanned
+// page is one big near-white image; leaving it untoned would keep a bright
+// white page in dark mode. Images that paper the page and look like ink on
+// paper are tone-mapped with the vector content; photos keep their colours.
+/** painted area relative to the page above which one image "papers the page" */
+const SCAN_COVERAGE_MIN = 0.7;
+/** strip/grid-encoded scans: smallest tile, and how densely the tiles fill their union box */
+const SCAN_TILE_MIN_FRACTION = 0.005;
+const SCAN_TILE_DENSITY_MIN = 0.85;
+const SCAN_WHITE_MIN_FRACTION = 0.6;
+const SCAN_OPAQUE_MIN_FRACTION = 0.99;
+const SCAN_SATURATED_MAX_FRACTION = 0.15;
+const SCAN_SAMPLE_PX = 64;
+const SCAN_MAX_TILES = 64;
+const FPDFBitmap_Gray = 1;
+const FPDFBitmap_BGR = 2;
+const FPDFBitmap_BGRx = 3;
+const FPDFBitmap_BGRA = 4;
+
+/**
+ * Paper verdict for one image: null when it is not paper (photo, colourful,
+ * cut-out), else whether it carries dark ink. Samples a block-averaged ~64px
+ * grid of the image as painted (masks applied), like lector's drawImage downsample.
+ */
+function classifyPaper(page: number, obj: number): { inked: boolean } | null {
+	let bmp = P.FPDFImageObj_GetRenderedBitmap(doc, page, obj);
+	if (!bmp) bmp = P.FPDFImageObj_GetBitmap(obj);
+	if (!bmp) return null;
+	try {
+		const w = P.FPDFBitmap_GetWidth(bmp);
+		const h = P.FPDFBitmap_GetHeight(bmp);
+		const stride = P.FPDFBitmap_GetStride(bmp);
+		const format = P.FPDFBitmap_GetFormat(bmp);
+		const bpp = format === FPDFBitmap_Gray ? 1 : format === FPDFBitmap_BGR ? 3 : format === FPDFBitmap_BGRx || format === FPDFBitmap_BGRA ? 4 : 0;
+		if (w <= 0 || h <= 0 || !bpp) return null;
+		const ptr = P.FPDFBitmap_GetBuffer(bmp);
+		const mem = heap();
+		const scale = Math.min(1, SCAN_SAMPLE_PX / Math.max(w, h));
+		const gw = Math.max(1, Math.round(w * scale));
+		const gh = Math.max(1, Math.round(h * scale));
+		// Block sums: r, g, b, alpha, count
+		const acc = new Float64Array(gw * gh * 5);
+		// Reading every pixel of a big rendered image is wasteful: step so each block gets ~16x16 reads.
+		const step = Math.max(1, Math.floor(Math.max(w / gw, h / gh) / 16));
+		for (let y = 0; y < h; y += step) {
+			const by = Math.min(gh - 1, Math.floor(y * scale));
+			const row = ptr + y * stride;
+			for (let x = 0; x < w; x += step) {
+				const bx = Math.min(gw - 1, Math.floor(x * scale));
+				const o = row + x * bpp;
+				const k = (by * gw + bx) * 5;
+				if (bpp === 1) {
+					acc[k] += mem[o]!;
+					acc[k + 1] += mem[o]!;
+					acc[k + 2] += mem[o]!;
+					acc[k + 3] += 255;
+				} else {
+					acc[k] += mem[o + 2]!;
+					acc[k + 1] += mem[o + 1]!;
+					acc[k + 2] += mem[o]!;
+					acc[k + 3] += format === FPDFBitmap_BGRA ? mem[o + 3]! : 255;
+				}
+				acc[k + 4]++;
+			}
+		}
+		const total = gw * gh;
+		let white = 0;
+		let opaque = 0;
+		let saturated = 0;
+		let ink = 0;
+		for (let k = 0; k < acc.length; k += 5) {
+			const n = acc[k + 4]!;
+			if (!n || acc[k + 3]! / n < 250) continue;
+			opaque++;
+			const r = acc[k]! / n;
+			const g = acc[k + 1]! / n;
+			const b = acc[k + 2]! / n;
+			const max = Math.max(r, g, b);
+			const min = Math.min(r, g, b);
+			if (min > 200 && max - min < 32) white++;
+			else if (max > 60 && (max - min) / max > 0.35) saturated++;
+			if (max < 100) ink++;
+		}
+		const paper = opaque / total >= SCAN_OPAQUE_MIN_FRACTION && white / total >= SCAN_WHITE_MIN_FRACTION && saturated / total <= SCAN_SATURATED_MAX_FRACTION;
+		return paper ? { inked: ink >= 1 } : null;
+	} finally {
+		P.FPDFBitmap_Destroy(bmp);
+	}
+}
+
+interface ImageBox {
+	obj: number;
+	box: [number, number, number, number];
+}
+
+/**
+ * Indices of `images` that are scan paper: either one image covering most of
+ * the page, or tiles (strips, grids) that together paper it densely. Pages
+ * only count as scans when some tile carries ink (a pure-white raster is an
+ * MRC background layer or a blank page) and no tile is a photo.
+ */
+function scanImages(page: number, images: ImageBox[], pw: number, ph: number): Set<number> {
+	const area = pw * ph;
+	const out = new Set<number>();
+	if (!images.length || area <= 0) return out;
+	const frac = (b: ImageBox["box"]) => (Math.max(0, Math.min(pw, b[2]) - Math.max(0, b[0])) * Math.max(0, Math.min(ph, b[3]) - Math.max(0, b[1]))) / area;
+	let group: number[] = [];
+	const big = images.findIndex((im) => frac(im.box) >= SCAN_COVERAGE_MIN);
+	if (big >= 0) group = [big];
+	else {
+		const tiles = images.map((im, i) => i).filter((i) => frac(images[i]!.box) >= SCAN_TILE_MIN_FRACTION);
+		if (tiles.length < 2 || tiles.length > SCAN_MAX_TILES) return out;
+		let x0 = Infinity;
+		let y0 = Infinity;
+		let x1 = -Infinity;
+		let y1 = -Infinity;
+		let sum = 0;
+		for (const i of tiles) {
+			const b = images[i]!.box;
+			x0 = Math.min(x0, b[0]);
+			y0 = Math.min(y0, b[1]);
+			x1 = Math.max(x1, b[2]);
+			y1 = Math.max(y1, b[3]);
+			sum += frac(b);
+		}
+		const union = frac([x0, y0, x1, y1]);
+		if (union < SCAN_COVERAGE_MIN || sum / union < SCAN_TILE_DENSITY_MIN) return out;
+		group = tiles;
+	}
+	let inked = false;
+	for (const i of group) {
+		const verdict = classifyPaper(page, images[i]!.obj);
+		if (!verdict) return out;
+		inked ||= verdict.inked;
+	}
+	if (inked) for (const i of group) out.add(i);
+	return out;
+}
+
 /**
  * Boxes of the page's raster images, so dark mode can leave photos in their
  * original colours. Stencil masks (1-bit, no colour space) paint with the fill
- * colour like vector shapes, so they are recoloured with the rest.
+ * colour like vector shapes, so they are recoloured with the rest, and so are
+ * scans (see `scanImages`). `scans` counts the images classified as scan paper.
  */
-function readImages(page: number, xf: Xf): Float32Array {
-	const out: number[] = [];
+function readImages(page: number, index: number, xf: Xf): { images: Float32Array; scans: number } {
+	const found: ImageBox[] = [];
 	const mem = P.pdfium.wasmExports.malloc(28); // FS_MATRIX / 4 bounds / FPDF_IMAGEOBJ_METADATA
 	const f32 = () => new Float32Array(heap().buffer, mem, 6);
 	const walk = (count: number, get: (i: number) => number, m: Matrix) => {
-		for (let i = 0; i < count && out.length < MAX_IMAGES * 4; i++) {
+		for (let i = 0; i < count && found.length < MAX_IMAGES; i++) {
 			const obj = get(i);
 			const type = P.FPDFPageObj_GetType(obj);
 			if (type === FPDF_PAGEOBJ_FORM) {
@@ -279,12 +419,18 @@ function readImages(page: number, xf: Xf): Float32Array {
 				y1 = Math.max(y1, py);
 			}
 			if (x1 - x0 < 1 || y1 - y0 < 1) continue;
-			out.push(x0, y0, x1, y1);
+			found.push({ obj, box: [x0, y0, x1, y1] });
 		}
 	};
 	walk(P.FPDFPage_CountObjects(page), (i) => P.FPDFPage_GetObject(page, i), [1, 0, 0, 1, 0, 0]);
 	P.pdfium.wasmExports.free(mem);
-	return new Float32Array(out);
+	const size = pageSizes[index]!;
+	const scans = scanImages(page, found, size.w, size.h);
+	const out: number[] = [];
+	found.forEach((im, i) => {
+		if (!scans.has(i)) out.push(...im.box);
+	});
+	return { images: new Float32Array(out), scans: scans.size };
 }
 
 async function open(msg: Extract<ToRaster, { t: "init" }>) {

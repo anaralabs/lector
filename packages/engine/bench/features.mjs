@@ -48,5 +48,49 @@ await page.waitForTimeout(600);
 await page.screenshot({ path: `${out}/f2-dark-selection.png` });
 const sel = await page.evaluate(() => window.__events.length);
 void sel;
+// Reads screenshot pixels (css px) through an <img> in the page: no PNG decoder needed.
+const pixels = async (points) => {
+	const png = (await page.screenshot()).toString("base64");
+	return page.evaluate(
+		async ({ png, points }) => {
+			const img = new Image();
+			img.src = `data:image/png;base64,${png}`;
+			await img.decode();
+			const c = document.createElement("canvas");
+			c.width = img.width;
+			c.height = img.height;
+			const ctx = c.getContext("2d");
+			ctx.drawImage(img, 0, 0);
+			const k = img.width / innerWidth;
+			return points.map(([x, y]) => [...ctx.getImageData(Math.round(x * k), Math.round(y * k), 1, 1).data.slice(0, 3)]);
+		},
+		{ png, points },
+	);
+};
+const base = new URL(url);
+const fixture = (file, extra = "") => `${base.origin}${base.pathname}?file=/${file}${extra}`;
+// Fixtures are generated (demo/public/*.pdf is gitignored): bench/fixtures/make-*.mjs.
+const has = async (file) => (await fetch(`${base.origin}/${file}`, { method: "HEAD" })).headers.get("content-type")?.includes("pdf");
+const skip = (name, file) => console.log(`SKIP  ${name}  — ${file} missing; run node bench/fixtures/make-${file.replace(".pdf", "")}.mjs`);
+
+// Dark mode: a scanned page (one near-white image) darkens; photos keep their colours.
+if (!(await has("scan.pdf"))) skip("scan dark mode", "scan.pdf");
+else {
+await page.goto(fixture("scan.pdf", "&dark=1"));
+await page.waitForFunction(() => window.__firstPaintMs !== undefined);
+await page.evaluate(() => window.__viewer.zoomTo(0.5));
+await page.waitForTimeout(1200);
+// 1280x860 viewport at 50%: p1 spans x 487..793, y 6..402; the photo on p2 is centred
+// near (640, 600); p3 (a full-page photo) starts at y≈810.
+const [scanPaper, photo, fullPhoto] = await pixels([[500, 30], [640, 600], [640, 840]]);
+const luma = ([r, g, b]) => (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+const sat = ([r, g, b]) => (Math.max(r, g, b) - Math.min(r, g, b)) / Math.max(1, Math.max(r, g, b));
+await page.screenshot({ path: `${out}/f3-scan-dark.png` });
+check("dark mode darkens scanned pages", luma(scanPaper) < 0.3, `scan paper rgb(${scanPaper})`);
+check("dark mode keeps photos", sat(photo) > 0.3 && sat(fullPhoto) > 0.3, `photo rgb(${photo}), full-page photo rgb(${fullPhoto})`);
+const scanHits = await page.evaluate(() => window.__viewer.search("invoice"));
+check("scan OCR text searchable", scanHits.length === 1 && scanHits[0].page === 0, `${scanHits.length} hits`);
+}
+
 check("no errors", errors.length === 0, errors.join(" | "));
 await browser.close();

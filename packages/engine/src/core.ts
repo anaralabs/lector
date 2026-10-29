@@ -1678,9 +1678,11 @@ export class ViewerCore {
 			};
 			drawTiles();
 			drawMarks(dark);
-			// Dark mode recolours vector content only: images are drawn again,
-			// clipped to their boxes, without the tone mapping. They stay light
-			// (a scanned page is one image), so marks there use the light style.
+			// Dark mode recolours vector content and scans: photos are drawn again,
+			// clipped to their boxes, without the tone mapping. They keep their
+			// original (usually light) colours, so marks there use the light style.
+			// Scan paper is not in `images` (the worker classifies it), so a
+			// scanned page darkens like any other and its marks use the dark style.
 			const images = dark ? this.images.get(p) : undefined;
 			if (images) {
 				gl.setTone(null);

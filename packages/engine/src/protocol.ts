@@ -52,6 +52,8 @@ export type FromRaster =
 			links: Link[];
 			/** l, t, r, b per raster image in page points (top-left origin) */
 			images: Float32Array;
+			/** images classified as scan paper (tone-mapped in dark mode, so not in `images`) */
+			scans: number;
 			ms: number;
 	  }
 	| { t: "outline"; id: number; items: OutlineItem[] };
