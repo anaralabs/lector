@@ -25,6 +25,8 @@ export interface TextPoint {
 	index: number;
 }
 
+import { buildHaystack, type Haystack, type SearchOptions } from "./search";
+
 const NEWLINE = new Set([0x0a, 0x0d]);
 
 export class PageText {
@@ -192,37 +194,14 @@ export class PageText {
 		return { text: s, chars: Int32Array.from(chars) };
 	}
 
-	private search: { haystack: string; map: Int32Array } | null = null;
+	private haystacks = new Map<number, Haystack>();
 
-	/**
-	 * Lower-cased page text for substring search, with whitespace collapsed and
-	 * line-break hyphens removed. `map[i]` is the char index of haystack[i].
-	 */
-	searchable() {
-		if (this.search) return this.search;
-		let haystack = "";
-		const map: number[] = [];
-		let space = false;
-		for (let i = 0; i < this.codes.length; i++) {
-			const c = this.codes[i]!;
-			if (c === 0x02) continue; // hyphen at a line break: join the word
-			const ch = String.fromCodePoint(c || 0x20);
-			if (/\s/.test(ch)) {
-				if (!space && haystack.length > 0) {
-					haystack += " ";
-					map.push(i);
-				}
-				space = true;
-				continue;
-			}
-			space = false;
-			for (const lc of ch.toLocaleLowerCase()) {
-				haystack += lc;
-				map.push(i);
-			}
-		}
-		this.search = { haystack, map: Int32Array.from(map) };
-		return this.search;
+	/** Folded text for search (see buildHaystack), cached per folding variant. */
+	haystack(options: Pick<SearchOptions, "matchDiacritics" | "ignoreHyphenation"> = {}): Haystack {
+		const key = (options.matchDiacritics === false ? 1 : 0) | (options.ignoreHyphenation ? 2 : 0);
+		let h = this.haystacks.get(key);
+		if (!h) this.haystacks.set(key, (h = buildHaystack(this.codes, options)));
+		return h;
 	}
 
 	/** One entry per line for the hidden DOM text layer (page points). */

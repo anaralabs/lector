@@ -5,6 +5,7 @@
 import { Compositor } from "./gl";
 import type { ErrorCode, ErrorPhase, Link, OutlineItem, PageSize } from "./protocol";
 import { RasterPool, type TextResult, type TileResult } from "./raster-pool";
+import { boundedDistance, foldQuery, insertRanked, matchPage, type RawMatch, type SearchOptions, splitLimit } from "./search";
 import { PageText, type Rect, type TextPoint, comparePoints } from "./text";
 
 export type Color = [number, number, number, number];
@@ -98,16 +99,37 @@ export type PulseKind = "ripple" | "flash";
 export type RevealAlign = "auto" | "center" | "start" | number;
 
 export interface SearchHit {
+	/** where the match starts: page, char index (as `rects`/`select` take) and length on that page */
 	page: number;
 	index: number;
 	length: number;
 	/** the match with some surrounding context */
 	snippet: string;
+	/** rects on `page` */
 	rects: Rect[];
+	/** 1 for exact matches, else 1 - edits/query length */
+	score: number;
+	/** one part per page the match covers (two when it crosses a page break); the first is `page`/`index`/`length`/`rects` */
+	parts: { page: number; index: number; length: number; rects: Rect[] }[];
+}
+
+/** Like @anaralabs/lector's `useSearch` results. */
+export interface SearchResults {
+	exactMatches: SearchHit[];
+	/** best-first */
+	fuzzyMatches: SearchHit[];
+	hasMoreResults: boolean;
+	/** pages searched so far (equals `pageCount` in the final result unless cancelled) */
+	pagesSearched: number;
+	pageCount: number;
+	done: boolean;
 }
 
 export type Request =
-	| { type: "search"; query: string; limit?: number; pages?: number[] }
+	/** exact matches only, in document order (folding as SearchOptions; default limit 500) */
+	| { type: "search"; query: string; limit?: number; pages?: number[]; matchDiacritics?: boolean; ignoreHyphenation?: boolean }
+	/** exact + fuzzy matches; `progress` streams `search-progress` events with partial results */
+	| ({ type: "search-results"; query: string; progress?: boolean } & SearchOptions)
 	| { type: "outline" }
 	| { type: "page-text"; page: number }
 	/** page text plus, per UTF-16 unit, the char index that `rects` takes */
@@ -132,6 +154,8 @@ export type Command =
 	/** animate highlights by id (see PulseKind) */
 	| { type: "pulse"; ids: string[]; kind?: PulseKind; duration?: number }
 	| { type: "request"; id: number; request: Request }
+	/** stop a running request (searches); it answers with `{ error: "cancelled" }` */
+	| { type: "cancel"; id: number }
 	| { type: "select"; page: number; from: number; to: number }
 	| { type: "highlights"; items: Highlight[] }
 	| { type: "clear-selection" }
@@ -186,6 +210,8 @@ export type CoreEvent =
 	| { type: "highlight-hover"; id: string | null; screen: Rect | null }
 	| { type: "click"; page: number; x: number; y: number }
 	| { type: "response"; id: number; result: unknown }
+	/** partial results of a `search-results` request with `progress` */
+	| { type: "search-progress"; id: number; results: SearchResults }
 	/** Cmd/Ctrl+F while the viewer has focus, with `interceptFind` on: open the host's search */
 	| { type: "find" }
 	/**
@@ -1064,8 +1090,11 @@ export class ViewerCore {
 			case "select":
 				this.selectRange(cmd.page, cmd.from, cmd.to);
 				return;
+			case "cancel":
+				this.cancelled.add(cmd.id);
+				return;
 			case "request":
-				this.answer(cmd.request).then(
+				this.answer(cmd.request, cmd.id).then(
 					(result) => this.emit({ type: "response", id: cmd.id, result }),
 					(err) => this.emit({ type: "response", id: cmd.id, result: { error: String(err) } }),
 				);
@@ -1105,7 +1134,123 @@ export class ViewerCore {
 
 	private outline: Promise<OutlineItem[]> | null = null;
 
-	private async answer(req: Request): Promise<unknown> {
+	private cancelled = new Set<number>();
+
+	/**
+	 * Searches pages in document order as their text arrives (a few pages are
+	 * extracted ahead), so the first matches come back before the whole
+	 * document is loaded. Matches may cross line and page breaks.
+	 */
+	private async runSearch(
+		id: number,
+		query: string,
+		o: SearchOptions,
+		fuzzy: boolean,
+		onProgress: ((r: SearchResults) => void) | null,
+	): Promise<SearchResults> {
+		const pages = (o.pages ?? this.pages.map((_, i) => i)).filter((p) => p >= 0 && p < this.pages.length);
+		const fold = { matchDiacritics: o.matchDiacritics, ignoreHyphenation: o.ignoreHyphenation };
+		const q = foldQuery(query, o);
+		const limit = Math.max(0, Math.floor(o.limit ?? 100));
+		const threshold = Math.max(0, Math.min(1, o.threshold ?? 0.7));
+		const maxDistance = fuzzy ? Math.floor(q.length * (1 - threshold)) : 0;
+		const distance = maxDistance > 0 ? boundedDistance(q, maxDistance) : null;
+		const exact: SearchHit[] = [];
+		const fuzzyHits: SearchHit[] = [];
+		let exactCount = 0;
+		let fuzzyCount = 0;
+		let searched = 0;
+		const result = (done: boolean): SearchResults => {
+			const { exactLimit, fuzzyLimit } = distance ? splitLimit(exactCount, fuzzyCount, limit) : { exactLimit: limit, fuzzyLimit: 0 };
+			return {
+				exactMatches: exact.slice(0, exactLimit),
+				fuzzyMatches: fuzzyHits.slice(0, fuzzyLimit),
+				hasMoreResults: exactCount + fuzzyCount > limit,
+				pagesSearched: searched,
+				pageCount: pages.length,
+				done,
+			};
+		};
+		if (!q) return result(true);
+		const AHEAD = 6;
+		let lastProgress = performance.now();
+		let slice = performance.now();
+		for (let i = 0; i < pages.length; i++) {
+			if (this.cancelled.has(id)) throw new Error("cancelled");
+			// Prefetch a window ahead (text jobs run behind visible tiles).
+			for (let k = i; k < Math.min(pages.length, i + AHEAD); k++) if (!this.texts.has(pages[k]!)) this.requestText(pages[k]!, 500 + k);
+			const page = pages[i]!;
+			const text = await this.loadText(page);
+			const hay = text.haystack(fold);
+			// The next page's head, so a match can run across the page break.
+			const nextPage = pages[i + 1] === page + 1 ? page + 1 : -1;
+			let combined = hay.text;
+			let sep = 0;
+			let next: { text: PageText; map: Int32Array } | null = null;
+			if (nextPage >= 0 && q.length > 1) {
+				const nt = await this.loadText(nextPage);
+				const nh = nt.haystack(fold);
+				sep = hay.text.endsWith(" ") || !hay.text ? 0 : 1;
+				combined = hay.text + (sep ? " " : "") + nh.text.slice(0, q.length * 2);
+				next = { text: nt, map: nh.map };
+			}
+			const toHit = (m: RawMatch): SearchHit | null => {
+				const pageLen = hay.text.length;
+				if (!pageLen) return null;
+				const from = hay.map[m.start]!;
+				const to = hay.map[Math.min(m.end, pageLen) - 1]! + 1;
+				const parts: SearchHit["parts"] = [{ page, index: from, length: to - from, rects: text.rects(from, to) }];
+				let snippet = text.text(Math.max(0, from - 40), Math.min(text.length, to + 40));
+				const tail = m.end - pageLen - sep;
+				if (next && tail > 0) {
+					const nFrom = next.map[0]!;
+					const nTo = next.map[tail - 1]! + 1;
+					parts.push({ page: nextPage, index: nFrom, length: nTo - nFrom, rects: next.text.rects(nFrom, nTo) });
+					snippet = `${text.text(Math.max(0, from - 40), text.length).trimEnd()} ${next.text.text(nFrom, Math.min(next.text.length, nTo + 40))}`;
+				}
+				const first = parts[0]!;
+				return { page, index: first.index, length: first.length, snippet, rects: first.rects, score: m.score, parts };
+			};
+			const found = matchPage(combined, hay.text.length, q, maxDistance, distance);
+			let lastSpan = "";
+			for (const m of found.exact) {
+				const hit = toHit(m);
+				if (!hit) continue;
+				// "f" inside one "ﬀ" glyph: one highlight, not two.
+				const span = `${hit.index}:${hit.length}`;
+				if (span === lastSpan) continue;
+				lastSpan = span;
+				exactCount++;
+				if (exact.length < limit) exact.push(hit);
+			}
+			for (const m of found.fuzzy) {
+				fuzzyCount++;
+				if (fuzzyHits.length < limit || m.score > (fuzzyHits[limit - 1]?.score ?? Infinity)) {
+					const hit = toHit(m);
+					if (hit) insertRanked(fuzzyHits, hit, limit);
+				}
+			}
+			searched = i + 1;
+			// Exact-only: the first extra hit proves hasMoreResults; later pages cannot change the list.
+			if (!distance && exactCount > limit) {
+				searched = pages.length;
+				break;
+			}
+			const now = performance.now();
+			if (onProgress && (now - lastProgress > 50 || found.exact.length || found.fuzzy.length)) {
+				lastProgress = now;
+				onProgress(result(false));
+			}
+			// Yield so frames (main-thread compositor) and input keep flowing.
+			if (now - slice > 8) {
+				await new Promise((r) => setTimeout(r, 0));
+				slice = performance.now();
+			}
+		}
+		return result(true);
+	}
+
+	private async answer(req: Request, id = 0): Promise<unknown> {
 		switch (req.type) {
 			case "page-text": {
 				const text = await this.loadText(req.page);
@@ -1143,24 +1288,12 @@ export class ViewerCore {
 				});
 				return this.outline;
 			case "search": {
-				const query = req.query.trim().toLocaleLowerCase();
-				if (!query) return [];
-				const limit = req.limit ?? 500;
-				const hits: SearchHit[] = [];
-				const pages = (req.pages ?? this.pages.map((_, i) => i)).filter((p) => p >= 0 && p < this.pages.length);
-				const texts = await Promise.all(pages.map((p) => this.loadText(p)));
-				for (let i = 0; i < texts.length && hits.length < limit; i++) {
-					const page = pages[i]!;
-					const text = texts[i]!;
-					const { haystack, map } = text.searchable();
-					for (let at = haystack.indexOf(query); at !== -1 && hits.length < limit; at = haystack.indexOf(query, at + 1)) {
-						const from = map[at]!;
-						const to = map[at + query.length - 1]! + 1;
-						const s = Math.max(0, from - 40);
-						hits.push({ page, index: from, length: to - from, snippet: text.text(s, Math.min(text.length, to + 40)), rects: text.rects(from, to) });
-					}
-				}
-				return hits;
+				const r = await this.runSearch(id, req.query, { ...req, limit: req.limit ?? 500, threshold: 1 }, false, null).finally(() => this.cancelled.delete(id));
+				return r.exactMatches;
+			}
+			case "search-results": {
+				const progress = req.progress ? (results: SearchResults) => this.emit({ type: "search-progress", id, results }) : null;
+				return this.runSearch(id, req.query, req, true, progress).finally(() => this.cancelled.delete(id));
 			}
 		}
 	}

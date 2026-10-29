@@ -11,8 +11,10 @@ import {
 	type Request,
 	type RevealAlign,
 	type SearchHit,
+	type SearchResults,
 	ViewerCore,
 } from "./core";
+import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
 import type { OutlineItem } from "./protocol";
 import { getEngineSupport } from "./support";
@@ -77,8 +79,23 @@ export interface Viewer {
 	select(page: number, from: number, to: number): void;
 	/** select the page in view ("page"), every page ("document"), or Cmd/Ctrl+A behaviour ("auto": page, then document) */
 	selectAll(scope?: "page" | "document" | "auto"): void;
-	/** case-insensitive search; `pages` limits it to those pages (0-based) */
-	search(query: string, limit?: number, options?: { pages?: number[] }): Promise<SearchHit[]>;
+	/**
+	 * Exact, case-insensitive search in document order (ligatures, quotes and
+	 * whitespace folded; matches cross line and page breaks). `pages` limits it
+	 * to those pages (0-based). Default limit 500.
+	 */
+	search(query: string, limit?: number, options?: Pick<SearchOptions, "pages" | "matchDiacritics" | "ignoreHyphenation"> & { signal?: AbortSignal }): Promise<SearchHit[]>;
+	/**
+	 * Exact and fuzzy search, like lector's `searchAsync`: `{ exactMatches,
+	 * fuzzyMatches, hasMoreResults }`. Pages are searched as their text is
+	 * extracted; `onProgress` gets partial results along the way. Aborting the
+	 * signal (or `cancelSearch`) rejects with an `AbortError`.
+	 */
+	searchAsync(query: string, options?: SearchOptions & { signal?: AbortSignal; onProgress?: (partial: SearchResults) => void }): Promise<SearchResults>;
+	/** cancel every running search */
+	cancelSearch(): void;
+	/** a search is running */
+	readonly isSearching: boolean;
 	outline(): Promise<OutlineItem[]>;
 	pageText(page: number): Promise<string>;
 	/** page text plus `chars[i]`: the char index (for `rects`) of UTF-16 unit `i` */
@@ -213,6 +230,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	let textLayer: TextLayer | null = null;
 	const unlocks: ((ok: boolean) => void)[] = [];
 	const pending = new Map<number, (result: unknown) => void>();
+	const progressFns = new Map<number, (r: SearchResults) => void>();
 	const flights = new Map<number, (landed: boolean) => void>();
 	const handleEvent = (e: CoreEvent) => {
 		if (e.type === "resized") {
@@ -235,7 +253,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			for (const resolve of unlocks.splice(0)) resolve(true);
 		} else if (e.type === "error" && e.code === "password" && e.phase === "document-load") {
 			for (const resolve of unlocks.splice(0)) resolve(false);
-		} else if (e.type === "response") {
+		} else if (e.type === "search-progress") progressFns.get(e.id)?.(e.results);
+		else if (e.type === "response") {
 			pending.get(e.id)?.(e.result);
 			pending.delete(e.id);
 			return;
@@ -286,7 +305,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			command(make(id));
 		});
 	let nextRequest = 1;
-	const request = <T>(req: Request) =>
+	const request = <T>(req: Request, started?: (id: number) => void) =>
 		new Promise<T>((resolve, reject) => {
 			const id = nextRequest++;
 			pending.set(id, (result) => {
@@ -294,8 +313,46 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				if (error) reject(new Error(error));
 				else resolve(result as T);
 			});
+			started?.(id);
 			command({ type: "request", id, request: req });
 		});
+	// Running searches: id -> abort (rejects the caller's promise right away).
+	const searches = new Map<number, () => void>();
+	const runSearch = <T>(req: Request, signal: AbortSignal | undefined, onProgress?: (r: SearchResults) => void) => {
+		if (signal?.aborted) return Promise.reject(new DOMException("Search aborted", "AbortError"));
+		let id = 0;
+		return new Promise<T>((resolve, reject) => {
+			const abort = () => {
+				if (!searches.has(id)) return;
+				searches.delete(id);
+				progressFns.delete(id);
+				pending.delete(id);
+				command({ type: "cancel", id });
+				reject(new DOMException("Search aborted", "AbortError"));
+			};
+			signal?.addEventListener("abort", abort, { once: true });
+			request<T>(req, (i) => {
+				id = i;
+				searches.set(id, abort);
+				if (onProgress) progressFns.set(id, onProgress);
+			}).then(
+				(r) => {
+					done();
+					resolve(r);
+				},
+				(err) => {
+					done();
+					reject(err);
+				},
+			);
+			// Before settling, so `isSearching` is false when the caller resumes.
+			const done = () => {
+				searches.delete(id);
+				progressFns.delete(id);
+				signal?.removeEventListener("abort", abort);
+			};
+		});
+	};
 
 	if (wantTextLayer) textLayer = new TextLayer(container, (page) => request<TextLayerLine[]>({ type: "text-layer", page }));
 
@@ -434,7 +491,18 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		pulse: (ids, o) => command({ type: "pulse", ids: Array.isArray(ids) ? ids : [ids], kind: o?.kind, duration: o?.duration }),
 		select: (page, from, to) => command({ type: "select", page, from, to }),
 		selectAll: (scope) => command({ type: "select-all", scope }),
-		search: (query, limit, o) => request<SearchHit[]>({ type: "search", query, limit, pages: o?.pages }),
+		search: (query, limit, o) =>
+			runSearch<SearchHit[]>({ type: "search", query, limit, pages: o?.pages, matchDiacritics: o?.matchDiacritics, ignoreHyphenation: o?.ignoreHyphenation }, o?.signal),
+		searchAsync: (query, o = {}) => {
+			const { signal, onProgress, ...opts } = o;
+			return runSearch<SearchResults>({ type: "search-results", query, progress: !!onProgress, ...opts }, signal, onProgress);
+		},
+		cancelSearch: () => {
+			for (const abort of [...searches.values()]) abort();
+		},
+		get isSearching() {
+			return searches.size > 0;
+		},
 		outline: () => request<OutlineItem[]>({ type: "outline" }),
 		pageText: (page) => request<string>({ type: "page-text", page }),
 		pageTextMap: (page) => request<{ text: string; chars: Int32Array }>({ type: "page-text-map", page }),
@@ -462,6 +530,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			ac.abort();
 			for (const resolve of flights.values()) resolve(false);
 			for (const resolve of unlocks.splice(0)) resolve(false);
+			for (const abort of [...searches.values()]) abort();
 			flights.clear();
 			ro.disconnect();
 			textLayer?.destroy();

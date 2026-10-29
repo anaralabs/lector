@@ -5,7 +5,7 @@ const out = process.argv[3] ?? ".";
 const browser = await chromium.launch({ channel: "chrome", headless: true, args: ["--enable-gpu", "--use-angle=metal"] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 2 });
 const errors = [];
-page.on("pageerror", (e) => errors.push(String(e)));
+page.on("pageerror", (e) => errors.push(String(e.stack || e)));
 page.on("console", (m) => m.type() === "error" && !m.text().includes("404") && errors.push(m.text()));
 await page.goto(url);
 await page.waitForFunction(() => window.__firstPaintMs !== undefined);
@@ -19,6 +19,40 @@ check("search hit has rects", hits[0]?.rects.length > 0, JSON.stringify(hits[0]?
 t = Date.now();
 const again = await page.evaluate(() => window.__viewer.search("automaton"));
 check("warm search", again.length > 0, `${again.length} hits in ${Date.now() - t}ms`);
+
+// Search parity with lector: fuzzy + exact, folding, line/page breaks, progress, cancellation.
+const sr = await page.evaluate(async () => {
+	const v = window.__viewer;
+	const progress = [];
+	const res = await v.searchAsync("programable mater", { onProgress: (p) => progress.push(p.pagesSearched) });
+	const p0 = await v.pageText(0);
+	const p1 = await v.pageText(1);
+	const cross = `${p0.trim().split(/\s+/).slice(-2).join(" ")} ${p1.trim().split(/\s+/).slice(0, 2).join(" ")}`;
+	const crossHits = await v.search(cross);
+	const ac = new AbortController();
+	const pending = v.searchAsync("the", { signal: ac.signal }).then(() => "resolved", (e) => e.name);
+	ac.abort();
+	const aborted = await pending;
+	return {
+		fuzzy: res.fuzzyMatches.length,
+		exact: res.exactMatches.length,
+		score: res.fuzzyMatches[0]?.score,
+		firstProgress: progress[0],
+		pageCount: res.pageCount,
+		line: (await v.search("programmable matter by presenting"))[0]?.rects.length,
+		hyphen: (await v.search("manipulating a collective")).length,
+		crossParts: crossHits[0]?.parts.map((p) => p.page).join(","),
+		accents: [(await v.search("sandor")).length, (await v.search("sandor", 10, { matchDiacritics: false })).length],
+		aborted,
+		searching: v.isSearching,
+	};
+});
+check("fuzzy search", sr.fuzzy > 3 && sr.exact === 0 && sr.score < 1, `${sr.fuzzy} fuzzy, best score ${sr.score?.toFixed(2)}`);
+check("search streams progress", sr.firstProgress < sr.pageCount, `first progress after ${sr.firstProgress}/${sr.pageCount} pages`);
+check("match across a line break", sr.line === 2 && sr.hyphen > 0, `${sr.line} rects; hyphenated: ${sr.hyphen}`);
+check("match across a page break", sr.crossParts === "0,1", `parts on pages ${sr.crossParts}`);
+check("diacritic folding (opt-in, like lector)", sr.accents[0] === 0 && sr.accents[1] > 0, `"sandor": ${sr.accents[0]} default, ${sr.accents[1]} folded`);
+check("search cancellation", sr.aborted === "AbortError" && !sr.searching, sr.aborted);
 
 const outline = await page.evaluate(() => window.__viewer.outline());
 check("outline", Array.isArray(outline), `${outline.length} top-level items: ${outline.slice(0, 4).map((o) => `${o.title}→p${o.dest?.page + 1}`).join(", ")}`);
