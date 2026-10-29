@@ -4,7 +4,9 @@
 import {
 	type Command,
 	type CoreEvent,
+	type Camera,
 	type CoreOptions,
+	defaultOptions,
 	type InputMsg,
 	type PointerKind,
 	type PulseKind,
@@ -73,10 +75,34 @@ export interface ViewerOptions extends Partial<CoreOptions> {
 export interface Viewer {
 	readonly canvas: HTMLCanvasElement;
 	readonly offscreen: boolean;
+	/**
+	 * A div above the canvas (and the hidden text layer) for host overlays
+	 * (popovers, page-anchored widgets). It is `pointer-events: none`: give
+	 * interactive children `pointer-events: auto`. Keys typed into inputs or
+	 * focusable elements here are left alone by the viewer.
+	 */
+	readonly overlayElement: HTMLDivElement;
+	/** the resolved options: defaults, creation options and every `setOptions` since */
+	readonly options: CoreOptions;
 	zoomTo(zoom: number): void;
 	fitWidth(): void;
-	/** resolves true once the camera lands, false if input or another jump interrupted it */
-	goToPage(page: number, top?: number, options?: { animate?: boolean }): Promise<boolean>;
+	/** zoom so the page in view fits whole (sticky across resizes, like fit-width) */
+	fitPage(): void;
+	/**
+	 * Resolves true once the camera lands, false if input or another jump
+	 * interrupted it. `top`: page points below the page top; `offset`: css px
+	 * kept between the viewport top and that point (default `pageGap`).
+	 */
+	goToPage(page: number, top?: number, options?: { animate?: boolean; offset?: number }): Promise<boolean>;
+	/**
+	 * The vertical scroll position as a scroll container would report it, in
+	 * css px at the current zoom: for scroll persistence and custom scrollbars.
+	 */
+	scrollState(): { top: number; height: number; viewportHeight: number; fraction: number };
+	/** scroll so the viewport top sits at `fraction` (0-1) of the scrollable range */
+	scrollToFraction(fraction: number): void;
+	/** the last camera (doc points at the viewport's top-left, zoom); pass it as `initialCamera` to restore exactly */
+	readonly camera: Camera;
 	/**
 	 * Bring a page-space rect into view, e.g. a citation: its top lands at 30% of
 	 * the viewport height (`align`), x only moves if it is cut off, and the zoom
@@ -96,9 +122,15 @@ export interface Viewer {
 	/**
 	 * Exact, case-insensitive search in document order (ligatures, quotes and
 	 * whitespace folded; matches cross line and page breaks). `pages` limits it
-	 * to those pages (0-based). Default limit 500.
+	 * to those pages (0-based). Default limit 500. With `fuzzy`, fuzzy matches
+	 * (`exact: false`, best `score` first) follow the exact ones, split within
+	 * `limit` like `searchAsync`.
 	 */
-	search(query: string, limit?: number, options?: Pick<SearchOptions, "pages" | "matchDiacritics" | "ignoreHyphenation"> & { signal?: AbortSignal }): Promise<SearchHit[]>;
+	search(
+		query: string,
+		limit?: number,
+		options?: Pick<SearchOptions, "pages" | "matchDiacritics" | "ignoreHyphenation"> & { fuzzy?: { threshold?: number }; signal?: AbortSignal },
+	): Promise<SearchHit[]>;
 	/**
 	 * Exact and fuzzy search, like lector's `searchAsync`: `{ exactMatches,
 	 * fuzzyMatches, hasMoreResults }`. Pages are searched as their text is
@@ -138,6 +170,8 @@ export interface RevealOptions {
 	animate?: boolean;
 	align?: RevealAlign;
 	ifNeeded?: boolean;
+	/** css px added to where the rect lands (positive moves it down), e.g. under a sticky header */
+	offset?: number;
 }
 
 /** Errors mirror pdf.js wording so hosts that pattern-match load failures keep working. */
@@ -262,6 +296,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	if (container.tabIndex < 0) container.tabIndex = 0;
 	canvas.setAttribute("aria-hidden", "true");
 	container.appendChild(canvas);
+	const overlay = document.createElement("div");
+	overlay.className = "lector-overlay";
+	overlay.style.cssText = "position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:2;";
 
 	// Raster workers, each with a port to the core. They share the document
 	// source. Phones and tablets: each worker still holds PDFium's heap, and iOS
@@ -284,6 +321,10 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 
 	let selectedText = "";
 	let opened = false;
+	let resolved: CoreOptions = { ...defaultOptions, ...coreOptions };
+	let camera: Camera = { x: 0, y: 0, zoom: 1 };
+	let layout: Rect[] = [];
+	let viewH = 0;
 	let textLayer: TextLayer | null = null;
 	const unlocks: ((ok: boolean) => void)[] = [];
 	const pending = new Map<number, (result: unknown) => void>();
@@ -294,7 +335,11 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			canvas.style.width = `${e.w}px`;
 			canvas.style.height = `${e.h}px`;
 			textLayer?.setViewport(e.w, e.h);
-		} else if (e.type === "camera") textLayer?.setCamera(e.camera);
+			viewH = e.h;
+		} else if (e.type === "camera") {
+			camera = e.camera;
+			textLayer?.setCamera(e.camera);
+		}
 		else if (e.type === "cursor") container.style.cursor = e.cursor;
 		else if (e.type === "selection") {
 			if (e.final) selectedText = e.selection?.text ?? "";
@@ -309,6 +354,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			if (autoFetch && !blob) void fetchAll().catch(() => {});
 		} else if (e.type === "ready") {
 			opened = true;
+			layout = e.layout;
 			textLayer?.setLayout(e.layout);
 			for (const resolve of unlocks.splice(0)) resolve(true);
 		} else if (e.type === "error" && e.code === "password" && e.phase === "document-load") {
@@ -344,7 +390,13 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			postToCore = (msg) => coreWorker!.postMessage(msg);
 		});
 	} else {
-		core = new ViewerCore(canvas, corePorts, handleEvent, (cb) => requestAnimationFrame(cb), coreOptions);
+		try {
+			core = new ViewerCore(canvas, corePorts, handleEvent, (cb) => requestAnimationFrame(cb), coreOptions);
+		} catch (err) {
+			for (const w of rasterWorkers) w.terminate();
+			canvas.remove();
+			throw new EngineError(`lector-engine: no WebGL2 context: ${String((err as Error)?.message ?? err)}`, "gpu", "engine-load");
+		}
 		(globalThis as { __core?: ViewerCore }).__core = core;
 	}
 
@@ -415,6 +467,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	};
 
 	if (wantTextLayer) textLayer = new TextLayer(container, (page) => request<TextLayerLine[]>({ type: "text-layer", page }));
+	container.appendChild(overlay);
 
 	// ------------------------------------------------------------ input
 	let rect = container.getBoundingClientRect();
@@ -526,7 +579,15 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		);
 	}
 
+	// Typing in a host input (in the overlay or elsewhere inside the container) is not viewer input.
+	const editable = (t: EventTarget | null) => {
+		const el = t instanceof Element ? t : null;
+		if (!el || el === container) return false;
+		if (el.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")) return true;
+		return overlay.contains(el);
+	};
 	on(container, "keydown", (e: KeyboardEvent) => {
+		if (editable(e.target)) return;
 		const mod = e.metaKey || e.ctrlKey;
 		const zoomKey = mod && ["=", "+", "-", "0"].includes(e.key);
 		const selectAll = mod && !e.altKey && e.key.toLowerCase() === "a";
@@ -537,7 +598,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 
 	let copyEnabled = coreOptions.copyOptions !== false;
 	on(document, "copy", (e: ClipboardEvent) => {
-		if (!copyEnabled || !selectedText || !container.contains(document.activeElement)) return;
+		if (!copyEnabled || !selectedText || !container.contains(document.activeElement) || editable(document.activeElement)) return;
 		e.clipboardData?.setData("text/plain", selectedText);
 		e.preventDefault();
 	});
@@ -546,15 +607,37 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		canvas,
 		offscreen: useOffscreen,
 		zoomTo: (zoom) => command({ type: "zoom", zoom }),
+		overlayElement: overlay,
+		get options() {
+			return { ...resolved };
+		},
+		get camera() {
+			return { ...camera };
+		},
 		fitWidth: () => command({ type: "fit-width" }),
-		goToPage: (page, top, o) => flight((id) => ({ type: "goto", page, top, animate: o?.animate, flight: id })),
-		reveal: (page, rect, o) => flight((id) => ({ type: "reveal", page, rect, animate: o?.animate, align: o?.align, ifNeeded: o?.ifNeeded, flight: id })),
+		fitPage: () => command({ type: "fit-page" }),
+		goToPage: (page, top, o) => flight((id) => ({ type: "goto", page, top, animate: o?.animate, offset: o?.offset, flight: id })),
+		reveal: (page, rect, o) =>
+			flight((id) => ({ type: "reveal", page, rect, animate: o?.animate, align: o?.align, ifNeeded: o?.ifNeeded, offset: o?.offset, flight: id })),
+		scrollState: () => {
+			const last = layout[layout.length - 1];
+			const docH = last ? last.y + last.h + resolved.pageGap : 0;
+			const z = camera.zoom;
+			const height = docH * z;
+			const top = Math.max(0, Math.min(height - viewH, camera.y * z));
+			const range = height - viewH;
+			return { top, height, viewportHeight: viewH, fraction: range > 0 ? top / range : 0 };
+		},
+		scrollToFraction: (fraction) => command({ type: "scroll-to", fraction }),
 		pulse: (ids, o) => command({ type: "pulse", ids: Array.isArray(ids) ? ids : [ids], kind: o?.kind, duration: o?.duration }),
 		select: (page, from, to) => command({ type: "select", page, from, to }),
 		setSelection: (range) => command({ type: "set-selection", range }),
 		selectAll: (scope) => command({ type: "select-all", scope }),
 		search: (query, limit, o) =>
-			runSearch<SearchHit[]>({ type: "search", query, limit, pages: o?.pages, matchDiacritics: o?.matchDiacritics, ignoreHyphenation: o?.ignoreHyphenation }, o?.signal),
+			runSearch<SearchHit[]>(
+				{ type: "search", query, limit, pages: o?.pages, matchDiacritics: o?.matchDiacritics, ignoreHyphenation: o?.ignoreHyphenation, fuzzy: o?.fuzzy },
+				o?.signal,
+			),
 		searchAsync: (query, o = {}) => {
 			const { signal, onProgress, ...opts } = o;
 			return runSearch<SearchResults>({ type: "search-results", query, progress: !!onProgress, ...opts }, signal, onProgress);
@@ -579,6 +662,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		clearSelection: () => command({ type: "clear-selection" }),
 		setOptions: (o) => {
 			if ("copyOptions" in o) copyEnabled = o.copyOptions !== false;
+			resolved = { ...resolved, ...o };
 			command({ type: "options", options: o });
 		},
 		unlock: (password) =>
@@ -599,6 +683,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			flights.clear();
 			ro.disconnect();
 			textLayer?.destroy();
+			overlay.remove();
 			for (const w of rasterWorkers) w.terminate();
 			coreWorker?.terminate();
 			canvas.remove();

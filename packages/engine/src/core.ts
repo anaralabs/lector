@@ -25,7 +25,24 @@ export interface CoreOptions {
 	gamma: number;
 	/** GPU texture budget for tiles */
 	textureBudgetMB: number;
-	initialZoom: "fit-width" | number;
+	/** "fit-width", "fit-page" (a whole page in view) or a zoom factor */
+	initialZoom: "fit-width" | "fit-page" | number;
+	/** page (0-based) shown first, set before the first paint (default 0) */
+	initialPage: number;
+	/**
+	 * Where the first view starts: page points below the top of `initialPage`
+	 * (default 0, the page top with a `pageGap` margin). See also
+	 * `initialOffset` and `initialCamera`.
+	 */
+	initialTop: number;
+	/**
+	 * Restore a scroll position: css px from the top of the document at the
+	 * initial zoom, like lector's `initialOffset` (pairs with
+	 * `viewer.scrollState().top`). Wins over `initialPage`.
+	 */
+	initialOffset: number | null;
+	/** exact restore of a saved `camera` event (doc points + zoom); wins over the other initial options */
+	initialCamera: Camera | null;
 	minZoom: number;
 	maxZoom: number;
 	/** dark mode: page white maps to `paper`, ink maps to `ink` */
@@ -38,6 +55,7 @@ export interface CoreOptions {
 	copyOptions: false | SelectionTextOptions;
 }
 
+/** Every option's default (hosts can read `pageGap`, colours, ... from here or `viewer.options`). */
 export const defaultOptions: CoreOptions = {
 	background: [0.93, 0.93, 0.94],
 	pageGap: 12,
@@ -47,6 +65,10 @@ export const defaultOptions: CoreOptions = {
 	gamma: 1.25,
 	textureBudgetMB: 384,
 	initialZoom: "fit-width",
+	initialPage: 0,
+	initialTop: 0,
+	initialOffset: null,
+	initialCamera: null,
 	minZoom: 0.1,
 	maxZoom: 24,
 	dark: false,
@@ -110,8 +132,12 @@ export interface SearchHit {
 	snippet: string;
 	/** rects on `page` */
 	rects: Rect[];
+	/** [start, end) of the match within `snippet` (UTF-16 offsets), for highlighting it */
+	snippetMatch: [number, number];
 	/** 1 for exact matches, else 1 - edits/query length */
 	score: number;
+	/** an exact (folded) match, not a fuzzy one */
+	exact: boolean;
 	/** one part per page the match covers (two when it crosses a page break); the first is `page`/`index`/`length`/`rects` */
 	parts: { page: number; index: number; length: number; rects: Rect[] }[];
 }
@@ -130,7 +156,16 @@ export interface SearchResults {
 
 export type Request =
 	/** exact matches only, in document order (folding as SearchOptions; default limit 500) */
-	| { type: "search"; query: string; limit?: number; pages?: number[]; matchDiacritics?: boolean; ignoreHyphenation?: boolean }
+	| {
+			type: "search";
+			query: string;
+			limit?: number;
+			pages?: number[];
+			matchDiacritics?: boolean;
+			ignoreHyphenation?: boolean;
+			/** also return fuzzy matches (after the exact ones, best first) */
+			fuzzy?: { threshold?: number };
+	  }
 	/** exact + fuzzy matches; `progress` streams `search-progress` events with partial results */
 	| ({ type: "search-results"; query: string; progress?: boolean } & SearchOptions)
 	| { type: "outline" }
@@ -145,15 +180,19 @@ export type Request =
 export type Command =
 	| { type: "zoom"; zoom: number; x?: number; y?: number }
 	| { type: "fit-width" }
+	/** zoom so the page in view fits whole, centred */
+	| { type: "fit-page" }
+	/** scroll so the viewport top is at `fraction` (0-1) of the scrollable height */
+	| { type: "scroll-to"; fraction: number }
 	/** `flight`: id echoed in the `flight` event when the camera lands (or is interrupted) */
-	| { type: "goto"; page: number; top?: number; animate?: boolean; flight?: number }
+	| { type: "goto"; page: number; top?: number; animate?: boolean; flight?: number; offset?: number }
 	/**
 	 * Bring `rect` (page points) into view: its top lands at `align` (default 0.3 of
 	 * the viewport height), x only moves if it does not fit, and the zoom only drops
 	 * if the rect is taller than 80% of the viewport. `ifNeeded`: no move when the
 	 * rect is already fully visible.
 	 */
-	| { type: "reveal"; page: number; rect: Rect; animate?: boolean; align?: RevealAlign; ifNeeded?: boolean; flight?: number }
+	| { type: "reveal"; page: number; rect: Rect; animate?: boolean; align?: RevealAlign; ifNeeded?: boolean; flight?: number; offset?: number }
 	/** animate highlights by id (see PulseKind) */
 	| { type: "pulse"; ids: string[]; kind?: PulseKind; duration?: number }
 	| { type: "request"; id: number; request: Request }
@@ -211,7 +250,8 @@ export type CoreEvent =
 	| { type: "ready"; pages: PageSize[]; layout: Rect[] }
 	/** the first page bitmap reached the screen (once per document) */
 	| { type: "painted"; page: number }
-	| { type: "view"; zoom: number; page: number; pageCount: number; fitWidth: boolean }
+	/** `fitWidth`: fit-width mode (kept for compatibility); `fit`: the sticky fit mode, if any */
+	| { type: "view"; zoom: number; page: number; pageCount: number; fitWidth: boolean; fit: "width" | "page" | null }
 	| { type: "camera"; camera: Camera; moving: boolean }
 	| { type: "selection"; selection: SelectionInfo | null; final: boolean }
 	| { type: "cursor"; cursor: Cursor }
@@ -304,13 +344,15 @@ function flashCurve(t: number) {
 	return 0;
 }
 
+type Fit = false | "width" | "page";
+
 interface Flight {
 	/** host id echoed in the `flight` event; 0 for internal jumps (links) */
 	id: number;
 	from: Camera;
 	to: Camera;
-	/** fit-width mode once landed */
-	fit: boolean;
+	/** fit mode once landed */
+	fit: Fit;
 	requested: number;
 	/** frame time the motion began; -1 while waiting for destination bitmaps */
 	start: number;
@@ -318,7 +360,7 @@ interface Flight {
 	/** pages on the path and at the destination: their base bitmaps must be ready */
 	pages: number[];
 	/** recomputes the destination (after a resize) */
-	retarget: () => { cam: Camera; fit: boolean } | null;
+	retarget: () => { cam: Camera; fit: Fit } | null;
 }
 
 export class ViewerCore {
@@ -332,8 +374,8 @@ export class ViewerCore {
 	private dpr = 1;
 	private cam = { x: 0, y: 0, zoom: 1 };
 	private camReady = false;
-	/** fit-width is sticky across resizes until the user zooms by hand */
-	private fitMode = false;
+	/** fit-width/fit-page is sticky across resizes until the user zooms by hand */
+	private fitMode: Fit = false;
 
 	private pages: PageSize[] = [];
 	private layout: PageRect[] = [];
@@ -397,7 +439,7 @@ export class ViewerCore {
 	private cpuTimes: number[] = [];
 	private tileMs: number[] = [];
 	private lastStats = 0;
-	private lastView = { zoom: 0, page: -1, fit: false };
+	private lastView: { zoom: number; page: number; fit: Fit } = { zoom: 0, page: -1, fit: false };
 
 	constructor(
 		canvas: HTMLCanvasElement | OffscreenCanvas,
@@ -434,19 +476,44 @@ export class ViewerCore {
 	private initCamera() {
 		if (this.camReady || this.vw === 0 || this.pages.length === 0) return;
 		this.camReady = true;
-		const fit = (this.vw - 32) / this.docW;
-		this.fitMode = this.opts.initialZoom === "fit-width";
-		const initial = this.opts.initialZoom;
-		const z = initial === "fit-width" ? this.fitZoom() : initial;
-		this.cam.zoom = this.clampZoom(z);
-		this.cam.y = 0;
+		const o = this.opts;
+		const initial = o.initialZoom;
+		this.fitMode = initial === "fit-width" ? "width" : initial === "fit-page" ? "page" : false;
+		const page = Math.max(0, Math.min(this.pages.length - 1, Math.floor(o.initialPage) || 0));
+		if (o.initialCamera) {
+			this.fitMode = false;
+			this.cam = { ...o.initialCamera, zoom: this.clampZoom(o.initialCamera.zoom) };
+		} else {
+			this.cam.zoom = this.clampZoom(this.fitMode ? this.fitZoom(this.fitMode, page) : (initial as number));
+			const zoom = this.cam.zoom;
+			if (o.initialOffset != null) this.cam.y = o.initialOffset / zoom;
+			else if (this.fitMode === "page") this.cam = this.fitPageCam(page, zoom);
+			else this.cam.y = this.layout[page]!.y + o.initialTop - this.opts.pageGap;
+		}
 		this.clampCamera();
+	}
+
+	/** Camera that centres `page` at `zoom`. */
+	private fitPageCam(page: number, zoom: number): Camera {
+		const r = this.layout[page]!;
+		return { x: r.x + r.w / 2 - this.vw / 2 / zoom, y: r.y + r.h / 2 - this.vh / 2 / zoom, zoom };
 	}
 
 	// ---------------------------------------------------------------- camera
 
-	private fitZoom() {
-		return Math.min((this.vw - 32) / this.docW, 2);
+	/** Zoom for a fit mode: the widest page fits the width, or `page` fits whole (with the 16px margins). */
+	private fitZoom(kind: "width" | "page" = "width", page = this.currentPage()) {
+		const width = Math.min((this.vw - 32) / this.docW, 2);
+		if (kind === "width") return width;
+		const r = this.layout[page];
+		if (!r) return width;
+		return Math.min((this.vw - 32) / r.w, (this.vh - 2 * this.opts.pageGap) / r.h);
+	}
+
+	/** The page at the viewport's vertical centre. */
+	private currentPage() {
+		const v = this.viewRect();
+		return this.layout.length ? this.pageAtDocY((v.y0 + v.y1) / 2) : 0;
 	}
 
 	private clampZoom(z: number) {
@@ -472,7 +539,7 @@ export class ViewerCore {
 	// ---------------------------------------------------------------- flights
 
 	/** Camera that shows `rect` on `page` (see the `reveal` command). */
-	private revealTarget(page: number, rect: Rect, align: RevealAlign = "auto", ifNeeded = false): { cam: Camera; fit: boolean } | null {
+	private revealTarget(page: number, rect: Rect, align: RevealAlign = "auto", ifNeeded = false, offset = 0): { cam: Camera; fit: Fit } | null {
 		const r = this.layout[page];
 		if (!r || this.vw === 0) return null;
 		const m = REVEAL_MARGIN;
@@ -497,14 +564,17 @@ export class ViewerCore {
 		if (dx0 < x + mx || dx0 + rect.w > x + viewW - mx) x = dx0 + rect.w / 2 - viewW / 2;
 		const hpx = rect.h * zoom;
 		let top = align === "center" ? (this.vh - hpx) / 2 : align === "start" ? m : this.vh * (typeof align === "number" ? align : 0.3);
-		top = Math.max(m, Math.min(top, this.vh - hpx - m));
+		top = Math.max(m, Math.min(top, this.vh - hpx - m)) + offset;
 		return { cam: this.clampCam({ x, y: dy0 - top / zoom, zoom }), fit };
 	}
 
-	private gotoTarget(page: number, top = 0): { cam: Camera; fit: boolean } | null {
+	/** `offset`: css px between the viewport top and the target (default: `pageGap` px). */
+	private gotoTarget(page: number, top = 0, offset?: number): { cam: Camera; fit: Fit } | null {
 		const r = this.layout[page];
 		if (!r) return null;
-		return { cam: this.clampCam({ x: this.cam.x, y: r.y + top - this.opts.pageGap / this.cam.zoom, zoom: this.cam.zoom }), fit: this.fitMode };
+		const z = this.cam.zoom;
+		if (this.fitMode === "page" && !top && offset === undefined) return { cam: this.clampCam(this.fitPageCam(page, z)), fit: "page" };
+		return { cam: this.clampCam({ x: this.cam.x, y: r.y + top - (offset ?? this.opts.pageGap) / z, zoom: z }), fit: this.fitMode };
 	}
 
 	/** Move the camera to the target, animated unless asked otherwise or reduced motion is on. */
@@ -675,7 +745,7 @@ export class ViewerCore {
 				this.initCamera();
 				if (changed && wasReady) {
 					if (this.fitMode) {
-						const z = this.clampZoom(this.fitZoom());
+						const z = this.clampZoom(this.fitZoom(this.fitMode));
 						if (z !== this.cam.zoom) {
 							this.cam.zoom = z;
 							this.zoomChanged();
@@ -1010,7 +1080,7 @@ export class ViewerCore {
 		const cy = this.vh / 2;
 		if (msg.mod && (msg.key === "=" || msg.key === "+")) this.userZoom(this.cam.zoom * 1.25, cx, cy);
 		else if (msg.mod && msg.key === "-") this.userZoom(this.cam.zoom / 1.25, cx, cy);
-		else if (msg.mod && msg.key === "0") this.command({ type: "fit-width" });
+		else if (msg.mod && msg.key === "0") this.command({ type: this.fitMode === "page" ? "fit-page" : "fit-width" });
 		else if (msg.key === "ArrowDown") this.panBy(0, line);
 		else if (msg.key === "ArrowUp") this.panBy(0, -line);
 		else if (msg.key === "ArrowRight") this.panBy(line, 0);
@@ -1061,20 +1131,40 @@ export class ViewerCore {
 				return;
 			case "fit-width":
 				this.cancelFlight();
-				this.zoomAt(this.fitZoom(), this.vw / 2, 0);
-				this.fitMode = true;
+				this.zoomAt(this.fitZoom("width"), this.vw / 2, 0);
+				this.fitMode = "width";
+				this.requestFrame();
 				return;
+			case "fit-page": {
+				this.cancelFlight();
+				const page = this.currentPage();
+				const zoom = this.clampZoom(this.fitZoom("page", page));
+				const zoomed = zoom !== this.cam.zoom;
+				this.cam = this.clampCam(this.fitPageCam(page, zoom));
+				this.fitMode = "page";
+				if (zoomed) this.zoomChanged();
+				this.requestFrame();
+				return;
+			}
+			case "scroll-to": {
+				this.cancelFlight();
+				const viewH = this.vh / this.cam.zoom;
+				this.cam.y = Math.max(0, Math.min(1, cmd.fraction)) * Math.max(0, this.docH - viewH);
+				this.clampCamera();
+				this.requestFrame();
+				return;
+			}
 			case "goto": {
-				const { page, top } = cmd;
-				this.fly(cmd.flight ?? 0, cmd.animate ?? false, () => this.gotoTarget(page, top));
+				const { page, top, offset } = cmd;
+				this.fly(cmd.flight ?? 0, cmd.animate ?? false, () => this.gotoTarget(page, top, offset));
 				return;
 			}
 			case "reveal": {
-				const { page, rect, align, ifNeeded } = cmd;
+				const { page, rect, align, ifNeeded, offset } = cmd;
 				let first = true;
 				// ifNeeded only applies to the first aim; a resize re-aims for real.
 				this.fly(cmd.flight ?? 0, cmd.animate ?? false, () => {
-					const t = this.revealTarget(page, rect, align, first && ifNeeded);
+					const t = this.revealTarget(page, rect, align, first && ifNeeded, offset);
 					first = false;
 					return t;
 				});
@@ -1220,16 +1310,31 @@ export class ViewerCore {
 				const from = hay.map[m.start]!;
 				const to = hay.map[Math.min(m.end, pageLen) - 1]! + 1;
 				const parts: SearchHit["parts"] = [{ page, index: from, length: to - from, rects: text.rects(from, to) }];
-				let snippet = text.text(Math.max(0, from - 40), Math.min(text.length, to + 40));
+				const s0 = Math.max(0, from - 40);
+				const before = text.text(s0, from);
+				let snippet = before + text.text(from, Math.min(text.length, to + 40));
+				let matchEnd = before.length + text.text(from, to).length;
 				const tail = m.end - pageLen - sep;
 				if (next && tail > 0) {
 					const nFrom = next.map[0]!;
 					const nTo = next.map[tail - 1]! + 1;
 					parts.push({ page: nextPage, index: nFrom, length: nTo - nFrom, rects: next.text.rects(nFrom, nTo) });
-					snippet = `${text.text(Math.max(0, from - 40), text.length).trimEnd()} ${next.text.text(nFrom, Math.min(next.text.length, nTo + 40))}`;
+					const head = `${before}${text.text(from, text.length)}`.trimEnd();
+					snippet = `${head} ${next.text.text(nFrom, Math.min(next.text.length, nTo + 40))}`;
+					matchEnd = head.length + 1 + next.text.text(nFrom, nTo).length;
 				}
 				const first = parts[0]!;
-				return { page, index: first.index, length: first.length, snippet, rects: first.rects, score: m.score, parts };
+				return {
+					page,
+					index: first.index,
+					length: first.length,
+					snippet,
+					snippetMatch: [before.length, matchEnd],
+					rects: first.rects,
+					score: m.score,
+					exact: m.score === 1,
+					parts,
+				};
 			};
 			const found = matchPage(combined, hay.text.length, q, maxDistance, distance);
 			let lastSpan = "";
@@ -1308,8 +1413,11 @@ export class ViewerCore {
 				});
 				return this.outline;
 			case "search": {
-				const r = await this.runSearch(id, req.query, { ...req, limit: req.limit ?? 500, threshold: 1 }, false, null).finally(() => this.cancelled.delete(id));
-				return r.exactMatches;
+				const fuzzy = !!req.fuzzy;
+				const r = await this.runSearch(id, req.query, { ...req, limit: req.limit ?? 500, threshold: req.fuzzy?.threshold ?? (fuzzy ? 0.7 : 1) }, fuzzy, null).finally(() =>
+					this.cancelled.delete(id),
+				);
+				return [...r.exactMatches, ...r.fuzzyMatches];
 			}
 			case "search-results": {
 				const progress = req.progress ? (results: SearchResults) => this.emit({ type: "search-progress", id, results }) : null;
@@ -2004,7 +2112,7 @@ export class ViewerCore {
 		}
 		if (page === this.lastView.page && this.cam.zoom === this.lastView.zoom && this.fitMode === this.lastView.fit) return;
 		this.lastView = { page, zoom: this.cam.zoom, fit: this.fitMode };
-		this.emit({ type: "view", zoom: this.cam.zoom, page, pageCount: this.pages.length, fitWidth: this.fitMode });
+		this.emit({ type: "view", zoom: this.cam.zoom, page, pageCount: this.pages.length, fitWidth: this.fitMode === "width", fit: this.fitMode || null });
 	}
 
 	private reportStats(now: number) {

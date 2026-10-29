@@ -453,7 +453,7 @@ function readImages(page: number, index: number, xf: Xf): { images: Float32Array
 }
 
 /** FPDF_GetLastError -> ErrorCode */
-const LOAD_ERRORS: Record<number, ErrorCode> = { 2: "file", 3: "format", 4: "password", 5: "security" };
+const LOAD_ERRORS: Record<number, ErrorCode> = { 2: "file", 3: "parse", 4: "password", 5: "security" };
 
 // ---------------------------------------------------------------- byte source
 // PDFium pulls bytes through FPDF_LoadCustomDocument's synchronous GetBlock
@@ -597,7 +597,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 		P = await init({ wasmBinary });
 		P.PDFiumExt_Init();
 	} catch (err) {
-		send({ t: "error", message: `lector-engine: pdfium.wasm failed to load from ${msg.wasmUrl}: ${String((err as Error)?.message ?? err)}`, code: "worker", phase: "engine-load" });
+		send({ t: "error", message: `lector-engine: pdfium.wasm failed to load from ${msg.wasmUrl}: ${String((err as Error)?.message ?? err)}`, code: "wasm", phase: "engine-load" });
 		return;
 	}
 	source = msg.source;

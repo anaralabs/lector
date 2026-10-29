@@ -1,3 +1,4 @@
+export { defaultOptions } from "./core";
 export { createViewer, type RevealOptions, type Viewer, type ViewerOptions } from "./viewer";
 export type { Camera, Color, Command, CoreEvent, CoreOptions, Cursor, Highlight, PulseKind, RevealAlign, SearchHit, SearchResults, SelectionInfo, Stats } from "./core";
 export type { SearchOptions } from "./search";

@@ -203,6 +203,70 @@ else {
 	check("password option", (await page.evaluate(() => window.__errors.length)) === 0);
 }
 
+// Position: initial page, scroll state round trip, fit-page, goto offset, overlay, options.
+await page.goto(fixture("cadbots.pdf", "&page=10"));
+await page.waitForFunction(() => window.__paintedMs !== undefined);
+const firstView = await page.evaluate(() => window.__all.find((e) => e.type === "view"));
+check("initialPage before first paint", firstView?.page === 10, `first view: page ${firstView?.page}`);
+const pos = await page.evaluate(async () => {
+	const v = window.__viewer;
+	const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+	v.scrollToFraction(0.5);
+	await wait(300);
+	const state = v.scrollState();
+	v.fitPage();
+	await wait(300);
+	const fitView = window.__all.findLast((e) => e.type === "view");
+	v.fitWidth();
+	await wait(200);
+	await v.goToPage(3, 0, { offset: 100 });
+	await wait(100);
+	const cam = v.camera;
+	const layout = window.__all.find((e) => e.type === "ready").layout;
+	const input = document.createElement("input");
+	input.style.pointerEvents = "auto";
+	v.overlayElement.appendChild(input);
+	input.focus();
+	const before = v.camera.y;
+	input.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }));
+	input.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", bubbles: true, cancelable: true }));
+	await wait(200);
+	const after = v.camera.y;
+	input.remove();
+	v.setOptions({ selectionColorDark: [0.5, 0.1, 0.1, 1] });
+	return {
+		state,
+		fit: fitView.fit,
+		fitWidthFlag: fitView.fitWidth,
+		gotoY: cam.y,
+		expectY: layout[3].y - 100 / cam.zoom,
+		overlay: getComputedStyle(v.overlayElement).pointerEvents,
+		inputKeys: after === before,
+		gap: v.options.pageGap,
+		dark: v.options.selectionColorDark.join(","),
+	};
+});
+check("scrollState / scrollToFraction", Math.abs(pos.state.fraction - 0.5) < 0.01 && pos.state.height > pos.state.viewportHeight, JSON.stringify(pos.state));
+check("fit-page", pos.fit === "page" && pos.fitWidthFlag === false, `fit ${pos.fit}`);
+check("goToPage offset", Math.abs(pos.gotoY - pos.expectY) < 0.5, `y ${pos.gotoY.toFixed(1)} vs ${pos.expectY.toFixed(1)}`);
+check("overlay element + keys in host inputs", pos.overlay === "none" && pos.inputKeys, `pointer-events ${pos.overlay}`);
+check("resolved options", pos.gap === 12 && pos.dark === "0.5,0.1,0.1,1", `pageGap ${pos.gap}, selectionColorDark ${pos.dark}`);
+// Restore the saved scroll position on a fresh viewer.
+await page.goto(fixture("cadbots.pdf", `&offset=${pos.state.top}`));
+await page.waitForFunction(() => window.__paintedMs !== undefined);
+const restored = await page.evaluate(() => window.__viewer.scrollState());
+check("initialOffset restores scroll", Math.abs(restored.top - pos.state.top) < 1, `${restored.top.toFixed(0)} vs ${pos.state.top.toFixed(0)}`);
+const fz = await page.evaluate(async () => {
+	const hits = await window.__viewer.search("programmable matter", 30, { fuzzy: { threshold: 0.8 } });
+	const exact = hits.filter((h) => h.exact);
+	return {
+		exact: exact.length,
+		fuzzy: hits.length - exact.length,
+		marked: exact.every((h) => h.snippet.slice(...h.snippetMatch).replace(/\s+/g, " ").toLowerCase() === "programmable matter"),
+	};
+});
+check("search fuzzy option + snippetMatch", fz.exact > 3 && fz.fuzzy > 0 && fz.marked, JSON.stringify(fz));
+
 // HTTP range loading: same document through range requests, getData fetches the whole file.
 await page.goto(fixture("cadbots.pdf", "&range=1&autoFetch=0"));
 await page.waitForFunction(() => window.__paintedMs !== undefined);

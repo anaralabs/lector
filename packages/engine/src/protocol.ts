@@ -8,12 +8,13 @@ export interface PageSize {
 
 /**
  * What failed. `password`: the document is encrypted and needs a (different)
- * password; `format`: not a PDF or damaged; `security`: unsupported encryption;
+ * password; `parse`: not a PDF or damaged; `security`: unsupported encryption;
  * `file`: unreadable; `fetch`: the HTTP request failed; `unsupported`: the
- * browser lacks a required feature; `worker`: a worker script or the wasm did
+ * browser lacks a required feature; `wasm`: pdfium.wasm did not load; `gpu`:
+ * no WebGL2 context (e.g. lost or blocklisted); `worker`: a worker script did
  * not load; `unknown`: anything else.
  */
-export type ErrorCode = "password" | "format" | "security" | "file" | "fetch" | "unsupported" | "worker" | "unknown";
+export type ErrorCode = "password" | "parse" | "security" | "file" | "fetch" | "unsupported" | "wasm" | "gpu" | "worker" | "unknown";
 /** When it failed, like lector's `onError` phases. */
 export type ErrorPhase = "engine-load" | "document-load" | "render" | "text";
 

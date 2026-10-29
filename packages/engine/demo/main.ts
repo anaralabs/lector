@@ -67,7 +67,12 @@ async function open(source: string | ArrayBuffer) {
 	const textLayer = params.get("textLayer") !== "0";
 	const rangeLoading = params.get("range") === "1";
 	const autoFetch = params.get("autoFetch") !== "0";
-	const viewer = await createViewer(el, source, { wasmUrl, offscreen, workers, onEvent, password, interceptFind, textLayer, rangeLoading, autoFetch, ...dark, ...(params.get("loader") === "0" ? {} : { createWorker, workerUrls }) });
+	const initial = {
+		...(params.has("page") ? { initialPage: Number(params.get("page")) } : {}),
+		...(params.has("offset") ? { initialOffset: Number(params.get("offset")) } : {}),
+		...(params.has("zoom") ? { initialZoom: params.get("zoom")!.startsWith("fit") ? (params.get("zoom") as "fit-page") : Number(params.get("zoom")) } : {}),
+	};
+	const viewer = await createViewer(el, source, { wasmUrl, offscreen, workers, onEvent, password, interceptFind, textLayer, rangeLoading, autoFetch, ...initial, ...dark, ...(params.get("loader") === "0" ? {} : { createWorker, workerUrls }) });
 	w.__viewer = viewer;
 	info.mode = `compositor: ${viewer.offscreen ? "worker (OffscreenCanvas)" : "main thread"}`;
 	el.focus();
