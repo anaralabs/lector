@@ -61,7 +61,9 @@ async function open(source: string | ArrayBuffer) {
 	// ?dark=1 previews dark mode with anara-like colours.
 	const dark = params.get("dark") === "1" ? { dark: true, background: [0.03, 0.03, 0.03] as [number, number, number], paper: [0.05, 0.05, 0.05] as [number, number, number] } : {};
 	const password = params.get("password") ?? undefined;
-	const viewer = await createViewer(el, source, { wasmUrl, offscreen, workers, onEvent, password, ...dark, ...(params.get("loader") === "0" ? {} : { createWorker, workerUrls }) });
+	const interceptFind = params.get("interceptFind") === "1";
+	const textLayer = params.get("textLayer") !== "0";
+	const viewer = await createViewer(el, source, { wasmUrl, offscreen, workers, onEvent, password, interceptFind, textLayer, ...dark, ...(params.get("loader") === "0" ? {} : { createWorker, workerUrls }) });
 	w.__viewer = viewer;
 	info.mode = `compositor: ${viewer.offscreen ? "worker (OffscreenCanvas)" : "main thread"}`;
 	el.focus();

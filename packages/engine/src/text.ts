@@ -225,6 +225,11 @@ export class PageText {
 		return this.search;
 	}
 
+	/** One entry per line for the hidden DOM text layer (page points). */
+	layerLines(): { text: string; x: number; y: number; w: number; h: number; dir?: "rtl" | "ttb" }[] {
+		return this.lines.map((line) => ({ text: this.text(line.start, line.end).replace(/[\r\n]+$/, ""), x: line.l, y: line.t, w: line.r - line.l, h: line.b - line.t }));
+	}
+
 	/** Word boundaries around caret `index`. */
 	wordAt(index: number): [number, number] {
 		const isWord = (i: number) => i >= 0 && i < this.codes.length && /[\p{L}\p{N}_]/u.test(String.fromCodePoint(this.codes[i]!));

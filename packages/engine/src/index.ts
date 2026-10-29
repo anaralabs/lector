@@ -4,3 +4,4 @@ export type { ErrorCode, ErrorPhase, Link, OutlineItem, PageSize } from "./proto
 export { EngineError } from "./errors";
 export type { Rect } from "./text";
 export { type EngineFeature, type EngineSupport, getEngineSupport, isEngineSupported } from "./support";
+export type { TextLayerLine } from "./text-layer";

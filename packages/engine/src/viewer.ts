@@ -17,6 +17,7 @@ import { EngineError } from "./errors";
 import type { OutlineItem } from "./protocol";
 import { getEngineSupport } from "./support";
 import type { Rect } from "./text";
+import { TextLayer, type TextLayerLine } from "./text-layer";
 
 export interface ViewerOptions extends Partial<CoreOptions> {
 	/** URL of pdfium.wasm (from `@embedpdf/pdfium/pdfium.wasm`) */
@@ -42,6 +43,18 @@ export interface ViewerOptions extends Partial<CoreOptions> {
 	onLink?: (url: string) => void;
 	/** password for an encrypted document (else an `error` event with code `password`; see `unlock`) */
 	password?: string;
+	/**
+	 * Hidden DOM text for the visible pages ±1 (default true): screen readers
+	 * read it and the browser's find (Cmd/Ctrl+F) matches it. It is transparent
+	 * and click-through; selection stays on the GPU.
+	 */
+	textLayer?: boolean;
+	/**
+	 * Cmd/Ctrl+F while the viewer has focus emits a `find` event instead of
+	 * opening the browser's find bar (default false). Native find only sees the
+	 * pages near the viewport, so hosts with their own search UI should use this.
+	 */
+	interceptFind?: boolean;
 }
 
 export interface Viewer {
@@ -62,6 +75,8 @@ export interface Viewer {
 	/** animate highlights by id: "ripple" (default, ~1s outward fade) or "flash" (whole-page blink) */
 	pulse(ids: string | string[], options?: { kind?: PulseKind; duration?: number }): void;
 	select(page: number, from: number, to: number): void;
+	/** select the page in view ("page"), every page ("document"), or Cmd/Ctrl+A behaviour ("auto": page, then document) */
+	selectAll(scope?: "page" | "document" | "auto"): void;
 	/** case-insensitive search; `pages` limits it to those pages (0-based) */
 	search(query: string, limit?: number, options?: { pages?: number[] }): Promise<SearchHit[]>;
 	outline(): Promise<OutlineItem[]>;
@@ -117,7 +132,19 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			"engine-load",
 		);
 	}
-	const { wasmUrl: wasmUrlOption, workers: workerCount, offscreen: wantOffscreen, onEvent, onLink, createWorker, workerUrls, password, ...coreOptions } = options;
+	const {
+		wasmUrl: wasmUrlOption,
+		workers: workerCount,
+		offscreen: wantOffscreen,
+		onEvent,
+		onLink,
+		createWorker,
+		workerUrls,
+		password,
+		textLayer: wantTextLayer = true,
+		interceptFind = false,
+		...coreOptions
+	} = options;
 	// Workers may run from blob: URLs (host loaders), where relative URLs don't resolve.
 	const wasmUrl = new URL(wasmUrlOption, location.href).href;
 	const spawn = (kind: "raster" | "core", name: string) => {
@@ -158,6 +185,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	// iOS: no native callout/magnifier on long-press; the engine selects text itself.
 	container.style.setProperty("-webkit-touch-callout", "none");
 	if (container.tabIndex < 0) container.tabIndex = 0;
+	canvas.setAttribute("aria-hidden", "true");
 	container.appendChild(canvas);
 
 	// Raster workers. Each gets its own copy of the bytes and a port to the core.
@@ -182,6 +210,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 
 	let selectedText = "";
 	let opened = false;
+	let textLayer: TextLayer | null = null;
 	const unlocks: ((ok: boolean) => void)[] = [];
 	const pending = new Map<number, (result: unknown) => void>();
 	const flights = new Map<number, (landed: boolean) => void>();
@@ -189,7 +218,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		if (e.type === "resized") {
 			canvas.style.width = `${e.w}px`;
 			canvas.style.height = `${e.h}px`;
-		} else if (e.type === "cursor") container.style.cursor = e.cursor;
+			textLayer?.setViewport(e.w, e.h);
+		} else if (e.type === "camera") textLayer?.setCamera(e.camera);
+		else if (e.type === "cursor") container.style.cursor = e.cursor;
 		else if (e.type === "selection") {
 			if (e.final) selectedText = e.selection?.text ?? "";
 		} else if (e.type === "link") {
@@ -200,6 +231,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			flights.delete(e.id);
 		} else if (e.type === "ready") {
 			opened = true;
+			textLayer?.setLayout(e.layout);
 			for (const resolve of unlocks.splice(0)) resolve(true);
 		} else if (e.type === "error" && e.code === "password" && e.phase === "document-load") {
 			for (const resolve of unlocks.splice(0)) resolve(false);
@@ -264,6 +296,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			});
 			command({ type: "request", id, request: req });
 		});
+
+	if (wantTextLayer) textLayer = new TextLayer(container, (page) => request<TextLayerLine[]>({ type: "text-layer", page }));
 
 	// ------------------------------------------------------------ input
 	let rect = container.getBoundingClientRect();
@@ -345,10 +379,41 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	// Android fires contextmenu on long-press; the engine handles that as selection.
 	on(canvas, "contextmenu", (e: Event) => touchCount > 0 && e.preventDefault());
 
+	// The browser's find scrolls the (overflow: hidden) container to bring a
+	// match in the hidden text layer into view: turn that into a camera pan.
+	on(
+		container,
+		"scroll",
+		() => {
+			const dx = container.scrollLeft;
+			const dy = container.scrollTop;
+			if (!dx && !dy) return;
+			container.scrollLeft = 0;
+			container.scrollTop = 0;
+			command({ type: "scroll-by", dx, dy });
+		},
+		{ passive: true },
+	);
+
+	if (interceptFind) {
+		on(
+			window,
+			"keydown",
+			(e: KeyboardEvent) => {
+				if (!(e.metaKey || e.ctrlKey) || e.altKey || e.key.toLowerCase() !== "f") return;
+				if (!container.contains(document.activeElement)) return;
+				e.preventDefault();
+				onEvent?.({ type: "find" });
+			},
+			{ capture: true },
+		);
+	}
+
 	on(container, "keydown", (e: KeyboardEvent) => {
 		const mod = e.metaKey || e.ctrlKey;
 		const zoomKey = mod && ["=", "+", "-", "0"].includes(e.key);
-		if (!zoomKey && !NAV_KEYS.has(e.key)) return;
+		const selectAll = mod && !e.altKey && e.key.toLowerCase() === "a";
+		if (!zoomKey && !selectAll && !NAV_KEYS.has(e.key)) return;
 		e.preventDefault();
 		send({ type: "key", key: e.key, mod, shift: e.shiftKey });
 	});
@@ -368,6 +433,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		reveal: (page, rect, o) => flight((id) => ({ type: "reveal", page, rect, animate: o?.animate, align: o?.align, ifNeeded: o?.ifNeeded, flight: id })),
 		pulse: (ids, o) => command({ type: "pulse", ids: Array.isArray(ids) ? ids : [ids], kind: o?.kind, duration: o?.duration }),
 		select: (page, from, to) => command({ type: "select", page, from, to }),
+		selectAll: (scope) => command({ type: "select-all", scope }),
 		search: (query, limit, o) => request<SearchHit[]>({ type: "search", query, limit, pages: o?.pages }),
 		outline: () => request<OutlineItem[]>({ type: "outline" }),
 		pageText: (page) => request<string>({ type: "page-text", page }),
@@ -398,6 +464,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			for (const resolve of unlocks.splice(0)) resolve(false);
 			flights.clear();
 			ro.disconnect();
+			textLayer?.destroy();
 			for (const w of rasterWorkers) w.terminate();
 			coreWorker?.terminate();
 			canvas.remove();

@@ -48,6 +48,26 @@ await page.waitForTimeout(600);
 await page.screenshot({ path: `${out}/f2-dark-selection.png` });
 const sel = await page.evaluate(() => window.__events.length);
 void sel;
+// Hidden DOM text layer: visible pages ±1, labelled regions, native find, Cmd/Ctrl+A.
+const regions = await page.evaluate(() => [...document.querySelectorAll('.lector-text-layer[role="document"] section[role="region"]')].map((s) => s.getAttribute("aria-label")));
+check("text layer regions", regions.length >= 1 && regions.length <= 4 && regions[0] === "Page 1", regions.join(", "));
+check("native find sees the text layer", await page.evaluate(() => window.find("toolbox")));
+const layerStyle = await page.evaluate(() => {
+	const s = getComputedStyle(document.querySelector(".lector-text-layer"));
+	return `${s.pointerEvents} ${s.userSelect} ${s.color}`;
+});
+check("text layer is inert", layerStyle === "none none rgba(0, 0, 0, 0)", layerStyle);
+await page.evaluate(() => getSelection().removeAllRanges());
+await page.locator("#viewer").focus();
+await page.keyboard.press("ControlOrMeta+a");
+await page.waitForTimeout(300);
+const pageAll = await page.evaluate(() => window.__viewer.selectedText.length);
+await page.keyboard.press("ControlOrMeta+a");
+await page.waitForTimeout(1000);
+const docAll = await page.evaluate(() => window.__viewer.selectedText.length);
+check("Cmd/Ctrl+A: page, then document", pageAll > 1000 && docAll > pageAll * 10, `${pageAll} then ${docAll} chars`);
+await page.evaluate(() => window.__viewer.clearSelection());
+
 // Reads screenshot pixels (css px) through an <img> in the page: no PNG decoder needed.
 const pixels = async (points) => {
 	const png = (await page.screenshot()).toString("base64");
@@ -107,6 +127,14 @@ else {
 	await page.waitForFunction(() => window.__firstPaintMs !== undefined);
 	check("password option", (await page.evaluate(() => window.__errors.length)) === 0);
 }
+
+// interceptFind: Cmd/Ctrl+F becomes a `find` event while the viewer has focus.
+await page.goto(fixture("cadbots.pdf", "&interceptFind=1"));
+await page.waitForFunction(() => window.__firstPaintMs !== undefined);
+await page.locator("#viewer").focus();
+await page.keyboard.press("ControlOrMeta+f");
+await page.waitForTimeout(100);
+check("interceptFind emits find", await page.evaluate(() => window.__all.some((e) => e.type === "find")));
 
 check("no errors", errors.length === 0, errors.join(" | "));
 await browser.close();

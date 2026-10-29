@@ -113,6 +113,8 @@ export type Request =
 	/** page text plus, per UTF-16 unit, the char index that `rects` takes */
 	| { type: "page-text-map"; page: number }
 	| { type: "rects"; page: number; from: number; to: number }
+	/** lines of text with their boxes, for the hidden DOM text layer */
+	| { type: "text-layer"; page: number }
 	| { type: "thumbnail"; page: number; width: number };
 
 export type Command =
@@ -133,6 +135,10 @@ export type Command =
 	| { type: "select"; page: number; from: number; to: number }
 	| { type: "highlights"; items: Highlight[] }
 	| { type: "clear-selection" }
+	/** pan by css px (e.g. the browser scrolled the hidden text layer to a find match) */
+	| { type: "scroll-by"; dx: number; dy: number }
+	/** select all text: the current page, or the whole document when that page is already selected (Cmd/Ctrl+A) */
+	| { type: "select-all"; scope?: "page" | "document" | "auto" }
 	/** retry opening an encrypted document with this password */
 	| { type: "unlock"; password: string }
 	| { type: "options"; options: Partial<CoreOptions> };
@@ -180,6 +186,8 @@ export type CoreEvent =
 	| { type: "highlight-hover"; id: string | null; screen: Rect | null }
 	| { type: "click"; page: number; x: number; y: number }
 	| { type: "response"; id: number; result: unknown }
+	/** Cmd/Ctrl+F while the viewer has focus, with `interceptFind` on: open the host's search */
+	| { type: "find" }
 	/**
 	 * An animated (or instant) reveal/goto finished. `landed: false` when input or
 	 * another jump interrupted it. `coverage`: share of the landing view already
@@ -974,6 +982,37 @@ export class ViewerCore {
 		else if (msg.key === "Home") this.panBy(0, -this.docH * this.cam.zoom);
 		else if (msg.key === "End") this.panBy(0, this.docH * this.cam.zoom);
 		else if (msg.key === "Escape") this.clearSelection();
+		else if (msg.mod && (msg.key === "a" || msg.key === "A")) void this.selectAll("auto");
+	}
+
+	/**
+	 * Cmd/Ctrl+A: the page in view first; again (that page already selected)
+	 * extends to the whole document, loading every page's text.
+	 */
+	private async selectAll(scope: "page" | "document" | "auto") {
+		if (!this.pages.length) return;
+		const view = this.viewRect();
+		const page = this.pageAtDocY((view.y0 + view.y1) / 2);
+		const current = await this.loadText(page);
+		const pageSelected =
+			this.selRange && comparePoints(this.selRange[0], { page, index: 0 }) <= 0 && comparePoints(this.selRange[1], { page, index: current.length }) >= 0;
+		if (scope === "page" || (scope === "auto" && !pageSelected)) {
+			this.handles = false;
+			this.selectRange(page, 0, current.length);
+			return;
+		}
+		const last = this.pages.length - 1;
+		const texts = await Promise.all(this.pages.map((_, i) => this.loadText(i)));
+		this.handles = false;
+		this.selAnchor = [
+			{ page: 0, index: 0 },
+			{ page: 0, index: 0 },
+		];
+		this.setRange([
+			{ page: 0, index: 0 },
+			{ page: last, index: texts[last]!.length },
+		]);
+		this.emitSelection(true);
 	}
 
 	command(cmd: Command) {
@@ -1037,6 +1076,13 @@ export class ViewerCore {
 			case "unlock":
 				this.pool.unlock(cmd.password);
 				return;
+			case "scroll-by":
+				this.cancelFlight();
+				this.panBy(cmd.dx, cmd.dy);
+				return;
+			case "select-all":
+				void this.selectAll(cmd.scope ?? "auto");
+				return;
 			case "options":
 				this.opts = { ...this.opts, ...cmd.options };
 				this.requestFrame();
@@ -1072,6 +1118,10 @@ export class ViewerCore {
 			case "rects": {
 				const text = await this.loadText(req.page);
 				return text.rects(req.from, req.to);
+			}
+			case "text-layer": {
+				const text = await this.loadText(req.page);
+				return text.layerLines();
 			}
 			case "thumbnail": {
 				const size = this.pages[req.page];
