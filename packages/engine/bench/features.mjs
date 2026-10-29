@@ -285,6 +285,42 @@ else {
 	check("form fields without appearances render", textInk > 10 && checkInk > 3, `${textInk} dark samples in the text field, ${checkInk} in the checkbox`);
 }
 
+// RTL: Hebrew runs (logical order, boxes moving left) group into one line; the
+// right edge is the line start; the text layer marks them dir=rtl.
+if (!(await has("rtl.pdf"))) skip("rtl", "rtl.pdf");
+else {
+	await page.goto(fixture("rtl.pdf", "&offscreen=0"));
+	await page.waitForFunction(() => window.__firstPaintMs !== undefined);
+	const rtl = await page.evaluate(async () => {
+		await window.__viewer.pageText(0);
+		const t = window.__core.texts.get(0);
+		const l1 = t.lines[1];
+		await new Promise((r) => setTimeout(r, 400));
+		return {
+			lines: t.lines.map((l) => l.dir ?? "ltr").join(","),
+			right: t.hitTest(l1.r - 1, (l1.t + l1.b) / 2) === l1.start,
+			left: t.hitTest(l1.l + 1, (l1.t + l1.b) / 2) === l1.end,
+			layer: [...document.querySelectorAll(".lector-text-layer span[dir=rtl]")].length,
+		};
+	});
+	check("RTL lines and carets", rtl.lines === "ltr,rtl,rtl" && rtl.right && rtl.left && rtl.layer === 2, JSON.stringify(rtl));
+}
+// Vertical (CJK top-to-bottom) lines, from synthetic char boxes: two columns, right to left.
+const vertical = await page.evaluate(async (src) => {
+	const { PageText } = await import(`/@fs${src}/text.ts`);
+	const codes = Uint32Array.from([..."縦書き文字列"].map((c) => c.codePointAt(0)));
+	const boxes = new Float32Array(codes.length * 4);
+	[..."縦書き文字列"].forEach((_, i) => {
+		const col = i < 3 ? 0 : 1; // first column on the right
+		const x = 300 - col * 30;
+		const y = 100 + (i % 3) * 20;
+		boxes.set([x, y, x + 18, y + 18], i * 4);
+	});
+	const t = new PageText(codes, boxes);
+	return { lines: t.lines.map((l) => `${l.dir}:${l.start}-${l.end}`).join(" "), caret: t.hitTest(309, 125), rect: t.rects(0, 2)[0], layer: t.layerLines()[0].dir };
+}, new URL("../src", import.meta.url).pathname);
+check("vertical lines", vertical.lines === "ttb:0-3 ttb:3-6" && vertical.caret === 1 && vertical.rect.h === 38 && vertical.layer === "ttb", JSON.stringify(vertical));
+
 // HTTP range loading: same document through range requests, getData fetches the whole file.
 await page.goto(fixture("cadbots.pdf", "&range=1&autoFetch=0"));
 await page.waitForFunction(() => window.__paintedMs !== undefined);
