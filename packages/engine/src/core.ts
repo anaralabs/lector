@@ -1242,10 +1242,9 @@ export class ViewerCore {
 		// Marks sit behind the text in both modes. Light: multiply, so black ink
 		// stays black. Dark: lighten (per-channel max), so the dark paper takes
 		// the colour while light ink stays on top, untinted.
-		const markBlend = dark ? "lighten" : "multiply";
 		// Light: the colour composited over white, so alpha still reads as strength.
 		// Dark: a deep version of the colour over the paper, so light ink keeps its contrast.
-		const mark = (c: Color): Color =>
+		const mark = (c: Color, dark: boolean): Color =>
 			dark
 				? [paper[0] + (c[0] * 0.55 - paper[0]) * c[3], paper[1] + (c[1] * 0.55 - paper[1]) * c[3], paper[2] + (c[2] * 0.55 - paper[2]) * c[3], 1]
 				: [1 - c[3] * (1 - c[0]), 1 - c[3] * (1 - c[1]), 1 - c[3] * (1 - c[2]), 1];
@@ -1290,9 +1289,40 @@ export class ViewerCore {
 					t.lastUsed = this.frameId;
 				}
 			};
+			const drawMarks = (dark: boolean) => {
+				const markBlend = dark ? "lighten" : "multiply";
+				for (const h of this.highlights) {
+					if (h.page !== p) continue;
+					const color = mark(h.color ?? highlightColor, dark);
+					const style = h.style ?? "fill";
+					for (const q of h.rects) {
+						const x = sx + q.x * S;
+						const y = sy + q.y * S;
+						const w = q.w * S;
+						const hh = q.h * S;
+						if (style === "fill") gl.drawRect(x, y, w, hh, color, markBlend);
+						else if (style === "underline") gl.drawRect(x, y + hh - 2 * px, w, 2 * px, h.color ?? highlightColor, "alpha");
+						else {
+							const c = h.color ?? highlightColor;
+							const b = 2 * px;
+							gl.drawRect(x - b, y - b, w + 2 * b, b, c, "alpha");
+							gl.drawRect(x - b, y + hh, w + 2 * b, b, c, "alpha");
+							gl.drawRect(x - b, y, b, hh, c, "alpha");
+							gl.drawRect(x + w, y, b, hh, c, "alpha");
+						}
+					}
+				}
+				for (const sel of this.selRects) {
+					if (sel.page !== p) continue;
+					const c = dark ? selectionColorDark : mark(selectionColor, false);
+					for (const q of sel.rects) gl.drawRect(sx + q.x * S, sy + q.y * S, q.w * S, q.h * S, c, markBlend);
+				}
+			};
 			drawTiles();
+			drawMarks(dark);
 			// Dark mode recolours vector content only: images are drawn again,
-			// clipped to their boxes, without the tone mapping.
+			// clipped to their boxes, without the tone mapping. They stay light
+			// (a scanned page is one image), so marks there use the light style.
 			const images = dark ? this.images.get(p) : undefined;
 			if (images) {
 				gl.setTone(null);
@@ -1304,36 +1334,10 @@ export class ViewerCore {
 					if (rr <= l || b <= t || rr < vx0 || l > vx1 || b < vy0 || t > vy1) continue;
 					gl.clip({ x: sx + l * S, y: sy + t * S, w: (rr - l) * S, h: (b - t) * S });
 					drawTiles();
+					drawMarks(false);
 				}
 				gl.clip(null);
 				gl.setTone({ paper, ink });
-			}
-
-			for (const h of this.highlights) {
-				if (h.page !== p) continue;
-				const color = mark(h.color ?? highlightColor);
-				const style = h.style ?? "fill";
-				for (const q of h.rects) {
-					const x = sx + q.x * S;
-					const y = sy + q.y * S;
-					const w = q.w * S;
-					const hh = q.h * S;
-					if (style === "fill") gl.drawRect(x, y, w, hh, color, markBlend);
-					else if (style === "underline") gl.drawRect(x, y + hh - 2 * px, w, 2 * px, h.color ?? highlightColor, "alpha");
-					else {
-						const c = h.color ?? highlightColor;
-						const b = 2 * px;
-						gl.drawRect(x - b, y - b, w + 2 * b, b, c, "alpha");
-						gl.drawRect(x - b, y + hh, w + 2 * b, b, c, "alpha");
-						gl.drawRect(x - b, y, b, hh, c, "alpha");
-						gl.drawRect(x + w, y, b, hh, c, "alpha");
-					}
-				}
-			}
-			for (const sel of this.selRects) {
-				if (sel.page !== p) continue;
-				const c = dark ? selectionColorDark : mark(selectionColor);
-				for (const q of sel.rects) gl.drawRect(sx + q.x * S, sy + q.y * S, q.w * S, q.h * S, c, markBlend);
 			}
 		}
 		const ends = this.handles ? this.handleEnds() : null;
