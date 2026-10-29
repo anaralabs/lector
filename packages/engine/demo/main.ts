@@ -1,4 +1,9 @@
-import wasmUrl from "@embedpdf/pdfium/pdfium.wasm?url";
+import wasmUrl, { workerUrls } from "../src/vite-wasm";
+
+// Same setup as anara: module workers started from a blob loader (survives
+// extensions that re-wrap workers, and cross-origin asset hosts).
+const createWorker = (url: URL, name: string) =>
+	new Worker(URL.createObjectURL(new Blob([`import(${JSON.stringify(url.href)})`], { type: "text/javascript" })), { name });
 import { type CoreEvent, createViewer, type Viewer } from "../src";
 
 const params = new URLSearchParams(location.search);
@@ -41,7 +46,7 @@ const onEvent = (e: CoreEvent) => {
 
 async function open(source: string | ArrayBuffer) {
 	w.__viewer?.destroy();
-	const viewer = await createViewer(el, source, { wasmUrl, offscreen, workers, onEvent });
+	const viewer = await createViewer(el, source, { wasmUrl, offscreen, workers, onEvent, ...(params.get("loader") === "0" ? {} : { createWorker, workerUrls }) });
 	w.__viewer = viewer;
 	info.mode = `compositor: ${viewer.offscreen ? "worker (OffscreenCanvas)" : "main thread"}`;
 	el.focus();

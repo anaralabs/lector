@@ -72,7 +72,9 @@ async function fetchPdf(url: string) {
 const NAV_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", "Home", "End", " ", "Escape"]);
 
 export async function createViewer(container: HTMLElement, source: string | ArrayBuffer | Uint8Array, options: ViewerOptions): Promise<Viewer> {
-	const { wasmUrl, workers: workerCount, offscreen: wantOffscreen, onEvent, onLink, createWorker, workerUrls, ...coreOptions } = options;
+	const { wasmUrl: wasmUrlOption, workers: workerCount, offscreen: wantOffscreen, onEvent, onLink, createWorker, workerUrls, ...coreOptions } = options;
+	// Workers may run from blob: URLs (host loaders), where relative URLs don't resolve.
+	const wasmUrl = new URL(wasmUrlOption, location.href).href;
 	const spawn = (kind: "raster" | "core", name: string) => {
 		const url = workerUrls?.[kind];
 		// Literal `new Worker(new URL(...))` so bundlers emit the worker chunks.
