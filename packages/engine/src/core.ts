@@ -2,8 +2,9 @@
 // selection and the WebGL frame loop. It never touches the DOM, so the same
 // code runs on the main thread or inside a worker with an OffscreenCanvas.
 
+import { markColor } from "./colors";
 import { Compositor } from "./gl";
-import type { ErrorCode, ErrorPhase, Link, OutlineItem, PageSize } from "./protocol";
+import type { DocumentInfo, ErrorCode, ErrorPhase, Link, OutlineItem, PageSize } from "./protocol";
 import { RasterPool, type TextResult, type TileResult } from "./raster-pool";
 import { boundedDistance, foldQuery, insertRanked, matchPage, type RawMatch, type SearchOptions, splitLimit } from "./search";
 import { PageText, type Rect, type SelectionTextOptions, type TextPoint, comparePoints } from "./text";
@@ -247,7 +248,8 @@ export interface SelectionInfo {
 export type Cursor = "default" | "text" | "pointer";
 
 export type CoreEvent =
-	| { type: "ready"; pages: PageSize[]; layout: Rect[] }
+	/** the document opened: page sizes (points), their layout in doc space, and its metadata */
+	| { type: "ready"; pages: PageSize[]; layout: Rect[]; info: DocumentInfo }
 	/** the first page bitmap reached the screen (once per document) */
 	| { type: "painted"; page: number }
 	/** `fitWidth`: fit-width mode (kept for compatibility); `fit`: the sticky fit mode, if any */
@@ -451,13 +453,13 @@ export class ViewerCore {
 		this.opts = { ...defaultOptions, ...options };
 		this.gl = new Compositor(canvas);
 		this.pool = new RasterPool(ports);
-		this.pool.onOpened = (pages) => this.opened(pages);
+		this.pool.onOpened = (pages, info) => this.opened(pages, info);
 		this.pool.onError = (message, code, phase) => this.emit({ type: "error", message, code, phase });
 	}
 
 	// ---------------------------------------------------------------- setup
 
-	private opened(pages: PageSize[]) {
+	private opened(pages: PageSize[], info: DocumentInfo) {
 		this.pages = pages;
 		let y = this.opts.pageGap;
 		this.docW = 0;
@@ -468,7 +470,7 @@ export class ViewerCore {
 			return r;
 		});
 		this.docH = y;
-		this.emit({ type: "ready", pages, layout: this.layout.map((r) => ({ ...r })) });
+		this.emit({ type: "ready", pages, layout: this.layout.map((r) => ({ ...r })), info });
 		this.initCamera();
 		this.requestFrame();
 	}
@@ -1915,11 +1917,7 @@ export class ViewerCore {
 		// Light: the colour composited over white, so alpha still reads as strength.
 		// Dark: a deep version of the colour over the paper, so light ink keeps its
 		// contrast. Alpha is boosted: light-mode alphas (~0.35) read too faint on dark.
-		const mark = (c: Color, dark: boolean): Color => {
-			if (!dark) return [1 - c[3] * (1 - c[0]), 1 - c[3] * (1 - c[1]), 1 - c[3] * (1 - c[2]), 1];
-			const a = Math.min(1, c[3] * 1.8);
-			return [paper[0] + (c[0] * 0.55 - paper[0]) * a, paper[1] + (c[1] * 0.55 - paper[1]) * a, paper[2] + (c[2] * 0.55 - paper[2]) * a, 1];
-		};
+		const mark = (c: Color, dark: boolean): Color => markColor(c, dark ? paper : null);
 		const px = this.dpr;
 		gl.resetState();
 		gl.begin(background);

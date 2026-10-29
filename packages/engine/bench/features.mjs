@@ -321,6 +321,18 @@ const vertical = await page.evaluate(async (src) => {
 }, new URL("../src", import.meta.url).pathname);
 check("vertical lines", vertical.lines === "ttb:0-3 ttb:3-6" && vertical.caret === 1 && vertical.rect.h === 38 && vertical.layer === "ttb", JSON.stringify(vertical));
 
+// Document metadata (lector's onDocumentLoad) and load failures through viewer.loaded.
+await page.goto(fixture("scan.pdf"));
+await page.waitForFunction(() => window.__viewer);
+const meta = await page.evaluate(async () => (await window.__viewer.loaded).info);
+check("viewer.loaded + metadata", meta.pageCount === 3 && meta.title === "Scan fixture" && meta.pdfVersion >= 14 && meta.hasForm === false, JSON.stringify(meta));
+const errorsBefore = errors.length;
+await page.goto(fixture("not-a-pdf.pdf"));
+await page.waitForFunction(() => window.__viewer);
+const bad = await page.evaluate(() => window.__viewer.loaded.then(() => "resolved", (e) => `${e.name}:${e.code}/${e.phase}`));
+check("parse error rejects loaded", bad === "EngineError:parse/document-load", bad);
+errors.length = errorsBefore; // the HUD logs that load error to the console on purpose
+
 // HTTP range loading: same document through range requests, getData fetches the whole file.
 await page.goto(fixture("cadbots.pdf", "&range=1&autoFetch=0"));
 await page.waitForFunction(() => window.__paintedMs !== undefined);

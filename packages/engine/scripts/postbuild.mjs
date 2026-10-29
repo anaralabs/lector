@@ -1,5 +1,5 @@
 // Runs after tsup (not in its onSuccess, which races the d.ts build's clean).
-import { copyFile, writeFile } from "node:fs/promises";
+import { copyFile, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -30,4 +30,9 @@ export default wasmUrl;
 export declare const workerUrls: { raster: string; core: string };
 `,
 );
+// esbuild drops module directives when bundling; React Server Components need
+// the client boundary on the react entry.
+const react = await readFile("dist/react.js", "utf8");
+if (!react.startsWith('"use client"')) await writeFile("dist/react.js", `"use client";\n${react}`);
+
 console.info("postbuild: dist/pdfium.wasm, dist/vite-wasm.js, dist/vite-wasm.d.ts");

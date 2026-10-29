@@ -49,6 +49,25 @@ export type ToRaster =
 	| { t: "text"; id: number; page: number }
 	| { t: "outline"; id: number; page: -1 };
 
+/** Document metadata (Info dictionary), like pdf.js `getMetadata().info` and lector's `onDocumentLoad`. */
+export interface DocumentInfo {
+	pageCount: number;
+	title?: string;
+	author?: string;
+	subject?: string;
+	keywords?: string;
+	creator?: string;
+	producer?: string;
+	/** raw PDF dates, e.g. "D:20200904120000Z" */
+	creationDate?: string;
+	modDate?: string;
+	/** e.g. 17 for PDF 1.7 */
+	pdfVersion?: number;
+	encrypted: boolean;
+	/** AcroForm fields present (rendered read-only) */
+	hasForm: boolean;
+}
+
 export interface Link {
 	/** l, t, r, b in page points (top-left origin) */
 	rect: [number, number, number, number];
@@ -64,7 +83,7 @@ export interface OutlineItem {
 }
 
 export type FromRaster =
-	| { t: "opened"; pages: PageSize[] }
+	| { t: "opened"; pages: PageSize[]; info: DocumentInfo }
 	| { t: "error"; message: string; code: ErrorCode; phase: ErrorPhase; id?: number }
 	/** heap: the worker's WASM heap plus its block cache, in bytes */
 	| { t: "tile"; id: number; buf: ArrayBuffer; w: number; h: number; ms: number; heap: number }

@@ -2,7 +2,7 @@
 // The core re-plans every frame: jobs that are no longer wanted are dropped
 // before dispatch, and the most urgent jobs go out first.
 
-import type { ErrorCode, ErrorPhase, FromRaster, PageSize, ToRaster } from "./protocol";
+import type { DocumentInfo, ErrorCode, ErrorPhase, FromRaster, PageSize, ToRaster } from "./protocol";
 
 export type TileResult = Extract<FromRaster, { t: "tile" }>;
 export type TextResult = Extract<FromRaster, { t: "text" }>;
@@ -29,7 +29,7 @@ export class RasterPool {
 	private queue = new Map<string, Job>();
 	private inflight = new Map<number, Job>();
 	private nextId = 1;
-	onOpened: (pages: PageSize[]) => void = () => {};
+	onOpened: (pages: PageSize[], info: DocumentInfo) => void = () => {};
 	onIdle: () => void = () => {};
 	onError: (message: string, code: ErrorCode, phase: ErrorPhase) => void = (m) => console.error(m);
 
@@ -116,7 +116,7 @@ export class RasterPool {
 	private receive(lane: Lane, index: number, msg: FromRaster) {
 		if (msg.t === "opened") {
 			lane.ready = true;
-			if (index === 0) this.onOpened(msg.pages);
+			if (index === 0) this.onOpened(msg.pages, msg.info);
 			this.pump();
 			return;
 		}

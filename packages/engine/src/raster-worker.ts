@@ -3,7 +3,7 @@
 // document, so workers never share memory and need no cross-origin isolation.
 
 import { init } from "@embedpdf/pdfium";
-import type { DocSource, ErrorCode, FromRaster, Link, OutlineItem, ToRaster } from "./protocol";
+import type { DocSource, DocumentInfo, ErrorCode, FromRaster, Link, OutlineItem, ToRaster } from "./protocol";
 
 type Pdfium = Awaited<ReturnType<typeof init>>;
 
@@ -579,7 +579,28 @@ function loadDocument(password: string | undefined) {
 	pageCount = P.FPDF_GetPageCount(doc);
 	// Sizes come from the page tree without parsing page content.
 	if (allSizes) for (let i = 0; i < pageCount; i++) sizeOf(i);
-	send({ t: "opened", pages: allSizes ? pageSizes : [] });
+	send({ t: "opened", pages: allSizes ? pageSizes : [], info: readInfo(password) });
+}
+
+function readInfo(password: string | undefined): DocumentInfo {
+	const meta = (tag: string) => readString((b, l) => P.FPDF_GetMetaText(doc, tag, b, l), true).trim() || undefined;
+	const ver = P.pdfium.wasmExports.malloc(4);
+	const pdfVersion = P.FPDF_GetFileVersion(doc, ver) ? new Int32Array(heap().buffer, ver, 1)[0] : undefined;
+	P.pdfium.wasmExports.free(ver);
+	return {
+		pageCount,
+		title: meta("Title"),
+		author: meta("Author"),
+		subject: meta("Subject"),
+		keywords: meta("Keywords"),
+		creator: meta("Creator"),
+		producer: meta("Producer"),
+		creationDate: meta("CreationDate"),
+		modDate: meta("ModDate"),
+		pdfVersion,
+		encrypted: P.FPDF_GetSecurityHandlerRevision(doc) !== -1 || !!password,
+		hasForm: !!form,
+	};
 }
 
 async function open(msg: Extract<ToRaster, { t: "init" }>) {

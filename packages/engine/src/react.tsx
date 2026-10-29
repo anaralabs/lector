@@ -1,3 +1,5 @@
+"use client";
+
 // React binding. The viewer is imperative; React only mounts it and passes
 // options through. Nothing here re-renders while scrolling or zooming.
 

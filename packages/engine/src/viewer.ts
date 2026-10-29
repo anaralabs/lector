@@ -18,7 +18,7 @@ import {
 } from "./core";
 import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
-import type { DocSource, OutlineItem } from "./protocol";
+import type { DocSource, DocumentInfo, OutlineItem, PageSize } from "./protocol";
 import { getEngineSupport } from "./support";
 import type { Rect, TextPoint } from "./text";
 import { TextLayer, type TextLayerLine } from "./text-layer";
@@ -82,6 +82,12 @@ export interface Viewer {
 	 * focusable elements here are left alone by the viewer.
 	 */
 	readonly overlayElement: HTMLDivElement;
+	/**
+	 * Resolves when the document has opened (like lector's `onDocumentLoad`):
+	 * page sizes in points and metadata. Rejects if it cannot open; for a
+	 * password-protected document it waits until `unlock` succeeds.
+	 */
+	readonly loaded: Promise<{ pages: PageSize[]; info: DocumentInfo }>;
 	/** the resolved options: defaults, creation options and every `setOptions` since */
 	readonly options: CoreOptions;
 	zoomTo(zoom: number): void;
@@ -252,7 +258,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		});
 		// A worker script that fails to load never boots; say so instead of hanging.
 		worker.addEventListener("error", (ev) => {
-			onEvent?.({ type: "error", message: `lector-engine: ${name} worker failed${ev.message ? `: ${ev.message}` : " to load"}`, code: "worker", phase: "engine-load" });
+			// Async (after setup), so handleEvent exists; it also rejects `loaded`.
+			handleEvent({ type: "error", message: `lector-engine: ${name} worker failed${ev.message ? `: ${ev.message}` : " to load"}`, code: "worker", phase: "engine-load" });
 		});
 		return { worker, booted };
 	};
@@ -321,6 +328,14 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 
 	let selectedText = "";
 	let opened = false;
+	let resolveLoaded: (v: { pages: PageSize[]; info: DocumentInfo }) => void = () => {};
+	let rejectLoaded: (err: EngineError) => void = () => {};
+	const loaded = new Promise<{ pages: PageSize[]; info: DocumentInfo }>((resolve, reject) => {
+		resolveLoaded = resolve;
+		rejectLoaded = reject;
+	});
+	// Hosts that only listen to events must not see an unhandled rejection.
+	loaded.catch(() => {});
 	let resolved: CoreOptions = { ...defaultOptions, ...coreOptions };
 	let camera: Camera = { x: 0, y: 0, zoom: 1 };
 	let layout: Rect[] = [];
@@ -355,10 +370,13 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		} else if (e.type === "ready") {
 			opened = true;
 			layout = e.layout;
+			resolveLoaded({ pages: e.pages, info: e.info });
 			textLayer?.setLayout(e.layout);
 			for (const resolve of unlocks.splice(0)) resolve(true);
 		} else if (e.type === "error" && e.code === "password" && e.phase === "document-load") {
 			for (const resolve of unlocks.splice(0)) resolve(false);
+		} else if (e.type === "error" && (e.phase === "document-load" || e.phase === "engine-load") && !opened) {
+			rejectLoaded(new EngineError(e.message, e.code, e.phase, typeof source === "string" ? source : undefined));
 		} else if (e.type === "search-progress") progressFns.get(e.id)?.(e.results);
 		else if (e.type === "response") {
 			pending.get(e.id)?.(e.result);
@@ -608,6 +626,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		offscreen: useOffscreen,
 		zoomTo: (zoom) => command({ type: "zoom", zoom }),
 		overlayElement: overlay,
+		loaded,
 		get options() {
 			return { ...resolved };
 		},
