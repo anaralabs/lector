@@ -1560,11 +1560,13 @@ export class ViewerCore {
 		// stays black. Dark: lighten (per-channel max), so the dark paper takes
 		// the colour while light ink stays on top, untinted.
 		// Light: the colour composited over white, so alpha still reads as strength.
-		// Dark: a deep version of the colour over the paper, so light ink keeps its contrast.
-		const mark = (c: Color, dark: boolean): Color =>
-			dark
-				? [paper[0] + (c[0] * 0.55 - paper[0]) * c[3], paper[1] + (c[1] * 0.55 - paper[1]) * c[3], paper[2] + (c[2] * 0.55 - paper[2]) * c[3], 1]
-				: [1 - c[3] * (1 - c[0]), 1 - c[3] * (1 - c[1]), 1 - c[3] * (1 - c[2]), 1];
+		// Dark: a deep version of the colour over the paper, so light ink keeps its
+		// contrast. Alpha is boosted: light-mode alphas (~0.35) read too faint on dark.
+		const mark = (c: Color, dark: boolean): Color => {
+			if (!dark) return [1 - c[3] * (1 - c[0]), 1 - c[3] * (1 - c[1]), 1 - c[3] * (1 - c[2]), 1];
+			const a = Math.min(1, c[3] * 1.8);
+			return [paper[0] + (c[0] * 0.55 - paper[0]) * a, paper[1] + (c[1] * 0.55 - paper[1]) * a, paper[2] + (c[2] * 0.55 - paper[2]) * a, 1];
+		};
 		const px = this.dpr;
 		gl.resetState();
 		gl.begin(background);
