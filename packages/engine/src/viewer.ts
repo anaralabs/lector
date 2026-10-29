@@ -12,6 +12,7 @@ import {
 	ViewerCore,
 } from "./core";
 import type { OutlineItem } from "./protocol";
+import { getEngineSupport } from "./support";
 import type { Rect } from "./text";
 
 export interface ViewerOptions extends Partial<CoreOptions> {
@@ -19,7 +20,7 @@ export interface ViewerOptions extends Partial<CoreOptions> {
 	wasmUrl: string;
 	/** number of PDFium raster workers (default: half the cores, 2-4) */
 	workers?: number;
-	/** run the compositor in a worker with an OffscreenCanvas (default: when supported) */
+	/** run the compositor in a worker with an OffscreenCanvas (default: when WebGL2 works on one) */
 	offscreen?: boolean;
 	onEvent?: (e: CoreEvent) => void;
 	/**
@@ -72,6 +73,10 @@ async function fetchPdf(url: string) {
 const NAV_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", "Home", "End", " ", "Escape"]);
 
 export async function createViewer(container: HTMLElement, source: string | ArrayBuffer | Uint8Array, options: ViewerOptions): Promise<Viewer> {
+	const support = getEngineSupport();
+	if (!support.supported) {
+		throw new Error(`lector-engine is not supported in this browser (missing: ${support.missing.join(", ")}). Check isEngineSupported() and fall back to another viewer.`);
+	}
 	const { wasmUrl: wasmUrlOption, workers: workerCount, offscreen: wantOffscreen, onEvent, onLink, createWorker, workerUrls, ...coreOptions } = options;
 	// Workers may run from blob: URLs (host loaders), where relative URLs don't resolve.
 	const wasmUrl = new URL(wasmUrlOption, location.href).href;
@@ -92,6 +97,10 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				resolve();
 			};
 			worker.addEventListener("message", onBoot);
+		});
+		// A worker script that fails to load never boots; say so instead of hanging.
+		worker.addEventListener("error", (ev) => {
+			onEvent?.({ type: "error", message: `lector-engine: ${name} worker failed${ev.message ? `: ${ev.message}` : " to load"}` });
 		});
 		return { worker, booted };
 	};
@@ -148,7 +157,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		onEvent?.(e);
 	};
 
-	const useOffscreen = (wantOffscreen ?? true) && typeof canvas.transferControlToOffscreen === "function";
+	// Probed, not just feature-tested: Safari 16.4-16.x can transfer a canvas
+	// but has no WebGL on OffscreenCanvas, so it composites on the main thread.
+	const useOffscreen = (wantOffscreen ?? true) && support.offscreen;
 	let coreWorker: Worker | null = null;
 	let postToCore: (msg: unknown) => void = () => {};
 	let core: ViewerCore | null = null;
