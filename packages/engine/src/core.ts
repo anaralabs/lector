@@ -142,6 +142,8 @@ export type CoreEvent =
 	| { type: "camera"; camera: Camera; moving: boolean }
 	| { type: "selection"; selection: SelectionInfo | null; final: boolean }
 	| { type: "cursor"; cursor: Cursor }
+	/** the canvas buffer now matches this css size (hosts size the element after this) */
+	| { type: "resized"; w: number; h: number }
 	| { type: "link"; url: string }
 	| { type: "highlight-click"; id: string; screen: Rect }
 	| { type: "highlight-hover"; id: string | null; screen: Rect | null }
@@ -190,6 +192,8 @@ export class ViewerCore {
 	private dpr = 1;
 	private cam = { x: 0, y: 0, zoom: 1 };
 	private camReady = false;
+	/** fit-width is sticky across resizes until the user zooms by hand */
+	private fitMode = false;
 
 	private pages: PageSize[] = [];
 	private layout: PageRect[] = [];
@@ -275,13 +279,19 @@ export class ViewerCore {
 		if (this.camReady || this.vw === 0 || this.pages.length === 0) return;
 		this.camReady = true;
 		const fit = (this.vw - 32) / this.docW;
-		const z = this.opts.initialZoom === "fit-width" ? Math.min(fit, 2) : this.opts.initialZoom;
+		this.fitMode = this.opts.initialZoom === "fit-width";
+		const initial = this.opts.initialZoom;
+		const z = initial === "fit-width" ? this.fitZoom() : initial;
 		this.cam.zoom = this.clampZoom(z);
 		this.cam.y = 0;
 		this.clampCamera();
 	}
 
 	// ---------------------------------------------------------------- camera
+
+	private fitZoom() {
+		return Math.min((this.vw - 32) / this.docW, 2);
+	}
 
 	private clampZoom(z: number) {
 		return Math.min(this.opts.maxZoom, Math.max(this.opts.minZoom, z));
@@ -296,6 +306,12 @@ export class ViewerCore {
 		else this.cam.x = Math.min(Math.max(this.cam.x, -this.docW / 2 - margin), this.docW / 2 + margin - viewW);
 		if (this.docH <= viewH) this.cam.y = (this.docH - viewH) / 2;
 		else this.cam.y = Math.min(Math.max(this.cam.y, 0), this.docH - viewH);
+	}
+
+	/** A zoom the user asked for: leaves fit-width mode. */
+	private userZoom(zoom: number, sx: number, sy: number) {
+		this.fitMode = false;
+		this.zoomAt(zoom, sx, sy);
 	}
 
 	private zoomAt(zoom: number, sx: number, sy: number) {
@@ -330,16 +346,32 @@ export class ViewerCore {
 		switch (msg.type) {
 			case "resize": {
 				const changed = msg.w !== this.vw || msg.h !== this.vh || msg.dpr !== this.dpr;
+				// Keep the doc point at the top-centre of the view fixed.
+				const anchorX = this.cam.x + this.vw / 2 / this.cam.zoom;
+				const anchorY = this.cam.y;
 				this.vw = msg.w;
 				this.vh = msg.h;
 				this.dpr = msg.dpr;
 				this.gl.resize(Math.round(msg.w * msg.dpr), Math.round(msg.h * msg.dpr));
+				const wasReady = this.camReady;
 				this.initCamera();
-				if (changed) this.clampCamera();
+				if (changed && wasReady) {
+					if (this.fitMode) {
+						const z = this.clampZoom(this.fitZoom());
+						if (z !== this.cam.zoom) {
+							this.cam.zoom = z;
+							this.zoomChanged();
+						}
+					}
+					this.cam.x = anchorX - this.vw / 2 / this.cam.zoom;
+					this.cam.y = anchorY;
+					this.clampCamera();
+				}
 				// Resizing clears the drawing buffer: draw synchronously so the
 				// new size never shows an empty frame.
 				this.dirty = true;
 				this.frame(performance.now());
+				this.emit({ type: "resized", w: msg.w, h: msg.h });
 				return;
 			}
 			case "wheel": {
@@ -347,7 +379,7 @@ export class ViewerCore {
 				if (msg.ctrl) {
 					if (this.gestureZoom !== null) return;
 					const step = Math.max(-0.5, Math.min(0.5, -msg.dy * unit * 0.01));
-					this.zoomAt(this.cam.zoom * Math.exp(step), msg.x, msg.y);
+					this.userZoom(this.cam.zoom * Math.exp(step), msg.x, msg.y);
 				} else {
 					this.velocity = { x: 0, y: 0 };
 					this.panBy(msg.dx * unit, msg.dy * unit);
@@ -357,7 +389,7 @@ export class ViewerCore {
 			}
 			case "gesture": {
 				if (msg.phase === "start") this.gestureZoom = this.cam.zoom;
-				else if (msg.phase === "change" && this.gestureZoom !== null) this.zoomAt(this.gestureZoom * msg.scale, msg.x, msg.y);
+				else if (msg.phase === "change" && this.gestureZoom !== null) this.userZoom(this.gestureZoom * msg.scale, msg.x, msg.y);
 				else this.gestureZoom = null;
 				return;
 			}
@@ -415,7 +447,7 @@ export class ViewerCore {
 		this.panBy(this.pinch.cx - cx, this.pinch.cy - cy);
 		this.pinch.cx = cx;
 		this.pinch.cy = cy;
-		this.zoomAt(this.pinch.zoom * (dist / this.pinch.dist), cx, cy);
+		this.userZoom(this.pinch.zoom * (dist / this.pinch.dist), cx, cy);
 	}
 
 	private startMomentum() {
@@ -538,8 +570,8 @@ export class ViewerCore {
 		const page = this.vh * 0.9;
 		const cx = this.vw / 2;
 		const cy = this.vh / 2;
-		if (msg.mod && (msg.key === "=" || msg.key === "+")) this.zoomAt(this.cam.zoom * 1.25, cx, cy);
-		else if (msg.mod && msg.key === "-") this.zoomAt(this.cam.zoom / 1.25, cx, cy);
+		if (msg.mod && (msg.key === "=" || msg.key === "+")) this.userZoom(this.cam.zoom * 1.25, cx, cy);
+		else if (msg.mod && msg.key === "-") this.userZoom(this.cam.zoom / 1.25, cx, cy);
 		else if (msg.mod && msg.key === "0") this.command({ type: "fit-width" });
 		else if (msg.key === "ArrowDown") this.panBy(0, line);
 		else if (msg.key === "ArrowUp") this.panBy(0, -line);
@@ -555,10 +587,11 @@ export class ViewerCore {
 	command(cmd: Command) {
 		switch (cmd.type) {
 			case "zoom":
-				this.zoomAt(cmd.zoom, cmd.x ?? this.vw / 2, cmd.y ?? this.vh / 2);
+				this.userZoom(cmd.zoom, cmd.x ?? this.vw / 2, cmd.y ?? this.vh / 2);
 				return;
 			case "fit-width":
-				this.zoomAt((this.vw - 32) / this.docW, this.vw / 2, 0);
+				this.zoomAt(this.fitZoom(), this.vw / 2, 0);
+				this.fitMode = true;
 				return;
 			case "goto": {
 				const r = this.layout[cmd.page];

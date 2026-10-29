@@ -98,7 +98,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	const bytes = typeof source === "string" ? await fetchPdf(source) : source instanceof Uint8Array ? source : new Uint8Array(source);
 
 	const canvas = document.createElement("canvas");
-	canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;";
+	// Sized in px from `resized` events, so the browser never stretches a stale
+	// buffer while a resize is in flight (the "jelly" look).
+	canvas.style.cssText = "position:absolute;left:0;top:0;display:block;touch-action:none;";
 	if (getComputedStyle(container).position === "static") container.style.position = "relative";
 	container.style.overflow = "hidden";
 	container.style.touchAction = "none";
@@ -123,7 +125,10 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	let selectedText = "";
 	const pending = new Map<number, (result: unknown) => void>();
 	const handleEvent = (e: CoreEvent) => {
-		if (e.type === "cursor") container.style.cursor = e.cursor;
+		if (e.type === "resized") {
+			canvas.style.width = `${e.w}px`;
+			canvas.style.height = `${e.h}px`;
+		} else if (e.type === "cursor") container.style.cursor = e.cursor;
 		else if (e.type === "selection") {
 			if (e.final) selectedText = e.selection?.text ?? "";
 		} else if (e.type === "link") {

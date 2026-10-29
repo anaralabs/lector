@@ -149,6 +149,21 @@ export class PageText {
 			}
 			if (l < r) out.push({ x: l, y: line.t, w: r - l, h: line.b - line.t });
 		}
+		// Consecutive lines meet halfway: loose boxes overlap (translucent
+		// fills would double up into stripes) or leave hairline gaps.
+		for (let i = 1; i < out.length; i++) {
+			const a = out[i - 1]!;
+			const b = out[i]!;
+			const aBottom = a.y + a.h;
+			const lineH = Math.min(a.h, b.h);
+			const gap = b.y - aBottom;
+			const sameColumn = b.x < a.x + a.w && a.x < b.x + b.w;
+			if (!sameColumn || b.y <= a.y || gap > lineH * 0.6) continue;
+			const mid = (aBottom + b.y) / 2;
+			a.h = mid - a.y;
+			b.h = b.y + b.h - mid;
+			b.y = mid;
+		}
 		return out;
 	}
 
