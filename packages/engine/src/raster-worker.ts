@@ -19,6 +19,9 @@ let P: Pdfium;
 const heap = () => (P.pdfium as unknown as { HEAPU8: Uint8Array }).HEAPU8;
 let doc = 0;
 let pageCount = 0;
+/** form fill environment (AcroForm documents only) */
+let form = 0;
+const FORMTYPE_NONE = 0;
 let port: MessagePort;
 const pageSizes: { w: number; h: number }[] = [];
 /**
@@ -49,10 +52,12 @@ function loadPage(index: number): number {
 		return hit;
 	}
 	const page = P.FPDF_LoadPage(doc, index);
+	if (form) P.FORM_OnAfterLoadPage(page, form);
 	pages.set(index, page);
 	if (pages.size > PAGE_CACHE) {
 		const [oldIndex, oldPage] = pages.entries().next().value as [number, number];
 		pages.delete(oldIndex);
+		if (form) P.FORM_OnBeforeClosePage(oldPage, form);
 		P.FPDF_ClosePage(oldPage);
 	}
 	return page;
@@ -69,16 +74,12 @@ function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 	const { w, h } = msg;
 	const bmp = P.FPDFBitmap_Create(w, h, 1);
 	P.FPDFBitmap_FillRect(bmp, 0, 0, w, h, 0xffffffff);
-	P.FPDF_RenderPageBitmap(
-		bmp,
-		page,
-		-msg.x,
-		-msg.y,
-		Math.round(size.w * msg.scale),
-		Math.round(size.h * msg.scale),
-		0,
-		FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER,
-	);
+	const pw = Math.round(size.w * msg.scale);
+	const ph = Math.round(size.h * msg.scale);
+	P.FPDF_RenderPageBitmap(bmp, page, -msg.x, -msg.y, pw, ph, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
+	// Form fields: drawn by the form fill environment, which also generates
+	// appearances for widgets that have none (NeedAppearances, filled values).
+	if (form) P.FPDF_FFLDraw(form, bmp, page, -msg.x, -msg.y, pw, ph, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
 	const ptr = P.FPDFBitmap_GetBuffer(bmp);
 	const stride = P.FPDFBitmap_GetStride(bmp);
 	const mem = heap();
@@ -568,6 +569,12 @@ function loadDocument(password: string | undefined) {
 				: `PDFium could not open the document (${code === "unknown" ? `error ${err}` : code})`;
 		send({ t: "error", message, code, phase: "document-load" });
 		return;
+	}
+	if (P.FPDF_GetFormType(doc) !== FORMTYPE_NONE) {
+		const info = P.PDFiumExt_OpenFormFillInfo();
+		form = P.PDFiumExt_InitFormFillEnvironment(doc, info);
+		// Read-only viewing: no blue field tint.
+		if (form) P.FPDF_SetFormFieldHighlightAlpha(form, 0);
 	}
 	pageCount = P.FPDF_GetPageCount(doc);
 	// Sizes come from the page tree without parsing page content.

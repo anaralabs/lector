@@ -267,6 +267,24 @@ const fz = await page.evaluate(async () => {
 });
 check("search fuzzy option + snippetMatch", fz.exact > 3 && fz.fuzzy > 0 && fz.marked, JSON.stringify(fz));
 
+// Forms: filled fields without appearance streams render through FPDF_FFLDraw.
+if (!(await has("form-noap.pdf"))) skip("forms without appearances", "form-noap.pdf");
+else {
+	await page.goto(fixture("form-noap.pdf"));
+	await page.waitForFunction(() => window.__paintedMs !== undefined);
+	await page.waitForTimeout(600);
+	// 1280px viewport, fit-width caps at 2x: page x0 = 28, top = 24 (12pt gap at 2x).
+	const at = (x, y) => [28 + x * 2, 24 + (792 - y) * 2];
+	const grid = [];
+	for (let x = 134; x < 300; x += 4) for (let y = 644; y < 660; y += 3) grid.push(at(x, y)); // "Ada Lovelace" field
+	for (let x = 132; x < 147; x += 2) for (let y = 597; y < 612; y += 2) grid.push(at(x, y)); // checkbox
+	const px = await pixels(grid);
+	const dark = (p) => p[0] + p[1] + p[2] < 200;
+	const textInk = px.slice(0, -64).filter(dark).length;
+	const checkInk = px.slice(-64).filter(dark).length;
+	check("form fields without appearances render", textInk > 10 && checkInk > 3, `${textInk} dark samples in the text field, ${checkInk} in the checkbox`);
+}
+
 // HTTP range loading: same document through range requests, getData fetches the whole file.
 await page.goto(fixture("cadbots.pdf", "&range=1&autoFetch=0"));
 await page.waitForFunction(() => window.__paintedMs !== undefined);
