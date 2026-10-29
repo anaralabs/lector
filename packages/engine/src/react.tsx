@@ -3,6 +3,7 @@
 
 import { type CSSProperties, forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import type { CoreEvent, CoreOptions } from "./core";
+import { EngineError } from "./errors";
 import { createViewer, type Viewer, type ViewerOptions } from "./viewer";
 
 export interface LectorViewProps extends Omit<ViewerOptions, "onEvent" | keyof CoreOptions> {
@@ -16,7 +17,7 @@ export interface LectorViewProps extends Omit<ViewerOptions, "onEvent" | keyof C
 }
 
 export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function LectorView(
-	{ source, options, onEvent, onViewer, className, style, wasmUrl, workers, offscreen, onLink, createWorker, workerUrls },
+	{ source, options, onEvent, onViewer, className, style, wasmUrl, workers, offscreen, onLink, createWorker, workerUrls, password },
 	ref,
 ) {
 	const container = useRef<HTMLDivElement>(null);
@@ -37,6 +38,7 @@ export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function Le
 			offscreen,
 			createWorker: latest.current.createWorker,
 			workerUrls,
+			password,
 			...latest.current.options,
 			onEvent: (e) => latest.current.onEvent?.(e),
 			onLink: latest.current.onLink ? (url) => latest.current.onLink?.(url) : undefined,
@@ -50,7 +52,13 @@ export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function Le
 				setViewer(v);
 				latest.current.onViewer?.(v);
 			},
-			(err) => latest.current.onEvent?.({ type: "error", message: String(err?.message ?? err) }),
+			(err) =>
+				latest.current.onEvent?.({
+					type: "error",
+					message: String(err?.message ?? err),
+					code: err instanceof EngineError ? err.code : "unknown",
+					phase: err instanceof EngineError ? err.phase : "document-load",
+				}),
 		);
 		return () => {
 			cancelled = true;
@@ -58,7 +66,8 @@ export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function Le
 			setViewer(null);
 			latest.current.onViewer?.(null);
 		};
-	}, [source, wasmUrl, workers, offscreen]);
+		// A new password reopens the document; `viewer.unlock` retries without remounting.
+	}, [source, wasmUrl, workers, offscreen, password]);
 
 	const optionsKey = JSON.stringify(options ?? {});
 	useEffect(() => {

@@ -25,7 +25,7 @@ self.onmessage = (ev: MessageEvent<Msg>) => {
 		try {
 			core = new ViewerCore(m.canvas, m.ports, (e) => self.postMessage(e), raf, m.options);
 		} catch (err) {
-			self.postMessage({ type: "error", message: String((err as Error)?.message ?? err) });
+			self.postMessage({ type: "error", message: String((err as Error)?.message ?? err), code: "unsupported", phase: "engine-load" });
 			return;
 		}
 		for (const p of pending.splice(0)) dispatch(p);

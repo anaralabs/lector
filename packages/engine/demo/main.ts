@@ -18,11 +18,19 @@ const t0 = performance.now();
 let zoom = 1;
 
 // Exposed for the benchmark harness.
-const w = window as unknown as { __events: CoreEvent[]; __flights: CoreEvent[]; __viewer?: Viewer; __firstPaintMs?: number };
+const w = window as unknown as { __events: CoreEvent[]; __flights: CoreEvent[]; __errors: CoreEvent[]; __all: CoreEvent[]; __viewer?: Viewer; __firstPaintMs?: number };
 w.__events = [];
 w.__flights = [];
+w.__errors = [];
+// Every non-stats event, for feature checks (bounded).
+w.__all = [];
 
 const onEvent = (e: CoreEvent) => {
+	if (e.type !== "stats" && e.type !== "camera") {
+		w.__all.push(e);
+		if (w.__all.length > 500) w.__all.splice(0, 250);
+	}
+	if (e.type === "error") w.__errors.push(e);
 	if (e.type === "flight") w.__flights.push(e);
 	if (e.type === "stats") {
 		w.__events.push(e);
@@ -41,7 +49,9 @@ const onEvent = (e: CoreEvent) => {
 		if (e.final) info.sel = e.selection?.text ? `selected ${e.selection.text.length} chars` : "";
 	} else if (e.type === "error") {
 		info.error = e.message.slice(0, 200);
-		console.error(e.message);
+		// An expected password prompt is not a page error (benches count console errors).
+		if (e.code === "password") console.warn(e.message);
+		else console.error(e.message);
 	}
 	hud.textContent = Object.values(info).filter(Boolean).join("\n");
 };
@@ -50,7 +60,8 @@ async function open(source: string | ArrayBuffer) {
 	w.__viewer?.destroy();
 	// ?dark=1 previews dark mode with anara-like colours.
 	const dark = params.get("dark") === "1" ? { dark: true, background: [0.03, 0.03, 0.03] as [number, number, number], paper: [0.05, 0.05, 0.05] as [number, number, number] } : {};
-	const viewer = await createViewer(el, source, { wasmUrl, offscreen, workers, onEvent, ...dark, ...(params.get("loader") === "0" ? {} : { createWorker, workerUrls }) });
+	const password = params.get("password") ?? undefined;
+	const viewer = await createViewer(el, source, { wasmUrl, offscreen, workers, onEvent, password, ...dark, ...(params.get("loader") === "0" ? {} : { createWorker, workerUrls }) });
 	w.__viewer = viewer;
 	info.mode = `compositor: ${viewer.offscreen ? "worker (OffscreenCanvas)" : "main thread"}`;
 	el.focus();

@@ -13,6 +13,7 @@ import {
 	type SearchHit,
 	ViewerCore,
 } from "./core";
+import { EngineError } from "./errors";
 import type { OutlineItem } from "./protocol";
 import { getEngineSupport } from "./support";
 import type { Rect } from "./text";
@@ -39,6 +40,8 @@ export interface ViewerOptions extends Partial<CoreOptions> {
 	workerUrls?: { raster: string; core: string };
 	/** external link clicked; default opens it in a new tab */
 	onLink?: (url: string) => void;
+	/** password for an encrypted document (else an `error` event with code `password`; see `unlock`) */
+	password?: string;
 }
 
 export interface Viewer {
@@ -74,6 +77,12 @@ export interface Viewer {
 	setHighlights(items: Extract<Command, { type: "highlights" }>["items"]): void;
 	clearSelection(): void;
 	setOptions(options: Partial<CoreOptions>): void;
+	/**
+	 * Retry opening an encrypted document after an `error` event with code
+	 * `password`. Resolves true once it opens (a `ready` event follows), false
+	 * for a wrong password (another `password` error is emitted too).
+	 */
+	unlock(password: string): Promise<boolean>;
 	/** text of the current selection ("" when nothing is selected) */
 	readonly selectedText: string;
 	destroy(): void;
@@ -87,8 +96,13 @@ export interface RevealOptions {
 
 /** Errors mirror pdf.js wording so hosts that pattern-match load failures keep working. */
 async function fetchPdf(url: string) {
-	const res = await fetch(url, { credentials: "same-origin" });
-	if (!res.ok) throw new Error(`Unexpected server response (${res.status}) while retrieving PDF "${url}".`);
+	let res: Response;
+	try {
+		res = await fetch(url, { credentials: "same-origin" });
+	} catch (err) {
+		throw new EngineError(`Failed to fetch PDF "${url}": ${String((err as Error)?.message ?? err)}`, "fetch", "document-load", url);
+	}
+	if (!res.ok) throw new EngineError(`Unexpected server response (${res.status}) while retrieving PDF "${url}".`, "fetch", "document-load", url);
 	return new Uint8Array(await res.arrayBuffer());
 }
 
@@ -97,9 +111,13 @@ const NAV_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Pa
 export async function createViewer(container: HTMLElement, source: string | ArrayBuffer | Uint8Array, options: ViewerOptions): Promise<Viewer> {
 	const support = getEngineSupport();
 	if (!support.supported) {
-		throw new Error(`lector-engine is not supported in this browser (missing: ${support.missing.join(", ")}). Check isEngineSupported() and fall back to another viewer.`);
+		throw new EngineError(
+			`lector-engine is not supported in this browser (missing: ${support.missing.join(", ")}). Check isEngineSupported() and fall back to another viewer.`,
+			"unsupported",
+			"engine-load",
+		);
 	}
-	const { wasmUrl: wasmUrlOption, workers: workerCount, offscreen: wantOffscreen, onEvent, onLink, createWorker, workerUrls, ...coreOptions } = options;
+	const { wasmUrl: wasmUrlOption, workers: workerCount, offscreen: wantOffscreen, onEvent, onLink, createWorker, workerUrls, password, ...coreOptions } = options;
 	// Workers may run from blob: URLs (host loaders), where relative URLs don't resolve.
 	const wasmUrl = new URL(wasmUrlOption, location.href).href;
 	const spawn = (kind: "raster" | "core", name: string) => {
@@ -122,7 +140,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		});
 		// A worker script that fails to load never boots; say so instead of hanging.
 		worker.addEventListener("error", (ev) => {
-			onEvent?.({ type: "error", message: `lector-engine: ${name} worker failed${ev.message ? `: ${ev.message}` : " to load"}` });
+			onEvent?.({ type: "error", message: `lector-engine: ${name} worker failed${ev.message ? `: ${ev.message}` : " to load"}`, code: "worker", phase: "engine-load" });
 		});
 		return { worker, booted };
 	};
@@ -157,12 +175,14 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		const { worker, booted } = spawn("raster", `lector-raster-${i}`);
 		const channel = new MessageChannel();
 		const copy = bytes.slice().buffer;
-		booted.then(() => worker.postMessage({ t: "init", bytes: copy, port: channel.port1, wasmUrl }, [copy, channel.port1]));
+		booted.then(() => worker.postMessage({ t: "init", bytes: copy, port: channel.port1, wasmUrl, password }, [copy, channel.port1]));
 		rasterWorkers.push(worker);
 		corePorts.push(channel.port2);
 	}
 
 	let selectedText = "";
+	let opened = false;
+	const unlocks: ((ok: boolean) => void)[] = [];
 	const pending = new Map<number, (result: unknown) => void>();
 	const flights = new Map<number, (landed: boolean) => void>();
 	const handleEvent = (e: CoreEvent) => {
@@ -178,6 +198,11 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		} else if (e.type === "flight") {
 			flights.get(e.id)?.(e.landed);
 			flights.delete(e.id);
+		} else if (e.type === "ready") {
+			opened = true;
+			for (const resolve of unlocks.splice(0)) resolve(true);
+		} else if (e.type === "error" && e.code === "password" && e.phase === "document-load") {
+			for (const resolve of unlocks.splice(0)) resolve(false);
 		} else if (e.type === "response") {
 			pending.get(e.id)?.(e.result);
 			pending.delete(e.id);
@@ -357,12 +382,20 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		setHighlights: (items) => command({ type: "highlights", items }),
 		clearSelection: () => command({ type: "clear-selection" }),
 		setOptions: (o) => command({ type: "options", options: o }),
+		unlock: (password) =>
+			opened
+				? Promise.resolve(true)
+				: new Promise<boolean>((resolve) => {
+						unlocks.push(resolve);
+						command({ type: "unlock", password });
+					}),
 		get selectedText() {
 			return selectedText;
 		},
 		destroy() {
 			ac.abort();
 			for (const resolve of flights.values()) resolve(false);
+			for (const resolve of unlocks.splice(0)) resolve(false);
 			flights.clear();
 			ro.disconnect();
 			for (const w of rasterWorkers) w.terminate();

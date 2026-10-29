@@ -2,7 +2,7 @@
 // The core re-plans every frame: jobs that are no longer wanted are dropped
 // before dispatch, and the most urgent jobs go out first.
 
-import type { FromRaster, PageSize, ToRaster } from "./protocol";
+import type { ErrorCode, ErrorPhase, FromRaster, PageSize, ToRaster } from "./protocol";
 
 export type TileResult = Extract<FromRaster, { t: "tile" }>;
 export type TextResult = Extract<FromRaster, { t: "text" }>;
@@ -29,7 +29,7 @@ export class RasterPool {
 	private nextId = 1;
 	onOpened: (pages: PageSize[]) => void = () => {};
 	onIdle: () => void = () => {};
-	onError: (message: string) => void = (m) => console.error(m);
+	onError: (message: string, code: ErrorCode, phase: ErrorPhase) => void = (m) => console.error(m);
 
 	constructor(ports: MessagePort[]) {
 		this.lanes = ports.map((port) => ({ port, ready: false, busy: null, recentPages: [] }));
@@ -77,6 +77,11 @@ export class RasterPool {
 		for (const job of this.queue.values()) if (job.msg.t === "tile" && !job.key.startsWith("thumb:") && !keep.has(job.key)) this.queue.delete(job.key);
 	}
 
+	/** Retry opening the document with a password in every worker that has not opened it. */
+	unlock(password: string) {
+		for (const lane of this.lanes) if (!lane.ready) lane.port.postMessage({ t: "unlock", password } satisfies ToRaster);
+	}
+
 	pump() {
 		if (this.queue.size === 0) return;
 		const jobs = [...this.queue.values()].sort((a, b) => a.priority - b.priority);
@@ -109,12 +114,17 @@ export class RasterPool {
 			return;
 		}
 		if (msg.t === "error") {
-			this.onError(msg.message);
-			if (lane.busy) {
-				this.inflight.delete(lane.busy.msg.id);
+			// Every worker opens the same bytes: report load failures once.
+			const load = msg.phase === "document-load" || msg.phase === "engine-load";
+			if (!load || index === 0) this.onError(msg.message, msg.code, msg.phase);
+			const job = lane.busy;
+			if (job) {
+				this.inflight.delete(job.msg.id);
 				lane.busy = null;
 			}
 			this.pump();
+			// The job's owner learns it failed (text waiters, tiles that must not retry forever).
+			if (job) job.onDone(msg);
 			return;
 		}
 		const job = this.inflight.get(msg.id);

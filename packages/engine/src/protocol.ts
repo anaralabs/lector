@@ -6,8 +6,21 @@ export interface PageSize {
 	h: number;
 }
 
+/**
+ * What failed. `password`: the document is encrypted and needs a (different)
+ * password; `format`: not a PDF or damaged; `security`: unsupported encryption;
+ * `file`: unreadable; `fetch`: the HTTP request failed; `unsupported`: the
+ * browser lacks a required feature; `worker`: a worker script or the wasm did
+ * not load; `unknown`: anything else.
+ */
+export type ErrorCode = "password" | "format" | "security" | "file" | "fetch" | "unsupported" | "worker" | "unknown";
+/** When it failed, like lector's `onError` phases. */
+export type ErrorPhase = "engine-load" | "document-load" | "render" | "text";
+
 export type ToRaster =
-	| { t: "init"; bytes: ArrayBuffer; port: MessagePort; wasmUrl: string }
+	| { t: "init"; bytes: ArrayBuffer; port: MessagePort; wasmUrl: string; password?: string }
+	/** retry opening the document with a password (after a `password` error) */
+	| { t: "unlock"; password: string }
 	| {
 			t: "tile";
 			id: number;
@@ -39,7 +52,7 @@ export interface OutlineItem {
 
 export type FromRaster =
 	| { t: "opened"; pages: PageSize[] }
-	| { t: "error"; message: string }
+	| { t: "error"; message: string; code: ErrorCode; phase: ErrorPhase; id?: number }
 	| { t: "tile"; id: number; buf: ArrayBuffer; w: number; h: number; ms: number }
 	| {
 			t: "text";

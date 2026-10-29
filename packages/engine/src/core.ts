@@ -3,7 +3,7 @@
 // code runs on the main thread or inside a worker with an OffscreenCanvas.
 
 import { Compositor } from "./gl";
-import type { Link, OutlineItem, PageSize } from "./protocol";
+import type { ErrorCode, ErrorPhase, Link, OutlineItem, PageSize } from "./protocol";
 import { RasterPool, type TextResult, type TileResult } from "./raster-pool";
 import { PageText, type Rect, type TextPoint, comparePoints } from "./text";
 
@@ -133,6 +133,8 @@ export type Command =
 	| { type: "select"; page: number; from: number; to: number }
 	| { type: "highlights"; items: Highlight[] }
 	| { type: "clear-selection" }
+	/** retry opening an encrypted document with this password */
+	| { type: "unlock"; password: string }
 	| { type: "options"; options: Partial<CoreOptions> };
 
 export interface Stats {
@@ -185,7 +187,8 @@ export type CoreEvent =
 	 */
 	| { type: "flight"; id: number; landed: boolean; coverage: number; waitMs: number; durationMs: number }
 	| { type: "stats"; stats: Stats }
-	| { type: "error"; message: string };
+	/** `code`/`phase` say what failed and when (see ErrorCode, ErrorPhase) */
+	| { type: "error"; message: string; code: ErrorCode; phase: ErrorPhase };
 
 interface Tile {
 	key: string;
@@ -202,6 +205,8 @@ interface Tile {
 	lastUsed: number;
 	/** frame that last planned this tile (visible or look-ahead) */
 	lastWanted: number;
+	/** the worker failed to render it: not requested again */
+	failed?: boolean;
 }
 
 interface PageRect {
@@ -359,7 +364,7 @@ export class ViewerCore {
 		this.gl = new Compositor(canvas);
 		this.pool = new RasterPool(ports);
 		this.pool.onOpened = (pages) => this.opened(pages);
-		this.pool.onError = (message) => this.emit({ type: "error", message });
+		this.pool.onError = (message, code, phase) => this.emit({ type: "error", message, code, phase });
 	}
 
 	// ---------------------------------------------------------------- setup
@@ -1029,6 +1034,9 @@ export class ViewerCore {
 			case "clear-selection":
 				this.clearSelection();
 				return;
+			case "unlock":
+				this.pool.unlock(cmd.password);
+				return;
 			case "options":
 				this.opts = { ...this.opts, ...cmd.options };
 				this.requestFrame();
@@ -1272,7 +1280,15 @@ export class ViewerCore {
 		this.textPending.add(page);
 		this.pool.request(`text:${page}`, priority, { t: "text", page }, (res) => {
 			this.textPending.delete(page);
-			if (res.t !== "text") return;
+			if (res.t !== "text") {
+				// Extraction failed: the page has no text, and waiters (search) move on.
+				if (res.t === "error") {
+					this.texts.set(page, new PageText(new Uint32Array(0), new Float32Array(0)));
+					for (const fn of this.textWaiters.get(page) ?? []) fn();
+					this.textWaiters.delete(page);
+				}
+				return;
+			}
 			const r = res as TextResult;
 			this.texts.set(page, new PageText(r.codes, r.boxes));
 			this.links.set(page, r.links);
@@ -1304,7 +1320,7 @@ export class ViewerCore {
 		if (pin) this.pinned.add(key);
 		const existing = this.tiles.get(key);
 		if (existing) existing.lastWanted = this.frameId;
-		if (existing && (existing.tex || existing.arrived)) return;
+		if (existing && (existing.tex || existing.arrived || existing.failed)) return;
 		keep.add(key);
 		let tile = existing;
 		if (!tile) {
@@ -1320,6 +1336,7 @@ export class ViewerCore {
 	private requestTile(tile: Tile, priority: number) {
 		const { key, page, scale, x, y, w, h } = tile;
 		this.pool.request(key, priority, { t: "tile", page, scale, x, y, w, h }, (res) => {
+			if (res.t === "error") tile.failed = true;
 			if (res.t !== "tile") return;
 			const r = res as TileResult;
 			this.tileMs.push(r.ms);
@@ -1426,7 +1443,7 @@ export class ViewerCore {
 		this.pool.pump();
 		// Placeholder tiles that will never be rendered are forgotten.
 		for (const tile of this.tiles.values()) {
-			if (!tile.tex && !tile.arrived && !keep.has(tile.key) && !this.pool.has(tile.key)) this.dropTile(tile);
+			if (!tile.tex && !tile.arrived && !tile.failed && !keep.has(tile.key) && !this.pool.has(tile.key)) this.dropTile(tile);
 		}
 		return visible;
 	}

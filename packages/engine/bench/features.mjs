@@ -92,5 +92,21 @@ const scanHits = await page.evaluate(() => window.__viewer.search("invoice"));
 check("scan OCR text searchable", scanHits.length === 1 && scanHits[0].page === 0, `${scanHits.length} hits`);
 }
 
+// Password-protected documents: a typed error, then unlock().
+if (!(await has("password.pdf"))) skip("password", "password.pdf");
+else {
+	await page.goto(fixture("password.pdf"));
+	await page.waitForFunction(() => window.__errors.length > 0 && window.__viewer);
+	const first = await page.evaluate(() => window.__errors[0]);
+	check("password error", first.code === "password" && first.phase === "document-load", `${first.code}/${first.phase}: ${first.message}`);
+	const wrong = await page.evaluate(() => window.__viewer.unlock("nope"));
+	const right = await page.evaluate(() => window.__viewer.unlock("secret"));
+	const unlocked = await page.evaluate(() => window.__viewer.pageText(1));
+	check("unlock", wrong === false && right === true && unlocked.includes("Unlocked page 2"), `wrong→${wrong}, right→${right}, p2 "${unlocked.trim()}"`);
+	await page.goto(fixture("password.pdf", "&password=secret"));
+	await page.waitForFunction(() => window.__firstPaintMs !== undefined);
+	check("password option", (await page.evaluate(() => window.__errors.length)) === 0);
+}
+
 check("no errors", errors.length === 0, errors.join(" | "));
 await browser.close();

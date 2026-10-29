@@ -3,7 +3,7 @@
 // document, so workers never share memory and need no cross-origin isolation.
 
 import { init } from "@embedpdf/pdfium";
-import type { FromRaster, Link, OutlineItem, ToRaster } from "./protocol";
+import type { ErrorCode, FromRaster, Link, OutlineItem, ToRaster } from "./protocol";
 
 type Pdfium = Awaited<ReturnType<typeof init>>;
 
@@ -433,25 +433,28 @@ function readImages(page: number, index: number, xf: Xf): { images: Float32Array
 	return { images: new Float32Array(out), scans: scans.size };
 }
 
-async function open(msg: Extract<ToRaster, { t: "init" }>) {
-	port = msg.port;
-	port.onmessage = (ev: MessageEvent<ToRaster>) => {
-		try {
-			if (ev.data.t === "tile") renderTile(ev.data);
-			else if (ev.data.t === "text") extractText(ev.data);
-			else if (ev.data.t === "outline") send({ t: "outline", id: ev.data.id, items: readOutline(0, 0) });
-		} catch (err) {
-			send({ t: "error", message: String((err as Error)?.stack ?? err) });
-		}
-	};
-	const wasmBinary = await (await fetch(msg.wasmUrl)).arrayBuffer();
-	P = await init({ wasmBinary });
-	P.PDFiumExt_Init();
-	const bytes = new Uint8Array(msg.bytes);
-	const ptr = P.pdfium.wasmExports.malloc(bytes.length);
-	heap().set(bytes, ptr);
-	doc = P.FPDF_LoadMemDocument(ptr, bytes.length, "");
-	if (!doc) throw new Error(`PDFium could not open the document (error ${P.FPDF_GetLastError()})`);
+/** FPDF_GetLastError -> ErrorCode */
+const LOAD_ERRORS: Record<number, ErrorCode> = { 2: "file", 3: "format", 4: "password", 5: "security" };
+
+// The document bytes live in the WASM heap for the document's lifetime
+// (FPDF_LoadMemDocument does not copy them), so a password retry reuses them.
+let bytesPtr = 0;
+let bytesLen = 0;
+
+function loadDocument(password: string | undefined) {
+	doc = P.FPDF_LoadMemDocument(bytesPtr, bytesLen, password ?? "");
+	if (!doc) {
+		const err = P.FPDF_GetLastError();
+		const code = LOAD_ERRORS[err] ?? "unknown";
+		const message =
+			code === "password"
+				? password
+					? "Incorrect password: PDFium could not decrypt the document."
+					: "The document is password-protected."
+				: `PDFium could not open the document (${code === "unknown" ? `error ${err}` : code})`;
+		send({ t: "error", message, code, phase: "document-load" });
+		return;
+	}
 	const count = P.FPDF_GetPageCount(doc);
 	// Sizes come from the page tree without parsing page content.
 	const size = P.pdfium.wasmExports.malloc(8);
@@ -464,6 +467,38 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 	send({ t: "opened", pages: pageSizes });
 }
 
+async function open(msg: Extract<ToRaster, { t: "init" }>) {
+	port = msg.port;
+	port.onmessage = (ev: MessageEvent<ToRaster>) => {
+		const m = ev.data;
+		try {
+			if (m.t === "tile") renderTile(m);
+			else if (m.t === "text") extractText(m);
+			else if (m.t === "outline") send({ t: "outline", id: m.id, items: readOutline(0, 0) });
+			else if (m.t === "unlock" && P && !doc && bytesPtr) loadDocument(m.password);
+		} catch (err) {
+			const id = "id" in m ? m.id : undefined;
+			send({ t: "error", message: String((err as Error)?.stack ?? err), code: "unknown", phase: m.t === "tile" ? "render" : "text", id });
+		}
+	};
+	let wasmBinary: ArrayBuffer;
+	try {
+		const res = await fetch(msg.wasmUrl);
+		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		wasmBinary = await res.arrayBuffer();
+		P = await init({ wasmBinary });
+		P.PDFiumExt_Init();
+	} catch (err) {
+		send({ t: "error", message: `lector-engine: pdfium.wasm failed to load from ${msg.wasmUrl}: ${String((err as Error)?.message ?? err)}`, code: "worker", phase: "engine-load" });
+		return;
+	}
+	const bytes = new Uint8Array(msg.bytes);
+	bytesLen = bytes.length;
+	bytesPtr = P.pdfium.wasmExports.malloc(bytes.length);
+	heap().set(bytes, bytesPtr);
+	loadDocument(msg.password);
+}
+
 // Hosts may load this module through a wrapper (dynamic import from a blob
 // loader), so announce readiness instead of assuming the first message lands.
 self.postMessage({ t: "boot" });
@@ -472,7 +507,7 @@ self.onmessage = (ev: MessageEvent<ToRaster>) => {
 	if (ev.data.t !== "init") return;
 	open(ev.data).catch((err) => {
 		const message = String((err as Error)?.stack ?? err);
-		if (port) send({ t: "error", message });
+		if (port) send({ t: "error", message, code: "unknown", phase: "document-load" });
 		else console.error(message);
 	});
 };
