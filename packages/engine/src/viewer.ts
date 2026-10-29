@@ -7,7 +7,9 @@ import {
 	type CoreOptions,
 	type InputMsg,
 	type PointerKind,
+	type PulseKind,
 	type Request,
+	type RevealAlign,
 	type SearchHit,
 	ViewerCore,
 } from "./core";
@@ -44,13 +46,27 @@ export interface Viewer {
 	readonly offscreen: boolean;
 	zoomTo(zoom: number): void;
 	fitWidth(): void;
-	goToPage(page: number, top?: number): void;
-	/** centre a page-space rect (zooming out if needed), e.g. a citation */
-	reveal(page: number, rect: Rect): void;
+	/** resolves true once the camera lands, false if input or another jump interrupted it */
+	goToPage(page: number, top?: number, options?: { animate?: boolean }): Promise<boolean>;
+	/**
+	 * Bring a page-space rect into view, e.g. a citation: its top lands at 30% of
+	 * the viewport height (`align`), x only moves if it is cut off, and the zoom
+	 * only drops if it is taller than 80% of the viewport. `animate` flies there
+	 * (instant under prefers-reduced-motion); `ifNeeded` stays put when it is
+	 * already fully visible. Resolves like `goToPage`.
+	 */
+	reveal(page: number, rect: Rect, options?: RevealOptions): Promise<boolean>;
+	/** animate highlights by id: "ripple" (default, ~1s outward fade) or "flash" (whole-page blink) */
+	pulse(ids: string | string[], options?: { kind?: PulseKind; duration?: number }): void;
 	select(page: number, from: number, to: number): void;
-	search(query: string, limit?: number): Promise<SearchHit[]>;
+	/** case-insensitive search; `pages` limits it to those pages (0-based) */
+	search(query: string, limit?: number, options?: { pages?: number[] }): Promise<SearchHit[]>;
 	outline(): Promise<OutlineItem[]>;
 	pageText(page: number): Promise<string>;
+	/** page text plus `chars[i]`: the char index (for `rects`) of UTF-16 unit `i` */
+	pageTextMap(page: number): Promise<{ text: string; chars: Int32Array }>;
+	/** rects (page points, one per line) of chars [from, to) on a page */
+	rects(page: number, from: number, to: number): Promise<Rect[]>;
 	/** a rendered page at `width` device pixels, for thumbnails */
 	thumbnail(page: number, width: number): Promise<ImageBitmap | null>;
 	/** a copy of the document bytes */
@@ -61,6 +77,12 @@ export interface Viewer {
 	/** text of the current selection ("" when nothing is selected) */
 	readonly selectedText: string;
 	destroy(): void;
+}
+
+export interface RevealOptions {
+	animate?: boolean;
+	align?: RevealAlign;
+	ifNeeded?: boolean;
 }
 
 /** Errors mirror pdf.js wording so hosts that pattern-match load failures keep working. */
@@ -124,6 +146,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	// Phones and tablets: each worker holds a copy of the PDF plus PDFium's heap,
 	// and iOS kills tabs that hold a few hundred MB, so use fewer of everything.
 	const touchDevice = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+	// Camera flights jump instantly for people who asked for less motion.
+	const motionQuery = coreOptions.reducedMotion === undefined && typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
+	if (motionQuery) coreOptions.reducedMotion = motionQuery.matches;
 	if (touchDevice) coreOptions.textureBudgetMB ??= 128;
 	const n = workerCount ?? (touchDevice ? 2 : Math.min(4, Math.max(2, Math.floor((navigator.hardwareConcurrency || 4) / 2))));
 	const rasterWorkers: Worker[] = [];
@@ -139,6 +164,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 
 	let selectedText = "";
 	const pending = new Map<number, (result: unknown) => void>();
+	const flights = new Map<number, (landed: boolean) => void>();
 	const handleEvent = (e: CoreEvent) => {
 		if (e.type === "resized") {
 			canvas.style.width = `${e.w}px`;
@@ -149,6 +175,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		} else if (e.type === "link") {
 			if (onLink) onLink(e.url);
 			else if (/^(https?|mailto):/i.test(e.url)) window.open(e.url, "_blank", "noopener,noreferrer");
+		} else if (e.type === "flight") {
+			flights.get(e.id)?.(e.landed);
+			flights.delete(e.id);
 		} else if (e.type === "response") {
 			pending.get(e.id)?.(e.result);
 			pending.delete(e.id);
@@ -191,6 +220,14 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		if (core) core.command(cmd);
 		else postToCore({ t: "command", cmd });
 	};
+	let nextFlight = 1;
+	const flight = (make: (id: number) => Command) =>
+		new Promise<boolean>((resolve) => {
+			const id = nextFlight++;
+			// Registered first: an instant jump answers synchronously on the main thread.
+			flights.set(id, resolve);
+			command(make(id));
+		});
 	let nextRequest = 1;
 	const request = <T>(req: Request) =>
 		new Promise<T>((resolve, reject) => {
@@ -236,6 +273,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		);
 	};
 	watchDpr();
+	motionQuery?.addEventListener("change", () => command({ type: "options", options: { reducedMotion: motionQuery.matches } }), { signal: ac.signal });
 
 	on(
 		container,
@@ -301,12 +339,15 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		offscreen: useOffscreen,
 		zoomTo: (zoom) => command({ type: "zoom", zoom }),
 		fitWidth: () => command({ type: "fit-width" }),
-		goToPage: (page, top) => command({ type: "goto", page, top }),
-		reveal: (page, rect) => command({ type: "reveal", page, rect }),
+		goToPage: (page, top, o) => flight((id) => ({ type: "goto", page, top, animate: o?.animate, flight: id })),
+		reveal: (page, rect, o) => flight((id) => ({ type: "reveal", page, rect, animate: o?.animate, align: o?.align, ifNeeded: o?.ifNeeded, flight: id })),
+		pulse: (ids, o) => command({ type: "pulse", ids: Array.isArray(ids) ? ids : [ids], kind: o?.kind, duration: o?.duration }),
 		select: (page, from, to) => command({ type: "select", page, from, to }),
-		search: (query, limit) => request<SearchHit[]>({ type: "search", query, limit }),
+		search: (query, limit, o) => request<SearchHit[]>({ type: "search", query, limit, pages: o?.pages }),
 		outline: () => request<OutlineItem[]>({ type: "outline" }),
 		pageText: (page) => request<string>({ type: "page-text", page }),
+		pageTextMap: (page) => request<{ text: string; chars: Int32Array }>({ type: "page-text-map", page }),
+		rects: (page, from, to) => request<Rect[]>({ type: "rects", page, from, to }),
 		getData: async () => bytes.slice(),
 		thumbnail: async (page, width) => {
 			const res = await request<{ buf: ArrayBuffer; w: number; h: number } | null>({ type: "thumbnail", page, width });
@@ -321,6 +362,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		},
 		destroy() {
 			ac.abort();
+			for (const resolve of flights.values()) resolve(false);
+			flights.clear();
 			ro.disconnect();
 			for (const w of rasterWorkers) w.terminate();
 			coreWorker?.terminate();

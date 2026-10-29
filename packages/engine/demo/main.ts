@@ -18,10 +18,12 @@ const t0 = performance.now();
 let zoom = 1;
 
 // Exposed for the benchmark harness.
-const w = window as unknown as { __events: CoreEvent[]; __viewer?: Viewer; __firstPaintMs?: number };
+const w = window as unknown as { __events: CoreEvent[]; __flights: CoreEvent[]; __viewer?: Viewer; __firstPaintMs?: number };
 w.__events = [];
+w.__flights = [];
 
 const onEvent = (e: CoreEvent) => {
+	if (e.type === "flight") w.__flights.push(e);
 	if (e.type === "stats") {
 		w.__events.push(e);
 		const s = e.stats;

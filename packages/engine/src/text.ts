@@ -178,6 +178,20 @@ export class PageText {
 		return s;
 	}
 
+	/** All page text (as `text()`), plus the char index of each UTF-16 unit. */
+	textWithMap(): { text: string; chars: Int32Array } {
+		let s = "";
+		const chars: number[] = [];
+		for (let i = 0; i < this.codes.length; i++) {
+			const c = this.codes[i]!;
+			if (c === 0x0d || c === 0x02) continue;
+			const ch = String.fromCodePoint(c || 0x20);
+			s += ch;
+			for (let k = 0; k < ch.length; k++) chars.push(i);
+		}
+		return { text: s, chars: Int32Array.from(chars) };
+	}
+
 	private search: { haystack: string; map: Int32Array } | null = null;
 
 	/**
