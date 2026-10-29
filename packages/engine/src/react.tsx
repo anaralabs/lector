@@ -19,7 +19,7 @@ export interface LectorViewProps extends Omit<ViewerOptions, "onEvent" | keyof C
 }
 
 export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function LectorView(
-	{ source, options, onEvent, onViewer, className, style, wasmUrl, workers, offscreen, onLink, createWorker, workerUrls, password, textLayer, interceptFind },
+	{ source, options, onEvent, onViewer, className, style, wasmUrl, workers, offscreen, onLink, createWorker, workerUrls, password, textLayer, interceptFind, rangeLoading, autoFetch },
 	ref,
 ) {
 	const container = useRef<HTMLDivElement>(null);
@@ -43,6 +43,8 @@ export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function Le
 			password,
 			textLayer,
 			interceptFind,
+			rangeLoading,
+			autoFetch,
 			...latest.current.options,
 			onEvent: (e) => latest.current.onEvent?.(e),
 			onLink: latest.current.onLink ? (url) => latest.current.onLink?.(url) : undefined,
@@ -71,7 +73,7 @@ export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function Le
 			latest.current.onViewer?.(null);
 		};
 		// A new password reopens the document; `viewer.unlock` retries without remounting.
-	}, [source, wasmUrl, workers, offscreen, password, textLayer, interceptFind]);
+	}, [source, wasmUrl, workers, offscreen, password, textLayer, interceptFind, rangeLoading, autoFetch]);
 
 	const optionsKey = JSON.stringify(options ?? {});
 	useEffect(() => {
