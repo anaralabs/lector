@@ -74,7 +74,7 @@ export class RasterPool {
 
 	/** Drop queued tile jobs whose key is not in `keep` (in-flight jobs finish; text jobs are cheap and always kept). */
 	retain(keep: Set<string>) {
-		for (const job of this.queue.values()) if (job.msg.t === "tile" && !keep.has(job.key)) this.queue.delete(job.key);
+		for (const job of this.queue.values()) if (job.msg.t === "tile" && !job.key.startsWith("thumb:") && !keep.has(job.key)) this.queue.delete(job.key);
 	}
 
 	pump() {

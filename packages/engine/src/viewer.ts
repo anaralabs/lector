@@ -38,6 +38,10 @@ export interface Viewer {
 	search(query: string, limit?: number): Promise<SearchHit[]>;
 	outline(): Promise<OutlineItem[]>;
 	pageText(page: number): Promise<string>;
+	/** a rendered page at `width` device pixels, for thumbnails */
+	thumbnail(page: number, width: number): Promise<ImageBitmap | null>;
+	/** a copy of the document bytes */
+	getData(): Promise<Uint8Array>;
 	setHighlights(items: Extract<Command, { type: "highlights" }>["items"]): void;
 	clearSelection(): void;
 	setOptions(options: Partial<CoreOptions>): void;
@@ -46,16 +50,18 @@ export interface Viewer {
 	destroy(): void;
 }
 
+/** Errors mirror pdf.js wording so hosts that pattern-match load failures keep working. */
+async function fetchPdf(url: string) {
+	const res = await fetch(url, { credentials: "same-origin" });
+	if (!res.ok) throw new Error(`Unexpected server response (${res.status}) while retrieving PDF "${url}".`);
+	return new Uint8Array(await res.arrayBuffer());
+}
+
 const NAV_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", "Home", "End", " ", "Escape"]);
 
 export async function createViewer(container: HTMLElement, source: string | ArrayBuffer | Uint8Array, options: ViewerOptions): Promise<Viewer> {
 	const { wasmUrl, workers: workerCount, offscreen: wantOffscreen, onEvent, onLink, ...coreOptions } = options;
-	const bytes =
-		typeof source === "string"
-			? new Uint8Array(await (await fetch(source)).arrayBuffer())
-			: source instanceof Uint8Array
-				? source
-				: new Uint8Array(source);
+	const bytes = typeof source === "string" ? await fetchPdf(source) : source instanceof Uint8Array ? source : new Uint8Array(source);
 
 	const canvas = document.createElement("canvas");
 	canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;";
@@ -232,6 +238,12 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		search: (query, limit) => request<SearchHit[]>({ type: "search", query, limit }),
 		outline: () => request<OutlineItem[]>({ type: "outline" }),
 		pageText: (page) => request<string>({ type: "page-text", page }),
+		getData: async () => bytes.slice(),
+		thumbnail: async (page, width) => {
+			const res = await request<{ buf: ArrayBuffer; w: number; h: number } | null>({ type: "thumbnail", page, width });
+			if (!res) return null;
+			return createImageBitmap(new ImageData(new Uint8ClampedArray(res.buf), res.w, res.h));
+		},
 		setHighlights: (items) => command({ type: "highlights", items }),
 		clearSelection: () => command({ type: "clear-selection" }),
 		setOptions: (o) => command({ type: "options", options: o }),

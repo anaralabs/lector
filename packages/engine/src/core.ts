@@ -72,6 +72,8 @@ export interface Highlight {
 	/** page points, top-left origin */
 	rects: Rect[];
 	color?: Color;
+	/** fill (default), outline (2px border) or underline (2px bar at the rect's bottom) */
+	style?: "fill" | "outline" | "underline";
 	/** false: drawn but not hoverable/clickable (e.g. search hits) */
 	interactive?: boolean;
 }
@@ -89,7 +91,8 @@ export type Request =
 	| { type: "search"; query: string; limit?: number }
 	| { type: "outline" }
 	| { type: "page-text"; page: number }
-	| { type: "rects"; page: number; from: number; to: number };
+	| { type: "rects"; page: number; from: number; to: number }
+	| { type: "thumbnail"; page: number; width: number };
 
 export type Command =
 	| { type: "zoom"; zoom: number; x?: number; y?: number }
@@ -436,6 +439,7 @@ export class ViewerCore {
 				return;
 			}
 			this.dragging = true;
+			this.emit({ type: "selection", selection: null, final: false });
 			if (msg.shift && this.selRange) {
 				this.selUnit = "char";
 				this.selAnchor = [this.selRange[0], this.selRange[0]];
@@ -625,6 +629,19 @@ export class ViewerCore {
 			case "rects": {
 				const text = await this.loadText(req.page);
 				return text.rects(req.from, req.to);
+			}
+			case "thumbnail": {
+				const size = this.pages[req.page];
+				if (!size) throw new Error(`no page ${req.page}`);
+				const scale = req.width / size.w;
+				const w = Math.max(1, Math.round(size.w * scale));
+				const h = Math.max(1, Math.round(size.h * scale));
+				return new Promise((resolve) => {
+					this.pool.request(`thumb:${req.page}:${w}`, 600 + req.page, { t: "tile", page: req.page, scale, x: 0, y: 0, w, h }, (res) =>
+						resolve(res.t === "tile" ? { buf: res.buf, w: res.w, h: res.h } : null),
+					);
+					this.pool.pump();
+				});
 			}
 			case "outline":
 				this.outline ??= new Promise((resolve) => {
@@ -1042,7 +1059,10 @@ export class ViewerCore {
 		gl.setTone(dark ? { paper, ink } : null);
 		// Multiply darkens: right on white paper, invisible on dark paper.
 		const markBlend = dark ? "alpha" : "multiply";
-		const mark = (c: Color): Color => (dark ? [c[0], c[1], c[2], 0.38] : c);
+		// Light: multiply by the colour composited over white, so alpha still reads as strength.
+		const mark = (c: Color): Color =>
+			dark ? [c[0], c[1], c[2], Math.min(0.55, c[3])] : [1 - c[3] * (1 - c[0]), 1 - c[3] * (1 - c[1]), 1 - c[3] * (1 - c[2]), 1];
+		const px = this.dpr;
 		gl.resetState();
 		gl.begin(background);
 		const view = this.viewRect();
@@ -1084,7 +1104,24 @@ export class ViewerCore {
 
 			for (const h of this.highlights) {
 				if (h.page !== p) continue;
-				for (const q of h.rects) gl.drawRect(sx + q.x * S, sy + q.y * S, q.w * S, q.h * S, mark(h.color ?? highlightColor), markBlend);
+				const color = mark(h.color ?? highlightColor);
+				const style = h.style ?? "fill";
+				for (const q of h.rects) {
+					const x = sx + q.x * S;
+					const y = sy + q.y * S;
+					const w = q.w * S;
+					const hh = q.h * S;
+					if (style === "fill") gl.drawRect(x, y, w, hh, color, markBlend);
+					else if (style === "underline") gl.drawRect(x, y + hh - 2 * px, w, 2 * px, h.color ?? highlightColor, "alpha");
+					else {
+						const c = h.color ?? highlightColor;
+						const b = 2 * px;
+						gl.drawRect(x - b, y - b, w + 2 * b, b, c, "alpha");
+						gl.drawRect(x - b, y + hh, w + 2 * b, b, c, "alpha");
+						gl.drawRect(x - b, y, b, hh, c, "alpha");
+						gl.drawRect(x + w, y, b, hh, c, "alpha");
+					}
+				}
 			}
 			for (const sel of this.selRects) {
 				if (sel.page !== p) continue;
