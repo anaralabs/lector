@@ -46,7 +46,9 @@ const onEvent = (e: CoreEvent) => {
 
 async function open(source: string | ArrayBuffer) {
 	w.__viewer?.destroy();
-	const viewer = await createViewer(el, source, { wasmUrl, offscreen, workers, onEvent, ...(params.get("loader") === "0" ? {} : { createWorker, workerUrls }) });
+	// ?dark=1 previews dark mode with anara-like colours.
+	const dark = params.get("dark") === "1" ? { dark: true, background: [0.03, 0.03, 0.03] as [number, number, number], paper: [0.05, 0.05, 0.05] as [number, number, number] } : {};
+	const viewer = await createViewer(el, source, { wasmUrl, offscreen, workers, onEvent, ...dark, ...(params.get("loader") === "0" ? {} : { createWorker, workerUrls }) });
 	w.__viewer = viewer;
 	info.mode = `compositor: ${viewer.offscreen ? "worker (OffscreenCanvas)" : "main thread"}`;
 	el.focus();

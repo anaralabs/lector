@@ -51,7 +51,8 @@ void main() {
   }
 }`;
 
-export type Blend = "none" | "alpha" | "multiply";
+/** lighten: per-channel max, so dark paper takes the colour and light ink stays on top */
+export type Blend = "none" | "alpha" | "multiply" | "lighten";
 
 export class Compositor {
 	readonly gl: WebGL2RenderingContext;
@@ -162,8 +163,9 @@ export class Compositor {
 			return;
 		}
 		gl.enable(gl.BLEND);
+		gl.blendEquation(mode === "lighten" ? gl.MAX : gl.FUNC_ADD);
 		if (mode === "alpha") gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-		else gl.blendFunc(gl.DST_COLOR, gl.ZERO);
+		else if (mode === "multiply") gl.blendFunc(gl.DST_COLOR, gl.ZERO);
 	}
 
 	private mode: "tex" | "solid" | null = null;

@@ -16,6 +16,8 @@ export interface CoreOptions {
 	pageGap: number;
 	/** multiplied over the page under selected text */
 	selectionColor: Color;
+	/** dark mode: the paper under selected text becomes this (ink stays on top) */
+	selectionColorDark: Color;
 	/** default highlight colour (multiplied) */
 	highlightColor: Color;
 	/** >1 darkens anti-aliased glyph edges (PDFium renders thin text) */
@@ -35,6 +37,7 @@ export const defaultOptions: CoreOptions = {
 	background: [0.93, 0.93, 0.94],
 	pageGap: 12,
 	selectionColor: [0.62, 0.78, 1, 1],
+	selectionColorDark: [0.16, 0.31, 0.58, 1],
 	highlightColor: [1, 0.9, 0.4, 1],
 	gamma: 1.25,
 	textureBudgetMB: 384,
@@ -1228,13 +1231,18 @@ export class ViewerCore {
 		const gl = this.gl;
 		const S = this.cam.zoom * this.dpr;
 		const target = this.targetScale;
-		const { background, selectionColor, highlightColor, gamma, dark, paper, ink } = this.opts;
+		const { background, selectionColor, selectionColorDark, highlightColor, gamma, dark, paper, ink } = this.opts;
 		gl.setTone(dark ? { paper, ink } : null);
-		// Multiply darkens: right on white paper, invisible on dark paper.
-		const markBlend = dark ? "alpha" : "multiply";
-		// Light: multiply by the colour composited over white, so alpha still reads as strength.
+		// Marks sit behind the text in both modes. Light: multiply, so black ink
+		// stays black. Dark: lighten (per-channel max), so the dark paper takes
+		// the colour while light ink stays on top, untinted.
+		const markBlend = dark ? "lighten" : "multiply";
+		// Light: the colour composited over white, so alpha still reads as strength.
+		// Dark: a deep version of the colour over the paper, so light ink keeps its contrast.
 		const mark = (c: Color): Color =>
-			dark ? [c[0], c[1], c[2], Math.min(0.55, c[3])] : [1 - c[3] * (1 - c[0]), 1 - c[3] * (1 - c[1]), 1 - c[3] * (1 - c[2]), 1];
+			dark
+				? [paper[0] + (c[0] * 0.55 - paper[0]) * c[3], paper[1] + (c[1] * 0.55 - paper[1]) * c[3], paper[2] + (c[2] * 0.55 - paper[2]) * c[3], 1]
+				: [1 - c[3] * (1 - c[0]), 1 - c[3] * (1 - c[1]), 1 - c[3] * (1 - c[2]), 1];
 		const px = this.dpr;
 		gl.resetState();
 		gl.begin(background);
@@ -1298,7 +1306,8 @@ export class ViewerCore {
 			}
 			for (const sel of this.selRects) {
 				if (sel.page !== p) continue;
-				for (const q of sel.rects) gl.drawRect(sx + q.x * S, sy + q.y * S, q.w * S, q.h * S, mark(selectionColor), markBlend);
+				const c = dark ? selectionColorDark : mark(selectionColor);
+				for (const q of sel.rects) gl.drawRect(sx + q.x * S, sy + q.y * S, q.w * S, q.h * S, c, markBlend);
 			}
 		}
 		const ends = this.handles ? this.handleEnds() : null;
