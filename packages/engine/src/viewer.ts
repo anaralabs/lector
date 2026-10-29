@@ -28,6 +28,12 @@ export interface ViewerOptions extends Partial<CoreOptions> {
 	 * module workers). The engine waits for each worker's `boot` message.
 	 */
 	createWorker?: (url: URL, name: string) => Worker;
+	/**
+	 * URLs of the bundled worker scripts (see `./vite`). Required with
+	 * `createWorker` when assets live on another origin; otherwise the engine
+	 * starts its workers with `new Worker(new URL(...))` for the bundler.
+	 */
+	workerUrls?: { raster: string; core: string };
 	/** external link clicked; default opens it in a new tab */
 	onLink?: (url: string) => void;
 }
@@ -66,9 +72,17 @@ async function fetchPdf(url: string) {
 const NAV_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", "Home", "End", " ", "Escape"]);
 
 export async function createViewer(container: HTMLElement, source: string | ArrayBuffer | Uint8Array, options: ViewerOptions): Promise<Viewer> {
-	const { wasmUrl, workers: workerCount, offscreen: wantOffscreen, onEvent, onLink, createWorker, ...coreOptions } = options;
-	const spawn = (url: URL, name: string) => {
-		const worker = createWorker ? createWorker(url, name) : new Worker(url, { type: "module", name });
+	const { wasmUrl, workers: workerCount, offscreen: wantOffscreen, onEvent, onLink, createWorker, workerUrls, ...coreOptions } = options;
+	const spawn = (kind: "raster" | "core", name: string) => {
+		const url = workerUrls?.[kind];
+		// Literal `new Worker(new URL(...))` so bundlers emit the worker chunks.
+		const worker = url
+			? createWorker
+				? createWorker(new URL(url, location.href), name)
+				: new Worker(url, { type: "module", name })
+			: kind === "raster"
+				? new Worker(new URL("./raster-worker.ts", import.meta.url), { type: "module", name })
+				: new Worker(new URL("./core-worker.ts", import.meta.url), { type: "module", name });
 		const booted = new Promise<void>((resolve) => {
 			const onBoot = (ev: MessageEvent) => {
 				if ((ev.data as { t?: string } | null)?.t !== "boot") return;
@@ -96,7 +110,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	const rasterWorkers: Worker[] = [];
 	const corePorts: MessagePort[] = [];
 	for (let i = 0; i < n; i++) {
-		const { worker, booted } = spawn(new URL("./raster-worker.ts", import.meta.url), `lector-raster-${i}`);
+		const { worker, booted } = spawn("raster", `lector-raster-${i}`);
 		const channel = new MessageChannel();
 		const copy = bytes.slice().buffer;
 		booted.then(() => worker.postMessage({ t: "init", bytes: copy, port: channel.port1, wasmUrl }, [copy, channel.port1]));
@@ -127,7 +141,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	let core: ViewerCore | null = null;
 	if (useOffscreen) {
 		const offscreen = canvas.transferControlToOffscreen();
-		const spawned = spawn(new URL("./core-worker.ts", import.meta.url), "lector-compositor");
+		const spawned = spawn("core", "lector-compositor");
 		coreWorker = spawned.worker;
 		coreWorker.onmessage = (ev: MessageEvent<CoreEvent | { t: "boot" }>) => {
 			if ("type" in ev.data) handleEvent(ev.data);

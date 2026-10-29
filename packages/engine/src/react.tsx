@@ -16,7 +16,7 @@ export interface LectorViewProps extends Omit<ViewerOptions, "onEvent" | keyof C
 }
 
 export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function LectorView(
-	{ source, options, onEvent, onViewer, className, style, wasmUrl, workers, offscreen, onLink, createWorker },
+	{ source, options, onEvent, onViewer, className, style, wasmUrl, workers, offscreen, onLink, createWorker, workerUrls },
 	ref,
 ) {
 	const container = useRef<HTMLDivElement>(null);
@@ -36,6 +36,7 @@ export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function Le
 			workers,
 			offscreen,
 			createWorker: latest.current.createWorker,
+			workerUrls,
 			...latest.current.options,
 			onEvent: (e) => latest.current.onEvent?.(e),
 			onLink: latest.current.onLink ? (url) => latest.current.onLink?.(url) : undefined,
