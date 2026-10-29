@@ -106,11 +106,17 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	container.style.touchAction = "none";
 	container.style.userSelect = "none";
 	(container.style as CSSStyleDeclaration & { webkitUserSelect: string }).webkitUserSelect = "none";
+	// iOS: no native callout/magnifier on long-press; the engine selects text itself.
+	container.style.setProperty("-webkit-touch-callout", "none");
 	if (container.tabIndex < 0) container.tabIndex = 0;
 	container.appendChild(canvas);
 
 	// Raster workers. Each gets its own copy of the bytes and a port to the core.
-	const n = workerCount ?? Math.min(4, Math.max(2, Math.floor((navigator.hardwareConcurrency || 4) / 2)));
+	// Phones and tablets: each worker holds a copy of the PDF plus PDFium's heap,
+	// and iOS kills tabs that hold a few hundred MB, so use fewer of everything.
+	const touchDevice = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+	if (touchDevice) coreOptions.textureBudgetMB ??= 128;
+	const n = workerCount ?? (touchDevice ? 2 : Math.min(4, Math.max(2, Math.floor((navigator.hardwareConcurrency || 4) / 2))));
 	const rasterWorkers: Worker[] = [];
 	const corePorts: MessagePort[] = [];
 	for (let i = 0; i < n; i++) {
@@ -262,6 +268,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	on(canvas, "pointercancel", pointer("cancel"));
 	on(canvas, "pointerleave", () => send({ type: "leave" }));
 	on(canvas, "touchstart", (e: TouchEvent) => e.preventDefault(), { passive: false });
+	// Android fires contextmenu on long-press; the engine handles that as selection.
+	on(canvas, "contextmenu", (e: Event) => touchCount > 0 && e.preventDefault());
 
 	on(container, "keydown", (e: KeyboardEvent) => {
 		const mod = e.metaKey || e.ctrlKey;

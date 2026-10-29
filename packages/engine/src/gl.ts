@@ -38,9 +38,18 @@ void main() {
 
 const SOLID_FS = `#version 300 es
 precision mediump float;
+in vec2 v_uv;
 uniform vec4 u_color;
+uniform float u_round;
 out vec4 o;
-void main() { o = u_color; }`;
+void main() {
+  o = u_color;
+  if (u_round > 0.0) {
+    // Disc with a one-pixel soft edge; u_round is the radius in pixels.
+    float d = length(v_uv * 2.0 - 1.0) * u_round;
+    o.a *= clamp(u_round - d + 0.5, 0.0, 1.0);
+  }
+}`;
 
 export type Blend = "none" | "alpha" | "multiply";
 
@@ -57,7 +66,7 @@ export class Compositor {
 		ink: WebGLUniformLocation;
 	};
 	private tone: { paper: [number, number, number]; ink: [number, number, number] } | null = null;
-	private solid: { prog: WebGLProgram; rect: WebGLUniformLocation; uv: WebGLUniformLocation; view: WebGLUniformLocation; color: WebGLUniformLocation };
+	private solid: { prog: WebGLProgram; rect: WebGLUniformLocation; uv: WebGLUniformLocation; view: WebGLUniformLocation; color: WebGLUniformLocation; round: WebGLUniformLocation };
 	private vao: WebGLVertexArrayObject;
 	private w = 1;
 	private h = 1;
@@ -80,7 +89,7 @@ export class Compositor {
 		const solidProg = this.program(QUAD_VS, SOLID_FS);
 		const u = (p: WebGLProgram, n: string) => gl.getUniformLocation(p, n)!;
 		this.tex = { prog: texProg, rect: u(texProg, "u_rect"), uv: u(texProg, "u_uv"), view: u(texProg, "u_view"), gamma: u(texProg, "u_gamma"), dark: u(texProg, "u_dark"), paper: u(texProg, "u_paper"), ink: u(texProg, "u_ink") };
-		this.solid = { prog: solidProg, rect: u(solidProg, "u_rect"), uv: u(solidProg, "u_uv"), view: u(solidProg, "u_view"), color: u(solidProg, "u_color") };
+		this.solid = { prog: solidProg, rect: u(solidProg, "u_rect"), uv: u(solidProg, "u_uv"), view: u(solidProg, "u_view"), color: u(solidProg, "u_color"), round: u(solidProg, "u_round") };
 
 		this.vao = gl.createVertexArray()!;
 		gl.bindVertexArray(this.vao);
@@ -202,7 +211,20 @@ export class Compositor {
 		this.use("solid");
 		this.blend(blend);
 		gl.uniform4f(this.solid.color, color[0], color[1], color[2], color[3]);
+		gl.uniform1f(this.solid.round, 0);
 		gl.uniform4f(this.solid.rect, x, y, w, h);
+		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+	}
+
+	/** Anti-aliased filled circle, alpha-blended. */
+	drawCircle(cx: number, cy: number, r: number, color: [number, number, number, number]) {
+		const gl = this.gl;
+		this.use("solid");
+		this.blend("alpha");
+		gl.uniform4f(this.solid.color, color[0], color[1], color[2], color[3]);
+		gl.uniform1f(this.solid.round, r);
+		gl.uniform4f(this.solid.uv, 0, 0, 1, 1);
+		gl.uniform4f(this.solid.rect, cx - r, cy - r, r * 2, r * 2);
 		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 	}
 }

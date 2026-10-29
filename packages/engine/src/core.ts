@@ -165,6 +165,8 @@ interface Tile {
 	/** pixels have arrived from a worker and are waiting for upload */
 	arrived: boolean;
 	lastUsed: number;
+	/** frame that last planned this tile (visible or look-ahead) */
+	lastWanted: number;
 }
 
 interface PageRect {
@@ -180,6 +182,11 @@ const ZOOM_SETTLE_MS = 180;
 const UPLOAD_BUDGET_MS = 2.5;
 const CLICK_SLOP = 4;
 const AUTOSCROLL_EDGE = 48;
+const LONG_PRESS_MS = 450;
+const TOUCH_SLOP = 8;
+/** handle knob radius and touch target, css px */
+const HANDLE_R = 6;
+const HANDLE_HIT = 32;
 
 export class ViewerCore {
 	private gl: Compositor;
@@ -231,6 +238,13 @@ export class ViewerCore {
 	private velocity = { x: 0, y: 0 };
 	private samples: { t: number; x: number; y: number }[] = [];
 	private gestureZoom: number | null = null;
+	private press: { x: number; y: number; t: number; timer: ReturnType<typeof setTimeout> | null } | null = null;
+	/** a finger is extending the selection (after a long-press or on a handle) */
+	private touchSelect = false;
+	/** finger -> hit-test point offset while dragging a handle */
+	private grab = { dx: 0, dy: 0 };
+	/** draw drag handles (the selection was made by touch) */
+	private handles = false;
 
 	// frame loop
 	private dirty = false;
@@ -414,15 +428,49 @@ export class ViewerCore {
 			this.touches.set(msg.id, { x: msg.x, y: msg.y });
 			this.samples = [];
 			this.pinch = null;
+			this.cancelPress();
+			this.press = null;
+			if (this.touches.size > 1) {
+				// A second finger turns any selection drag into a pinch.
+				this.endTouchSelect();
+				return;
+			}
+			if (this.grabHandle(msg.x, msg.y)) return;
+			this.press = { x: msg.x, y: msg.y, t: performance.now(), timer: setTimeout(() => this.longPress(), LONG_PRESS_MS) };
 			return;
 		}
 		if (msg.phase === "up" || msg.phase === "cancel") {
 			this.touches.delete(msg.id);
 			this.pinch = null;
+			const press = this.press;
+			this.cancelPress();
+			this.press = null;
+			if (this.touchSelect) {
+				this.endTouchSelect();
+				return;
+			}
+			const tap = press && performance.now() - press.t < LONG_PRESS_MS;
+			if (msg.phase === "up" && tap && this.touches.size === 0) {
+				// Tap: dismiss a selection, otherwise click links and highlights.
+				if (this.selRange) this.clearSelection();
+				else this.click(msg.x, msg.y);
+				return;
+			}
 			if (this.touches.size === 0) this.startMomentum();
 			return;
 		}
 		if (!prev) return;
+		if (this.touchSelect) {
+			prev.x = msg.x;
+			prev.y = msg.y;
+			this.pointer = { x: msg.x + this.grab.dx, y: msg.y + this.grab.dy };
+			this.updateDrag();
+			return;
+		}
+		if (this.press && Math.hypot(msg.x - this.press.x, msg.y - this.press.y) > TOUCH_SLOP) {
+			this.cancelPress();
+			this.press = null;
+		}
 		if (this.touches.size === 1) {
 			this.panBy(prev.x - msg.x, prev.y - msg.y);
 			prev.x = msg.x;
@@ -450,6 +498,80 @@ export class ViewerCore {
 		this.userZoom(this.pinch.zoom * (dist / this.pinch.dist), cx, cy);
 	}
 
+	private cancelPress() {
+		if (this.press?.timer) clearTimeout(this.press.timer);
+		if (this.press) this.press.timer = null;
+	}
+
+	/** Long-press on text selects the word; keep the finger down to extend it. */
+	private longPress() {
+		const press = this.press;
+		if (!press || this.touches.size !== 1) return;
+		press.timer = null;
+		const at = this.toPage(press.x, press.y);
+		const text = at && this.texts.get(at.page);
+		if (!at || !text || !text.isOverText(at.x, at.y)) return;
+		const hit = this.hitPoint(press.x, press.y);
+		if (!hit) return;
+		this.press = null;
+		this.velocity = { x: 0, y: 0 };
+		this.selUnit = "word";
+		this.selAnchor = this.expand(hit);
+		this.setFocus(hit);
+		this.handles = true;
+		this.touchSelect = true;
+		this.dragging = true;
+		this.grab = { dx: 0, dy: 0 };
+		this.pointer = { x: press.x, y: press.y };
+		this.emitSelection(false);
+		this.requestFrame();
+	}
+
+	/** Touch down on a selection handle: drag that end, the other stays put. */
+	private grabHandle(x: number, y: number) {
+		if (!this.handles || !this.selRange) return false;
+		const ends = this.handleEnds();
+		if (!ends) return false;
+		const [start, end] = ends;
+		const ds = Math.hypot(x - start.x, y - (start.y - HANDLE_R));
+		const de = Math.hypot(x - end.x, y - (end.y + end.h + HANDLE_R));
+		if (Math.min(ds, de) > HANDLE_HIT) return false;
+		const moving = de <= ds ? end : start;
+		const fixed = de <= ds ? this.selRange[0] : this.selRange[1];
+		this.selUnit = "char";
+		this.selAnchor = [fixed, fixed];
+		// Hit-test at the line the handle marks, not under the finger.
+		this.grab = { dx: moving.x - x, dy: moving.y + moving.h / 2 - y };
+		this.pointer = { x: x + this.grab.dx, y: y + this.grab.dy };
+		this.touchSelect = true;
+		this.dragging = true;
+		this.emit({ type: "selection", selection: null, final: false });
+		this.requestFrame();
+		return true;
+	}
+
+	private endTouchSelect() {
+		if (!this.touchSelect) return;
+		this.touchSelect = false;
+		this.dragging = false;
+		this.emitSelection(true);
+	}
+
+	/** Screen (css px) caret boxes at the selection's start and end. */
+	private handleEnds(): [Rect, Rect] | null {
+		const first = this.selRects[0];
+		const last = this.selRects[this.selRects.length - 1];
+		const a = first?.rects[0];
+		const z = last?.rects[last.rects.length - 1];
+		if (!first || !last || !a || !z) return null;
+		const s = this.screenRect(first.page, [a])!;
+		const e = this.screenRect(last.page, [z])!;
+		return [
+			{ x: s.x, y: s.y, w: 0, h: s.h },
+			{ x: e.x + e.w, y: e.y, w: 0, h: e.h },
+		];
+	}
+
 	private startMomentum() {
 		const s = this.samples;
 		if (s.length < 2) return;
@@ -471,6 +593,7 @@ export class ViewerCore {
 				return;
 			}
 			this.dragging = true;
+			this.handles = false;
 			this.emit({ type: "selection", selection: null, final: false });
 			if (msg.shift && this.selRange) {
 				this.selUnit = "char";
@@ -793,6 +916,8 @@ export class ViewerCore {
 		const had = this.selRange !== null;
 		this.selAnchor = null;
 		this.dragging = false;
+		this.touchSelect = false;
+		this.handles = false;
 		this.setRange(null);
 		if (had) this.emitSelection(true);
 	}
@@ -892,11 +1017,12 @@ export class ViewerCore {
 	private ensureTile(page: number, scale: number, x: number, y: number, w: number, h: number, priority: number, keep: Set<string>) {
 		const key = this.tileKey(page, scale, x, y);
 		const existing = this.tiles.get(key);
+		if (existing) existing.lastWanted = this.frameId;
 		if (existing && (existing.tex || existing.arrived)) return;
 		keep.add(key);
 		let tile = existing;
 		if (!tile) {
-			tile = { key, page, scale, x, y, w, h, tex: null, arrived: false, lastUsed: 0 };
+			tile = { key, page, scale, x, y, w, h, tex: null, arrived: false, lastUsed: 0, lastWanted: this.frameId };
 			this.tiles.set(key, tile);
 			let set = this.tilesByPage.get(page);
 			if (!set) this.tilesByPage.set(page, (set = new Set()));
@@ -944,6 +1070,8 @@ export class ViewerCore {
 		const raw = zooming ? 2 ** Math.ceil(Math.log2(S) - 0.05) : S;
 		this.targetScale = Math.round(raw * 4096) / 4096;
 		const keep = new Set<string>();
+		// Near the texture budget, keep what is cached ahead but stop fetching more.
+		const roomAhead = this.gl.textureBytes < this.opts.textureBudgetMB * 1024 * 1024 * 0.8;
 		const view = this.viewRect();
 		const ahead = this.viewRect(0.75);
 		const visible = this.pagesIn(view);
@@ -984,6 +1112,7 @@ export class ViewerCore {
 						const y = ty * TILE;
 						const dx = r.x + (x + TILE / 2) / s - cx;
 						const dy = r.y + (y + TILE / 2) / s - cy;
+						if (base === 30 && !roomAhead && !this.tiles.has(this.tileKey(p, s, x, y))) continue;
 						const prio = base + Math.hypot(dx, dy) * this.cam.zoom * 1e-4;
 						this.ensureTile(p, s, x, y, Math.min(TILE, pw - x), Math.min(TILE, ph - y), prio, keep);
 					}
@@ -1018,9 +1147,20 @@ export class ViewerCore {
 	private evict(frameId: number) {
 		const budget = this.opts.textureBudgetMB * 1024 * 1024;
 		if (this.gl.textureBytes <= budget) return;
-		const candidates = [...this.tiles.values()].filter((t) => t.tex && t.lastUsed !== frameId).sort((a, b) => a.lastUsed - b.lastUsed);
+		// Tiles this frame drew or planned (look-ahead) stay: evicting a planned
+		// tile only makes the next plan request it again.
+		const candidates = [...this.tiles.values()]
+			.filter((t) => t.tex && t.lastUsed !== frameId && t.lastWanted !== frameId)
+			.sort((a, b) => a.lastUsed - b.lastUsed);
 		for (const t of candidates) {
 			if (this.gl.textureBytes <= budget * 0.85) break;
+			this.dropTile(t);
+		}
+		// Still over: give up look-ahead tiles too (never what is on screen).
+		if (this.gl.textureBytes <= budget) return;
+		const ahead = [...this.tiles.values()].filter((t) => t.tex && t.lastUsed !== frameId).sort((a, b) => a.lastUsed - b.lastUsed);
+		for (const t of ahead) {
+			if (this.gl.textureBytes <= budget) break;
 			this.dropTile(t);
 		}
 	}
@@ -1160,6 +1300,17 @@ export class ViewerCore {
 				if (sel.page !== p) continue;
 				for (const q of sel.rects) gl.drawRect(sx + q.x * S, sy + q.y * S, q.w * S, q.h * S, mark(selectionColor), markBlend);
 			}
+		}
+		const ends = this.handles ? this.handleEnds() : null;
+		if (ends) {
+			const d = this.dpr;
+			const c: Color = [0.16, 0.45, 0.95, 1];
+			// Like iOS: the start knob sits above the line, the end knob below.
+			ends.forEach((e, i) => {
+				const knob = i === 0 ? e.y - HANDLE_R : e.y + e.h + HANDLE_R;
+				gl.drawRect((e.x - 1) * d, Math.min(e.y, knob) * d, 2 * d, (e.h + HANDLE_R) * d, c, "alpha");
+				gl.drawCircle(e.x * d, knob * d, HANDLE_R * d, c);
+			});
 		}
 	}
 
