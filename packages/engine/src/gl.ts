@@ -193,6 +193,21 @@ export class Compositor {
 		this.mode = null;
 	}
 
+	/** Limit drawing to a device-pixel rect (top-left origin); null draws everywhere. */
+	clip(r: { x: number; y: number; w: number; h: number } | null) {
+		const gl = this.gl;
+		if (!r) {
+			gl.disable(gl.SCISSOR_TEST);
+			return;
+		}
+		gl.enable(gl.SCISSOR_TEST);
+		const x = Math.max(0, Math.floor(r.x));
+		const y = Math.max(0, Math.floor(r.y));
+		const x1 = Math.min(this.w, Math.ceil(r.x + r.w));
+		const y1 = Math.min(this.h, Math.ceil(r.y + r.h));
+		gl.scissor(x, this.h - y1, Math.max(0, x1 - x), Math.max(0, y1 - y));
+	}
+
 	/** Must be called once per frame before drawing (program state is cached). */
 	resetState() {
 		this.mode = null;

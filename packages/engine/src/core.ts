@@ -219,6 +219,8 @@ export class ViewerCore {
 
 	private texts = new Map<number, PageText>();
 	private textPending = new Set<number>();
+	/** raster image boxes per page (l, t, r, b in points), kept in original colours in dark mode */
+	private images = new Map<number, Float32Array>();
 	private links = new Map<number, Link[]>();
 	private textWaiters = new Map<number, (() => void)[]>();
 
@@ -998,6 +1000,10 @@ export class ViewerCore {
 			const r = res as TextResult;
 			this.texts.set(page, new PageText(r.codes, r.boxes));
 			this.links.set(page, r.links);
+			if (r.images.length) {
+				this.images.set(page, r.images);
+				if (this.opts.dark) this.requestFrame();
+			}
 			for (const fn of this.textWaiters.get(page) ?? []) fn();
 			this.textWaiters.delete(page);
 			if (this.dragging) this.updateDrag();
@@ -1269,18 +1275,38 @@ export class ViewerCore {
 			ready.sort((a, b) => (a.scale === target ? 1 : 0) - (b.scale === target ? 1 : 0) || a.scale - b.scale);
 			// If the target scale fully covers the view, skip the fallbacks.
 			const start = this.coveredByTarget(p, ready, target) ? ready.findIndex((t) => t.scale === target) : 0;
-			for (let i = Math.max(0, start); i < ready.length; i++) {
-				const t = ready[i]!;
-				const k = S / t.scale;
-				let x = sx + t.x * k;
-				let y = sy + t.y * k;
-				if (Math.abs(k - 1) < 1e-3) {
-					// Exact scale: pin to whole device pixels so glyphs stay crisp.
-					x = Math.round(x);
-					y = Math.round(y);
+			const drawTiles = () => {
+				for (let i = Math.max(0, start); i < ready.length; i++) {
+					const t = ready[i]!;
+					const k = S / t.scale;
+					let x = sx + t.x * k;
+					let y = sy + t.y * k;
+					if (Math.abs(k - 1) < 1e-3) {
+						// Exact scale: pin to whole device pixels so glyphs stay crisp.
+						x = Math.round(x);
+						y = Math.round(y);
+					}
+					gl.drawTexture(t.tex!, x, y, t.w * k, t.h * k, gamma);
+					t.lastUsed = this.frameId;
 				}
-				gl.drawTexture(t.tex!, x, y, t.w * k, t.h * k, gamma);
-				t.lastUsed = this.frameId;
+			};
+			drawTiles();
+			// Dark mode recolours vector content only: images are drawn again,
+			// clipped to their boxes, without the tone mapping.
+			const images = dark ? this.images.get(p) : undefined;
+			if (images) {
+				gl.setTone(null);
+				for (let i = 0; i < images.length; i += 4) {
+					const l = Math.max(0, images[i]!);
+					const t = Math.max(0, images[i + 1]!);
+					const rr = Math.min(r.w, images[i + 2]!);
+					const b = Math.min(r.h, images[i + 3]!);
+					if (rr <= l || b <= t || rr < vx0 || l > vx1 || b < vy0 || t > vy1) continue;
+					gl.clip({ x: sx + l * S, y: sy + t * S, w: (rr - l) * S, h: (b - t) * S });
+					drawTiles();
+				}
+				gl.clip(null);
+				gl.setTone({ paper, ink });
 			}
 
 			for (const h of this.highlights) {

@@ -10,6 +10,9 @@ type Pdfium = Awaited<ReturnType<typeof init>>;
 const FPDF_ANNOT = 0x01;
 const FPDF_REVERSE_BYTE_ORDER = 0x10; // RGBA instead of BGRA
 const PAGE_CACHE = 8;
+const FPDF_PAGEOBJ_IMAGE = 3;
+const FPDF_PAGEOBJ_FORM = 5;
+const MAX_IMAGES = 256;
 
 let P: Pdfium;
 // Re-read on every use: the WASM heap buffer is replaced when memory grows.
@@ -210,10 +213,78 @@ function extractText(msg: Extract<ToRaster, { t: "text" }>) {
 	P.pdfium.wasmExports.free(rect);
 	P.FPDFText_ClosePage(tp);
 	const links = readLinks(page, xf);
+	const images = readImages(page, xf);
 	send(
-		{ t: "text", id: msg.id, page: msg.page, codes, boxes, links, ms: performance.now() - t0 },
-		[codes.buffer, boxes.buffer],
+		{ t: "text", id: msg.id, page: msg.page, codes, boxes, links, images, ms: performance.now() - t0 },
+		[codes.buffer, boxes.buffer, images.buffer],
 	);
+}
+
+type Matrix = [number, number, number, number, number, number];
+
+/** m then n, PDF [a b c d e f] convention */
+function concat(m: Matrix, n: Matrix): Matrix {
+	return [
+		n[0] * m[0] + n[2] * m[1],
+		n[1] * m[0] + n[3] * m[1],
+		n[0] * m[2] + n[2] * m[3],
+		n[1] * m[2] + n[3] * m[3],
+		n[0] * m[4] + n[2] * m[5] + n[4],
+		n[1] * m[4] + n[3] * m[5] + n[5],
+	];
+}
+
+/**
+ * Boxes of the page's raster images, so dark mode can leave photos in their
+ * original colours. Stencil masks (1-bit, no colour space) paint with the fill
+ * colour like vector shapes, so they are recoloured with the rest.
+ */
+function readImages(page: number, xf: Xf): Float32Array {
+	const out: number[] = [];
+	const mem = P.pdfium.wasmExports.malloc(28); // FS_MATRIX / 4 bounds / FPDF_IMAGEOBJ_METADATA
+	const f32 = () => new Float32Array(heap().buffer, mem, 6);
+	const walk = (count: number, get: (i: number) => number, m: Matrix) => {
+		for (let i = 0; i < count && out.length < MAX_IMAGES * 4; i++) {
+			const obj = get(i);
+			const type = P.FPDFPageObj_GetType(obj);
+			if (type === FPDF_PAGEOBJ_FORM) {
+				if (!P.FPDFPageObj_GetMatrix(obj, mem)) continue;
+				const f = f32();
+				const child = concat([f[0]!, f[1]!, f[2]!, f[3]!, f[4]!, f[5]!], m);
+				walk(P.FPDFFormObj_CountObjects(obj), (j) => P.FPDFFormObj_GetObject(obj, j), child);
+				continue;
+			}
+			if (type !== FPDF_PAGEOBJ_IMAGE) continue;
+			if (P.FPDFImageObj_GetImageMetadata(obj, page, mem)) {
+				const meta = new Int32Array(heap().buffer, mem, 7);
+				if (meta[4] === 1 && meta[5] === 0) continue;
+			}
+			if (!P.FPDFPageObj_GetBounds(obj, mem, mem + 4, mem + 8, mem + 12)) continue;
+			const [l, b, r, t] = f32();
+			// Bounds are in the parent form's space; map all four corners to the page.
+			let x0 = Infinity;
+			let y0 = Infinity;
+			let x1 = -Infinity;
+			let y1 = -Infinity;
+			for (const [cx, cy] of [
+				[l!, b!],
+				[r!, b!],
+				[l!, t!],
+				[r!, t!],
+			] as const) {
+				const [px, py] = xf(m[0] * cx + m[2] * cy + m[4], m[1] * cx + m[3] * cy + m[5]);
+				x0 = Math.min(x0, px);
+				y0 = Math.min(y0, py);
+				x1 = Math.max(x1, px);
+				y1 = Math.max(y1, py);
+			}
+			if (x1 - x0 < 1 || y1 - y0 < 1) continue;
+			out.push(x0, y0, x1, y1);
+		}
+	};
+	walk(P.FPDFPage_CountObjects(page), (i) => P.FPDFPage_GetObject(page, i), [1, 0, 0, 1, 0, 0]);
+	P.pdfium.wasmExports.free(mem);
+	return new Float32Array(out);
 }
 
 async function open(msg: Extract<ToRaster, { t: "init" }>) {

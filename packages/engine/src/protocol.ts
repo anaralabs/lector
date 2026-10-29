@@ -50,6 +50,8 @@ export type FromRaster =
 			/** l, t, r, b per char in page points (top-left origin); zero-area for generated chars */
 			boxes: Float32Array;
 			links: Link[];
+			/** l, t, r, b per raster image in page points (top-left origin) */
+			images: Float32Array;
 			ms: number;
 	  }
 	| { t: "outline"; id: number; items: OutlineItem[] };
