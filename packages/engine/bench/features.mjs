@@ -557,6 +557,47 @@ await page.waitForFunction(() => window.__firstPaintMs !== undefined);
 	await page.goto(fixture("cadbots.pdf"));
 	await page.waitForFunction(() => window.__firstPaintMs !== undefined);
 }
+// The same failure with a host onEvent that throws: teardown still completes.
+{
+	await page.evaluate(() => window.__viewer.destroy());
+	await page.waitForTimeout(1500);
+	await page.evaluate(async (src) => {
+		const { createViewer } = await import(`/@fs${src}/index.ts`);
+		const { default: wasmUrl, workerUrls } = await import(`/@fs${src}/vite-wasm.ts`);
+		const el = document.createElement("div");
+		el.id = "throwing-host";
+		el.style.cssText = "position:fixed;left:0;top:0;width:400px;height:300px";
+		document.body.appendChild(el);
+		const loader = (url, name) => new Worker(URL.createObjectURL(new Blob([`import(${JSON.stringify(url.href)})`], { type: "text/javascript" })), { name });
+		const onEvent = (e) => {
+			if (e.type === "error") throw new Error("host onEvent threw");
+		};
+		window.__t = await createViewer(el, "/cadbots.pdf", { wasmUrl, workerUrls, createWorker: loader, workers: 1, onEvent });
+		await window.__t.loaded;
+	}, src);
+	const core = await coreWorkerOf(page);
+	await core.evaluate(() => {
+		self.__core.command = () => {};
+	});
+	await page.evaluate(() => {
+		const v = window.__t;
+		const code = (p) => p.then(() => "resolved", (e) => e.code ?? e.name);
+		window.__dying = Promise.all([code(v.pageText(3)), v.goToPage(5)]);
+	});
+	await page.waitForTimeout(100);
+	await core.evaluate(() => setTimeout(() => {
+		throw new Error("injected compositor failure");
+	}));
+	const died = await settle(page.evaluate(async () => {
+		const [text, flight] = await window.__dying;
+		return `${text},${flight},${document.querySelector("#throwing-host").children.length}`;
+	}));
+	await page.waitForTimeout(1500);
+	check("throwing onEvent does not stop teardown", died === "worker,false,0" && page.workers().length === 0, `${died}; ${page.workers().length} workers`);
+	errors.splice(0, errors.length, ...errors.filter((e) => !/injected compositor failure|lector-compositor worker failed|host onEvent threw/.test(e)));
+	await page.goto(fixture("cadbots.pdf"));
+	await page.waitForFunction(() => window.__firstPaintMs !== undefined);
+}
 const workersBefore = page.workers().length;
 await page.evaluate(() => window.__viewer.destroy());
 await page.waitForTimeout(1500);

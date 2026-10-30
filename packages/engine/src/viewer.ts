@@ -255,6 +255,21 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		blob = new Blob([(source instanceof Uint8Array ? source : new Uint8Array(source)) as Uint8Array<ArrayBuffer>], { type: "application/pdf" });
 		docSource = { kind: "blob", blob };
 	}
+	/**
+	 * Runs a host callback. A throwing callback must not break the engine (the
+	 * core emits from inside its frame loop and teardown paths), so the error is
+	 * reported like an uncaught one instead of propagating.
+	 */
+	const host = (fn: () => void) => {
+		try {
+			fn();
+		} catch (err) {
+			if (typeof reportError === "function") reportError(err);
+			else setTimeout(() => {
+				throw err;
+			});
+		}
+	};
 	// Everything acquired from here on is released in reverse order by `destroy`,
 	// or right away if construction fails part-way (the caller gets no viewer).
 	const cleanups: (() => void)[] = [];
@@ -302,9 +317,10 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				if (destroyed) return;
 				const message = `lector-engine: ${name} worker failed${ev.message ? `: ${ev.message}` : " to load"}`;
 				const phase = opened ? "render" : "engine-load";
-				// Async (after setup), so handleEvent exists; before `ready` it also rejects `loaded`.
-				handleEvent({ type: "error", message, code: "worker", phase });
+				// Tear down first (settling every promise), then tell the host. Async
+				// (after setup), so handleEvent exists.
 				teardown(new EngineError(message, "worker", phase, typeof source === "string" ? source : undefined));
+				handleEvent({ type: "error", message, code: "worker", phase });
 			});
 			return { worker, booted };
 		};
@@ -432,7 +448,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			else if (e.type === "selection") {
 				if (e.final) selectedText = e.selection?.text ?? "";
 			} else if (e.type === "link") {
-				if (onLink) onLink(e.url);
+				if (onLink) host(() => onLink(e.url));
 				else if (/^(https?|mailto):/i.test(e.url)) window.open(e.url, "_blank", "noopener,noreferrer");
 			} else if (e.type === "flight") {
 				flights.get(e.id)?.(e.landed);
@@ -451,14 +467,17 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			} else if (e.type === "error" && (e.phase === "document-load" || e.phase === "engine-load") && !opened) {
 				// Fatal: nothing will answer requests (a worker that did not load, a document that cannot open).
 				fail(new EngineError(e.message, e.code, e.phase, typeof source === "string" ? source : undefined));
-			} else if (e.type === "search-progress") progressFns.get(e.id)?.(e.results);
+			} else if (e.type === "search-progress") {
+				const fn = progressFns.get(e.id);
+				if (fn) host(() => fn(e.results));
+			}
 			else if (e.type === "response") {
 				const p = pending.get(e.id);
 				pending.delete(e.id);
 				p?.resolve(e.result);
 				return;
 			}
-			onEvent?.(e);
+			if (onEvent) host(() => onEvent(e));
 		};
 
 		// Probed, not just feature-tested: Safari 16.4-16.x can transfer a canvas
@@ -693,7 +712,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 					if (!(e.metaKey || e.ctrlKey) || e.altKey || e.key.toLowerCase() !== "f") return;
 					if (!container.contains(document.activeElement)) return;
 					e.preventDefault();
-					onEvent?.({ type: "find" });
+					if (onEvent) host(() => onEvent({ type: "find" }));
 				},
 				{ capture: true },
 			);
