@@ -42,6 +42,9 @@ jobs:
       - name: Run lint
         run: pnpm lint
 
+      - name: Release commit filter tests
+        run: node --test scripts/release/paths.test.mjs
+
   test:
     name: Library tests (${{ matrix.browser }})
     runs-on: ubuntu-latest
@@ -157,20 +160,21 @@ jobs:
         run: chmod +x ./packages/lector/scripts/prepack.sh
 
       - name: Semantic Release
-        run: ../../node_modules/.bin/semantic-release
+        run: ../../node_modules/.bin/semantic-release --extends ../../scripts/release/lector.mjs
         working-directory: packages/lector
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # Separate tags (lector-engine-v*). Each package's "release" config counts only
-      # its own commits (scripts/release/paths.mjs): the engine its folder; lector its
-      # folder plus root dependency/CI files when a commit leaves the engine alone.
+      # Separate tags (lector-engine-v*). Each package's release config
+      # (scripts/release/{lector,engine}.mjs) counts only its own commits
+      # (scripts/release/paths.mjs): the engine its folder; lector its folder, root
+      # package.json, patches and lockfile changes beyond the engine's importer.
       - name: Build engine package
         run: pnpm --filter @anaralabs/lector-engine build
 
       - name: Semantic Release (engine)
-        run: ../../node_modules/.bin/semantic-release
+        run: ../../node_modules/.bin/semantic-release --extends ../../scripts/release/engine.mjs
         working-directory: packages/engine
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
