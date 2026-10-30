@@ -18,25 +18,34 @@ const workerUrlsToJs: NonNullable<Options["esbuildPlugins"]>[number] = {
 	},
 };
 
-export default defineConfig({
-	entry: {
-		index: "src/index.ts",
-		react: "src/react.tsx",
-		"raster-worker": "src/raster-worker.ts",
-		"core-worker": "src/core-worker.ts",
-	},
+const shared: Options = {
 	format: ["esm"],
 	platform: "browser",
 	target: browserTarget,
 	outDir: "dist",
-	clean: true,
-	splitting: true,
+	// The build script empties dist/ first: the configs build in parallel.
+	clean: false,
 	treeshake: true,
 	sourcemap: true,
-	dts: { entry: { index: "src/index.ts", react: "src/react.tsx" } },
-	external: ["react", "react/jsx-runtime"],
-	// The PDFium glue is bundled into the raster worker so the worker is a
-	// standalone module; scripts/postbuild.mjs puts its wasm next to it in dist/.
-	noExternal: ["@embedpdf/pdfium"],
-	esbuildPlugins: [workerUrlsToJs],
-});
+};
+
+export default defineConfig([
+	{
+		...shared,
+		entry: { index: "src/index.ts", react: "src/react.tsx" },
+		splitting: true,
+		dts: { entry: { index: "src/index.ts", react: "src/react.tsx" } },
+		external: ["react", "react/jsx-runtime"],
+		esbuildPlugins: [workerUrlsToJs],
+	},
+	{
+		// Each worker is one self-contained file (no shared chunks), so hosts can
+		// self-host the documented files: raster-worker.js, core-worker.js, pdfium.wasm.
+		...shared,
+		entry: { "raster-worker": "src/raster-worker.ts", "core-worker": "src/core-worker.ts" },
+		splitting: false,
+		// The PDFium glue is bundled into the raster worker; scripts/postbuild.mjs
+		// puts its wasm next to it in dist/.
+		noExternal: ["@embedpdf/pdfium"],
+	},
+]);

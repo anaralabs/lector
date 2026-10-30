@@ -1,12 +1,17 @@
 // Runs after tsup (not in its onSuccess, which races the d.ts build's clean).
 import { copyFile, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
 const require = createRequire(import.meta.url);
 
 // The bundled PDFium glue resolves `new URL("pdfium.wasm", import.meta.url)`,
 // and vite-wasm.js imports it, so it lives next to raster-worker.js.
 await copyFile(require.resolve("@embedpdf/pdfium/pdfium.wasm"), "dist/pdfium.wasm");
+// PDFium's binary and EmbedPDF's glue ship under their own licenses (see THIRD_PARTY_NOTICES.md).
+const pdfiumDir = dirname(dirname(require.resolve("@embedpdf/pdfium/pdfium.wasm")));
+await copyFile(join(pdfiumDir, "LICENSE.pdfium"), "dist/LICENSE.pdfium");
+await copyFile(join(pdfiumDir, "LICENSE"), "dist/LICENSE.embedpdf");
 
 // Vite-only asset URLs. Not bundled by tsup: the consumer's Vite resolves these
 // queries and emits the workers and the wasm as same-origin assets.
@@ -35,4 +40,4 @@ export declare const workerUrls: { raster: string; core: string };
 const react = await readFile("dist/react.js", "utf8");
 if (!react.startsWith('"use client"')) await writeFile("dist/react.js", `"use client";\n${react}`);
 
-console.info("postbuild: dist/pdfium.wasm, dist/vite-wasm.js, dist/vite-wasm.d.ts");
+console.info("postbuild: dist/pdfium.wasm, dist/LICENSE.pdfium, dist/LICENSE.embedpdf, dist/vite-wasm.js, dist/vite-wasm.d.ts");

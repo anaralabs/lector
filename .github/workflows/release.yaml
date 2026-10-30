@@ -106,6 +106,8 @@ jobs:
       - run: pnpm install --frozen-lockfile --filter @anaralabs/lector-engine...
       - name: Build engine
         run: pnpm --filter @anaralabs/lector-engine build
+      - name: Install Chromium (self-hosted worker check)
+        run: pnpm --filter @anaralabs/lector-engine exec playwright-core install --with-deps chromium
       - name: Check types, unit tests and packed exports
         run: |
           pnpm --filter @anaralabs/lector-engine test:types
