@@ -74,7 +74,7 @@ const createWorker = (url: URL, name: string) =>
 	new Worker(URL.createObjectURL(new Blob([`import(${JSON.stringify(url.href)})`], { type: "text/javascript" })), { name });
 ```
 
-Without Vite, serve `@anaralabs/lector-engine/pdfium.wasm` and the worker files yourself (the package exports `./raster-worker`, `./core-worker` and `./pdfium.wasm`), and pass their URLs as `wasmUrl` and `workerUrls`.
+Without Vite, serve `@anaralabs/lector-engine/pdfium.wasm` and the worker files yourself (the package exports `./raster-worker`, `./core-worker` and `./pdfium.wasm`), and pass their URLs as `wasmUrl` and `workerUrls`. Those three files are all you need: each worker is a single self-contained module (no shared chunks), so they can live in any directory or on a CDN.
 
 ## API reference
 
@@ -171,6 +171,8 @@ interface Viewer {
 
 - `goToPage`/`reveal` resolve `true` when the camera lands and `false` when input or another jump interrupted it. `offset` is in css px: for `goToPage`, the gap kept above the target (default `pageGap`); for `reveal`, added to where the rect lands (e.g. under a sticky header).
 - `scrollState()` reports the position as a scroll container would (`top` of `height`, at the current zoom), for persistence and custom scrollbars. Restore with `initialOffset` (same zoom) or `initialCamera` (exact).
+- In fit-page mode, `goToPage`, `reveal` and link jumps fit the destination page (pages of different sizes get different zooms).
+- `destroy()` stops the frame loop, terminates the workers, frees GPU resources, removes the canvas and overlay and restores the container's styles. Nothing is left pending: `loaded` (if still waiting) and every waiting request (`pageText`, `outline`, `thumbnail`, `rects`, ...) reject with an `EngineError` whose `code` is `"destroyed"` (phase `"request"`), running searches reject with an `AbortError`, `goToPage`/`reveal` resolve `false` and `unlock` resolves `false`. Requests made after `destroy()` reject right away. If the document or the engine fails to load, waiting requests reject with that load error instead.
 
 ### Search
 
@@ -178,7 +180,7 @@ interface Viewer {
 
 - Pages are searched in order as their text is extracted (a few pages ahead), so the first results arrive before the whole document is loaded; `onProgress` receives partial results.
 - Folding: case, ligatures (ﬁ → fi), typographic quotes and dashes, soft hyphens, whitespace; `matchDiacritics: false` folds Latin/Greek/Cyrillic accents; `ignoreHyphenation: true` joins words hyphenated at a line break. Matches cross line breaks and page breaks.
-- Aborting `signal`, or `cancelSearch()`, rejects with an `AbortError`.
+- Aborting `signal`, `cancelSearch()` or `destroy()` rejects with an `AbortError` (partial results so far arrive through `onProgress`). The listener on `signal` is removed once the search settles, however it ends.
 
 ```ts
 interface SearchHit {
@@ -215,8 +217,8 @@ interface SearchHit {
 
 `error` events and `EngineError` (rejections of `createViewer` and `viewer.loaded`) carry a `code` and a `phase`, like lector's `onError({ error, phase, source })`:
 
-- `code`: `password` (encrypted: pass `password` or call `viewer.unlock(password)`, which resolves `false` for a wrong one), `parse` (not a PDF or damaged), `security` (unsupported encryption), `file`, `fetch`, `unsupported` (browser), `wasm` (pdfium.wasm failed to load), `gpu` (no WebGL2 context), `worker` (a worker script failed to load), `unknown`.
-- `phase`: `engine-load`, `document-load`, `render`, `text`.
+- `code`: `password` (encrypted: pass `password` or call `viewer.unlock(password)`, which resolves `false` for a wrong one), `parse` (not a PDF or damaged), `security` (unsupported encryption), `file`, `fetch`, `unsupported` (browser), `wasm` (pdfium.wasm failed to load), `gpu` (no WebGL2 context; with phase `render`, the context was lost: drawing stops and resumes on its own if the browser restores it), `worker` (a worker script failed to load), `destroyed` (a request was still waiting when the viewer was destroyed), `unknown`.
+- `phase`: `engine-load`, `document-load`, `render`, `text`, `request` (a viewer request such as `pageText`).
 
 ### Other exports
 
@@ -255,7 +257,7 @@ Documents with an AcroForm get a PDFium form fill environment in each raster wor
 
 ### Right-to-left and vertical text
 
-Lines are grouped by direction. A line whose first strong character is Hebrew, Arabic, Syriac, Thaana, N'Ko or a similar script is right-to-left. Its characters move left, and caret hit-testing uses each character's own direction. A line whose second character sits directly below the first is vertical: CJK text written top to bottom, hit-tested by column. The text layer marks these lines with `dir="rtl"` or `writing-mode: vertical-rl`.
+Lines are grouped by direction. A line whose first strong character is Hebrew, Arabic, Syriac, Thaana, N'Ko or a similar script is right-to-left. Its characters move left. Caret hit-testing finds the glyph under the pointer by its box (visual order), then puts the caret before or after it by that character's own direction, so Latin inside Hebrew (and the reverse) hit-tests correctly. A line whose second character sits directly below the first is vertical: CJK text written top to bottom, hit-tested by column. The text layer marks these lines with `dir="rtl"` or `writing-mode: vertical-rl`.
 
 ## Browser support
 
@@ -284,11 +286,19 @@ The worker compositor needs WebGL2 on an `OffscreenCanvas`. Safari 16.4–16.x h
 pnpm dev               # demo at http://127.0.0.1:5199 (?offscreen=0, ?dark=1, ?file=…, ?page=, ?zoom=fit-page, ?range=1, ?password=, ?interceptFind=1, ?textLayer=0)
 pnpm build             # dist/ via tsup + scripts/postbuild.mjs
 pnpm typecheck
-pnpm test:package      # pack, then check every export resolves to a file
+pnpm test:unit         # node --test (block cache)
+pnpm test:package      # pack; check exports, license notices, and boot the self-hosted workers in Chrome
 node bench/features.mjs   # search / outline / selection / dark mode against the demo
 node bench/compat.mjs     # emulated old browsers: compositor fallback and clean rejection
+node bench/clicks.mjs     # double/triple click in Chrome, Firefox, WebKit (npx playwright-core install firefox webkit)
 node bench/frames.mjs     # frame timing (HEADED=1 for a vsync'd window)
 node bench/memory.mjs [/big.pdf] ["&range=1"] [Mbit/s]   # ready/painted time and memory
 ```
 
-Fixtures other than `cadbots.pdf` are generated, not committed: `node bench/fixtures/make-{scan,password,form,rtl,big}.mjs`. They need `pdf-lib` (and `mupdf` for the password fixture). Point `PDF_LIB` / `MUPDF` at those packages. `features.mjs` skips checks whose fixture is missing.
+Fixtures other than `cadbots.pdf` are generated, not committed: `node bench/fixtures/make-{scan,password,form,rtl,links,big}.mjs`. They need `pdf-lib` (and `mupdf` for the password fixture). Point `PDF_LIB` / `MUPDF` at those packages. `features.mjs` skips checks whose fixture is missing.
+
+The demo sets `globalThis.__lectorEngineDebug = true`, which exposes the core as `window.__core` (main-thread compositor) or `self.__core` (compositor worker) for the benches. Hosts should not set it.
+
+## License
+
+MIT (see `LICENSE`). `pdfium.wasm` is PDFium (BSD-3-Clause and Apache-2.0) built by `@embedpdf/pdfium` (MIT); their licenses ship as `dist/LICENSE.pdfium` and `dist/LICENSE.embedpdf`, and `THIRD_PARTY_NOTICES.md` lists the libraries compiled into PDFium.
