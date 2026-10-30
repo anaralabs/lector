@@ -42,6 +42,9 @@ jobs:
       - name: Run lint
         run: pnpm lint
 
+      - name: Release config and commit filter tests
+        run: node --test scripts/release/config.test.mjs scripts/release/paths.test.mjs
+
   test:
     name: Library tests (${{ matrix.browser }})
     runs-on: ubuntu-latest
@@ -93,9 +96,30 @@ jobs:
       - run: pnpm --filter @anaralabs/lector test:browser
       - run: pnpm --filter @anaralabs/lector test:size
 
+  engine:
+    name: Engine package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @anaralabs/lector-engine...
+      - name: Build engine
+        run: pnpm --filter @anaralabs/lector-engine build
+      - name: Install Chromium (self-hosted worker check)
+        run: pnpm --filter @anaralabs/lector-engine exec playwright-core install --with-deps chromium
+      - name: Check types, unit tests and packed exports
+        run: |
+          pnpm --filter @anaralabs/lector-engine test:types
+          pnpm --filter @anaralabs/lector-engine test:unit
+          pnpm --filter @anaralabs/lector-engine test:package
+
   release:
     name: Release
-    needs: [lint, test, windows-test]
+    needs: [lint, test, windows-test, engine]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -127,7 +151,7 @@ jobs:
           cache-dependency-path: ./pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install --ignore-scripts --frozen-lockfile --filter lector...
+        run: pnpm install --ignore-scripts --frozen-lockfile --filter lector... --filter @anaralabs/lector-engine...
 
       - name: Build package
         run: pnpm build --filter @anaralabs/lector
@@ -136,8 +160,22 @@ jobs:
         run: chmod +x ./packages/lector/scripts/prepack.sh
 
       - name: Semantic Release
-        run: ../../node_modules/.bin/semantic-release
+        run: ../../node_modules/.bin/semantic-release --extends ../../scripts/release/lector.mjs
         working-directory: packages/lector
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Separate tags (lector-engine-v*). Each package's release config
+      # (scripts/release/{lector,engine}.mjs) counts only its own commits
+      # (scripts/release/paths.mjs): the engine its folder; lector its folder, root
+      # package.json, patches and lockfile changes beyond the engine's importer.
+      - name: Build engine package
+        run: pnpm --filter @anaralabs/lector-engine build
+
+      - name: Semantic Release (engine)
+        run: ../../node_modules/.bin/semantic-release --extends ../../scripts/release/engine.mjs
+        working-directory: packages/engine
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

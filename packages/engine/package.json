@@ -1,0 +1,87 @@
+{
+	"name": "@anaralabs/lector-engine",
+	"version": "0.0.0-semantically-released",
+	"description": "120fps PDF viewer engine: PDFium WASM raster workers, tiled WebGL2 compositor, GPU text selection",
+	"author": "Anara (https://github.com/anaralabs)",
+	"license": "MIT",
+	"type": "module",
+	"sideEffects": false,
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./react": {
+			"types": "./dist/react.d.ts",
+			"import": "./dist/react.js"
+		},
+		"./vite-wasm": {
+			"types": "./dist/vite-wasm.d.ts",
+			"import": "./dist/vite-wasm.js"
+		},
+		"./raster-worker": "./dist/raster-worker.js",
+		"./core-worker": "./dist/core-worker.js",
+		"./pdfium.wasm": "./dist/pdfium.wasm",
+		"./package.json": "./package.json"
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE",
+		"THIRD_PARTY_NOTICES.md"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"dev": "vite demo",
+		"build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsup && node scripts/postbuild.mjs",
+		"build:demo": "vite build demo",
+		"typecheck": "tsc --noEmit",
+		"test:types": "tsc --noEmit",
+		"test:package": "node scripts/check-package.mjs",
+		"test:unit": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
+		"bench": "node bench/frames.mjs",
+		"bench:features": "node bench/features.mjs"
+	},
+	"devDependencies": {
+		"@embedpdf/pdfium": "2.15.1",
+		"@types/react": "19",
+		"mupdf": "1.27.0",
+		"pdf-lib": "1.17.1",
+		"playwright-core": "^1.64.1",
+		"react": "19",
+		"tsup": "^8.3.5",
+		"typescript": "^5.9.3",
+		"vite": "^7.1.0"
+	},
+	"peerDependencies": {
+		"react": ">=18"
+	},
+	"peerDependenciesMeta": {
+		"react": {
+			"optional": true
+		}
+	},
+	"keywords": [
+		"pdf",
+		"pdfium",
+		"webgl",
+		"webgl2",
+		"wasm",
+		"viewer",
+		"react",
+		"anaralabs"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/anaralabs/lector.git",
+		"directory": "packages/engine"
+	},
+	"bugs": {
+		"url": "https://github.com/anaralabs/lector/issues"
+	},
+	"homepage": "https://github.com/anaralabs/lector/tree/main/packages/engine"
+}
