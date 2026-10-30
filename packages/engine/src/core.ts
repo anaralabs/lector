@@ -593,12 +593,14 @@ export class ViewerCore {
 			const mz = m / cur.zoom;
 			if (dx0 >= v.x0 && dx0 + rect.w <= v.x1 && dy0 >= v.y0 + mz && dy0 + rect.h <= v.y1 - mz) return { cam: { ...cur }, fit: this.fitMode };
 		}
-		// Zoom out only when the rect cannot be read whole.
-		let zoom = cur.zoom;
+		// Zoom out only when the rect cannot be read whole. Fit-page starts from
+		// the zoom that fits the destination page.
+		const base = this.fitMode === "page" ? this.clampZoom(this.fitZoom("page", page)) : cur.zoom;
+		let zoom = base;
 		if (rect.h * zoom > this.vh * 0.8) zoom = (this.vh * 0.8) / rect.h;
 		if (rect.w * zoom > this.vw - 2 * m) zoom = Math.min(zoom, (this.vw - 2 * m) / rect.w);
 		zoom = this.clampZoom(zoom);
-		const fit = zoom === cur.zoom ? this.fitMode : false;
+		const fit = zoom === base ? this.fitMode : false;
 		const viewW = this.vw / zoom;
 		// Keep the horizontal centre when zooming; recentre only if the rect is cut off.
 		let x = zoom === cur.zoom ? cur.x : cur.x + this.vw / 2 / cur.zoom - viewW / 2;
@@ -614,9 +616,11 @@ export class ViewerCore {
 	private gotoTarget(page: number, top = 0, offset?: number): { cam: Camera; fit: Fit } | null {
 		const r = this.layout[page];
 		if (!r) return null;
-		const z = this.cam.zoom;
+		// Fit-page fits the destination page, whatever the size of the one in view.
+		const z = this.fitMode === "page" ? this.clampZoom(this.fitZoom("page", page)) : this.cam.zoom;
 		if (this.fitMode === "page" && !top && offset === undefined) return { cam: this.clampCam(this.fitPageCam(page, z)), fit: "page" };
-		return { cam: this.clampCam({ x: this.cam.x, y: r.y + top - (offset ?? this.opts.pageGap) / z, zoom: z }), fit: this.fitMode };
+		const x = z === this.cam.zoom ? this.cam.x : this.cam.x + this.vw / 2 / this.cam.zoom - this.vw / 2 / z;
+		return { cam: this.clampCam({ x, y: r.y + top - (offset ?? this.opts.pageGap) / z, zoom: z }), fit: this.fitMode };
 	}
 
 	/** Move the camera to the target, animated unless asked otherwise or reduced motion is on. */
