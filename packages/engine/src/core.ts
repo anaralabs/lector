@@ -402,6 +402,11 @@ export class ViewerCore {
 	private selAnchor: [TextPoint, TextPoint] | null = null;
 	private selRange: [TextPoint, TextPoint] | null = null;
 	private selUnit: "char" | "word" | "line" = "char";
+	/**
+	 * Bumped by every selection change: programmatic selections that wait for
+	 * text give up if the selection changed meanwhile (newer intent wins).
+	 */
+	private selGen = 0;
 	private selRects: { page: number; rects: Rect[] }[] = [];
 	private dragging = false;
 	private pointer = { x: 0, y: 0 };
@@ -960,6 +965,7 @@ export class ViewerCore {
 		const ds = Math.hypot(x - start.x, y - (start.y - HANDLE_R));
 		const de = Math.hypot(x - end.x, y - (end.y + end.h + HANDLE_R));
 		if (Math.min(ds, de) > HANDLE_HIT) return false;
+		this.selGen++;
 		const moving = de <= ds ? end : start;
 		const fixed = de <= ds ? this.selRange[0] : this.selRange[1];
 		this.selUnit = "char";
@@ -1010,6 +1016,7 @@ export class ViewerCore {
 	private mouse(msg: Extract<InputMsg, { type: "pointer" }>) {
 		this.pointer = { x: msg.x, y: msg.y };
 		if (msg.phase === "down" && msg.buttons & 1) {
+			this.selGen++;
 			this.downAt = { x: msg.x, y: msg.y };
 			const hit = this.hitPoint(msg.x, msg.y);
 			if (!hit) {
@@ -1138,9 +1145,11 @@ export class ViewerCore {
 	 */
 	private async selectAll(scope: "page" | "document" | "auto") {
 		if (!this.pages.length) return;
+		const gen = ++this.selGen;
 		const view = this.viewRect();
 		const page = this.pageAtDocY((view.y0 + view.y1) / 2);
 		const current = await this.loadText(page);
+		if (gen !== this.selGen) return;
 		const pageSelected =
 			this.selRange && comparePoints(this.selRange[0], { page, index: 0 }) <= 0 && comparePoints(this.selRange[1], { page, index: current.length }) >= 0;
 		if (scope === "page" || (scope === "auto" && !pageSelected)) {
@@ -1150,6 +1159,7 @@ export class ViewerCore {
 		}
 		const last = this.pages.length - 1;
 		const texts = await Promise.all(this.pages.map((_, i) => this.loadText(i)));
+		if (gen !== this.selGen) return;
 		this.handles = false;
 		this.selAnchor = [
 			{ page: 0, index: 0 },
@@ -1541,14 +1551,16 @@ export class ViewerCore {
 		if (last < 0) return;
 		const s0 = Math.max(0, Math.min(last, s.page));
 		const e0 = Math.max(0, Math.min(last, e.page));
+		const gen = ++this.selGen;
 		const texts = await Promise.all(Array.from({ length: e0 - s0 + 1 }, (_, i) => this.loadText(s0 + i)));
+		if (gen !== this.selGen) return;
 		const clamp = (p: number, i: number) => Math.max(0, Math.min(texts[p - s0]!.length, i));
 		const start = { page: s0, index: clamp(s0, s.index) };
 		const end = { page: e0, index: clamp(e0, e.index) };
 		this.handles = false;
 		this.selAnchor = [start, start];
-		this.selRange = null; // recompute rects even if the range is unchanged
-		this.setRange(comparePoints(start, end) === 0 ? null : [start, end]);
+		// Recompute rects even if the range is unchanged (text may have loaded since).
+		this.setRange(comparePoints(start, end) === 0 ? null : [start, end], true);
 		this.emitSelection(true);
 	}
 
@@ -1565,10 +1577,12 @@ export class ViewerCore {
 		this.emitSelection(true);
 	}
 
-	private setRange(range: [TextPoint, TextPoint] | null) {
+	/** `force`: rebuild the rects even when the range is unchanged. */
+	private setRange(range: [TextPoint, TextPoint] | null, force = false) {
+		this.selGen++;
 		const same =
 			range && this.selRange && comparePoints(range[0], this.selRange[0]) === 0 && comparePoints(range[1], this.selRange[1]) === 0;
-		if (same || (!range && !this.selRange)) return;
+		if (!force && (same || (!range && !this.selRange))) return;
 		this.selRange = range;
 		this.selRects = [];
 		if (range) {
@@ -1585,6 +1599,7 @@ export class ViewerCore {
 	}
 
 	private clearSelection() {
+		this.selGen++;
 		const had = this.selRange !== null;
 		this.selAnchor = null;
 		this.dragging = false;
