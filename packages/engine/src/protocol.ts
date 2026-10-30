@@ -11,12 +11,14 @@ export interface PageSize {
  * password; `parse`: not a PDF or damaged; `security`: unsupported encryption;
  * `file`: unreadable; `fetch`: the HTTP request failed; `unsupported`: the
  * browser lacks a required feature; `wasm`: pdfium.wasm did not load; `gpu`:
- * no WebGL2 context (e.g. lost or blocklisted); `worker`: a worker script did
- * not load; `unknown`: anything else.
+ * no WebGL2 context (blocklisted, or in phase `render`: the context was lost;
+ * drawing resumes if the browser restores it); `worker`: a worker script did
+ * not load or crashed; `destroyed`: the viewer was destroyed before a request answered;
+ * `unknown`: anything else.
  */
-export type ErrorCode = "password" | "parse" | "security" | "file" | "fetch" | "unsupported" | "wasm" | "gpu" | "worker" | "unknown";
-/** When it failed, like lector's `onError` phases. */
-export type ErrorPhase = "engine-load" | "document-load" | "render" | "text";
+export type ErrorCode = "password" | "parse" | "security" | "file" | "fetch" | "unsupported" | "wasm" | "gpu" | "worker" | "destroyed" | "unknown";
+/** When it failed, like lector's `onError` phases; `request`: a pending viewer request (`pageText`, `outline`, ...). */
+export type ErrorPhase = "engine-load" | "document-load" | "render" | "text" | "request";
 
 /**
  * Where a raster worker reads the document from. Workers never hold a full

@@ -5,9 +5,11 @@
 import { type Command, type CoreOptions, type InputMsg, ViewerCore } from "./core";
 
 type Msg =
-	| { t: "init"; canvas: OffscreenCanvas; ports: MessagePort[]; options: Partial<CoreOptions> }
+	| { t: "init"; canvas: OffscreenCanvas; ports: MessagePort[]; options: Partial<CoreOptions>; debug?: boolean }
 	| { t: "input"; msg: InputMsg }
-	| { t: "command"; cmd: Command };
+	| { t: "command"; cmd: Command }
+	/** the viewer is destroyed: free GPU resources and ports, then exit */
+	| { t: "dispose" };
 
 let core: ViewerCore | null = null;
 const pending: Msg[] = [];
@@ -21,9 +23,18 @@ self.postMessage({ t: "boot" });
 
 self.onmessage = (ev: MessageEvent<Msg>) => {
 	const m = ev.data;
+	if (m.t === "dispose") {
+		core?.dispose();
+		core = null;
+		pending.length = 0;
+		self.close();
+		return;
+	}
 	if (m.t === "init") {
 		try {
 			core = new ViewerCore(m.canvas, m.ports, (e) => self.postMessage(e), raf, m.options);
+			// Debugging and benches only (the viewer passes globalThis.__lectorEngineDebug).
+			if (m.debug) (self as unknown as { __core: ViewerCore }).__core = core;
 		} catch (err) {
 			self.postMessage({ type: "error", message: String((err as Error)?.message ?? err), code: "gpu", phase: "engine-load" });
 			return;

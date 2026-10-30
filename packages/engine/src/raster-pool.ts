@@ -84,6 +84,17 @@ export class RasterPool {
 		for (const job of this.queue.values()) if (job.msg.t === "tile" && !job.key.startsWith("thumb:") && !keep.has(job.key)) this.queue.delete(job.key);
 	}
 
+	/** Stops listening to the workers and drops every job (their callbacks never run). */
+	dispose() {
+		for (const lane of this.lanes) {
+			lane.port.onmessage = null;
+			lane.port.close();
+		}
+		this.lanes = [];
+		this.queue.clear();
+		this.inflight.clear();
+	}
+
 	/** Retry opening the document with a password in every worker that has not opened it. */
 	unlock(password: string) {
 		for (const lane of this.lanes) if (!lane.ready) lane.port.postMessage({ t: "unlock", password } satisfies ToRaster);

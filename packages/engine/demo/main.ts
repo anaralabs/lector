@@ -6,6 +6,9 @@ const createWorker = (url: URL, name: string) =>
 	new Worker(URL.createObjectURL(new Blob([`import(${JSON.stringify(url.href)})`], { type: "text/javascript" })), { name });
 import { type CoreEvent, createViewer, type Viewer } from "../src";
 
+// Benches read the core (window.__core, or self.__core in the compositor worker).
+(globalThis as { __lectorEngineDebug?: boolean }).__lectorEngineDebug = true;
+
 const params = new URLSearchParams(location.search);
 const src = params.get("file") ?? "/cadbots.pdf";
 const offscreen = params.get("offscreen") !== "0";

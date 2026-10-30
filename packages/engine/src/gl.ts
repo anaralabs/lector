@@ -54,9 +54,8 @@ void main() {
 /** lighten: per-channel max, so dark paper takes the colour and light ink stays on top */
 export type Blend = "none" | "alpha" | "multiply" | "lighten";
 
-export class Compositor {
-	readonly gl: WebGL2RenderingContext;
-	private tex: {
+interface Programs {
+	tex: {
 		prog: WebGLProgram;
 		rect: WebGLUniformLocation;
 		uv: WebGLUniformLocation;
@@ -66,12 +65,28 @@ export class Compositor {
 		paper: WebGLUniformLocation;
 		ink: WebGLUniformLocation;
 	};
+	solid: { prog: WebGLProgram; rect: WebGLUniformLocation; uv: WebGLUniformLocation; view: WebGLUniformLocation; color: WebGLUniformLocation; round: WebGLUniformLocation };
+	vao: WebGLVertexArrayObject;
+	vbo: WebGLBuffer;
+}
+
+export class Compositor {
+	readonly gl: WebGL2RenderingContext;
+	private tex!: Programs["tex"];
+	private solid!: Programs["solid"];
+	private res!: Programs;
 	private tone: { paper: [number, number, number]; ink: [number, number, number] } | null = null;
-	private solid: { prog: WebGLProgram; rect: WebGLUniformLocation; uv: WebGLUniformLocation; view: WebGLUniformLocation; color: WebGLUniformLocation; round: WebGLUniformLocation };
-	private vao: WebGLVertexArrayObject;
 	private w = 1;
 	private h = 1;
 	textureBytes = 0;
+	/**
+	 * The context is lost (GPU reset, resource pressure): nothing draws until
+	 * it is restored. Every texture is gone by then; the owner re-uploads.
+	 */
+	lost = false;
+	onLost: () => void = () => {};
+	onRestored: () => void = () => {};
+	private ac = new AbortController();
 
 	constructor(readonly canvas: Canvas) {
 		const gl = canvas.getContext("webgl2", {
@@ -86,15 +101,43 @@ export class Compositor {
 		}) as WebGL2RenderingContext | null;
 		if (!gl) throw new Error("WebGL2 is not available");
 		this.gl = gl;
+		this.build();
+		// preventDefault on loss asks the browser to restore the context later.
+		const target = canvas as EventTarget;
+		target.addEventListener(
+			"webglcontextlost",
+			(e) => {
+				e.preventDefault();
+				this.lost = true;
+				this.onLost();
+			},
+			{ signal: this.ac.signal },
+		);
+		target.addEventListener(
+			"webglcontextrestored",
+			() => {
+				this.lost = false;
+				this.textureBytes = 0;
+				this.mode = null;
+				this.build();
+				this.onRestored();
+			},
+			{ signal: this.ac.signal },
+		);
+	}
+
+	/** Programs and the quad buffer (again after a context restore). */
+	private build() {
+		const gl = this.gl;
 		const texProg = this.program(QUAD_VS, TEX_FS);
 		const solidProg = this.program(QUAD_VS, SOLID_FS);
 		const u = (p: WebGLProgram, n: string) => gl.getUniformLocation(p, n)!;
 		this.tex = { prog: texProg, rect: u(texProg, "u_rect"), uv: u(texProg, "u_uv"), view: u(texProg, "u_view"), gamma: u(texProg, "u_gamma"), dark: u(texProg, "u_dark"), paper: u(texProg, "u_paper"), ink: u(texProg, "u_ink") };
 		this.solid = { prog: solidProg, rect: u(solidProg, "u_rect"), uv: u(solidProg, "u_uv"), view: u(solidProg, "u_view"), color: u(solidProg, "u_color"), round: u(solidProg, "u_round") };
 
-		this.vao = gl.createVertexArray()!;
-		gl.bindVertexArray(this.vao);
-		const vbo = gl.createBuffer();
+		const vao = gl.createVertexArray()!;
+		gl.bindVertexArray(vao);
+		const vbo = gl.createBuffer()!;
 		gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
 		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
 		for (const prog of [texProg, solidProg]) {
@@ -102,6 +145,22 @@ export class Compositor {
 			gl.enableVertexAttribArray(loc);
 			gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
 		}
+		this.res = { tex: this.tex, solid: this.solid, vao, vbo };
+	}
+
+	/** Frees programs and buffers and releases the context (textures are the owner's). */
+	dispose() {
+		this.ac.abort();
+		const gl = this.gl;
+		if (!this.lost && !gl.isContextLost()) {
+			gl.deleteProgram(this.res.tex.prog);
+			gl.deleteProgram(this.res.solid.prog);
+			gl.deleteVertexArray(this.res.vao);
+			gl.deleteBuffer(this.res.vbo);
+			// Browsers cap live contexts per page: give this one back now, not at GC.
+			gl.getExtension("WEBGL_lose_context")?.loseContext();
+		}
+		this.textureBytes = 0;
 	}
 
 	private program(vs: string, fs: string) {
@@ -110,15 +169,20 @@ export class Compositor {
 			const s = gl.createShader(type)!;
 			gl.shaderSource(s, src);
 			gl.compileShader(s);
-			if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) ?? "shader");
+			if (!gl.getShaderParameter(s, gl.COMPILE_STATUS) && !gl.isContextLost()) throw new Error(gl.getShaderInfoLog(s) ?? "shader");
 			return s;
 		};
 		const p = gl.createProgram()!;
-		gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
-		gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+		const v = compile(gl.VERTEX_SHADER, vs);
+		const f = compile(gl.FRAGMENT_SHADER, fs);
+		gl.attachShader(p, v);
+		gl.attachShader(p, f);
 		gl.bindAttribLocation(p, 0, "a_pos");
 		gl.linkProgram(p);
-		if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) ?? "link");
+		// Flagged for deletion; they go with the program.
+		gl.deleteShader(v);
+		gl.deleteShader(f);
+		if (!gl.getProgramParameter(p, gl.LINK_STATUS) && !gl.isContextLost()) throw new Error(gl.getProgramInfoLog(p) ?? "link");
 		return p;
 	}
 
@@ -129,9 +193,10 @@ export class Compositor {
 		this.h = h;
 	}
 
-	upload(pixels: Uint8Array, w: number, h: number): WebGLTexture {
+	upload(pixels: Uint8Array, w: number, h: number): WebGLTexture | null {
 		const gl = this.gl;
-		const tex = gl.createTexture()!;
+		const tex = gl.createTexture();
+		if (!tex) return null; // context lost
 		gl.bindTexture(gl.TEXTURE_2D, tex);
 		gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
 		gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
@@ -153,7 +218,7 @@ export class Compositor {
 		gl.viewport(0, 0, this.w, this.h);
 		gl.clearColor(clear[0], clear[1], clear[2], 1);
 		gl.clear(gl.COLOR_BUFFER_BIT);
-		gl.bindVertexArray(this.vao);
+		gl.bindVertexArray(this.res.vao);
 	}
 
 	private blend(mode: Blend) {

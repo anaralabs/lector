@@ -455,6 +455,41 @@ export class ViewerCore {
 		this.pool = new RasterPool(ports);
 		this.pool.onOpened = (pages, info) => this.opened(pages, info);
 		this.pool.onError = (message, code, phase) => this.emit({ type: "error", message, code, phase });
+		this.gl.onLost = () => this.emit({ type: "error", message: "lector-engine: the WebGL context was lost; waiting for the browser to restore it", code: "gpu", phase: "render" });
+		this.gl.onRestored = () => this.contextRestored();
+	}
+
+	private disposed = false;
+
+	/**
+	 * Stops the frame loop and timers, closes the worker ports and frees GPU
+	 * resources. The core is unusable afterwards; requests in flight never answer.
+	 */
+	dispose() {
+		if (this.disposed) return;
+		this.disposed = true;
+		this.flight = null;
+		this.dragging = false;
+		this.velocity = { x: 0, y: 0 };
+		for (const timer of [this.settleTimer, this.idleTimer, this.press?.timer]) if (timer) clearTimeout(timer);
+		this.settleTimer = this.idleTimer = null;
+		this.press = null;
+		this.pool.dispose();
+		for (const tile of this.tiles.values()) if (tile.tex) this.gl.free(tile.tex, tile.w, tile.h);
+		this.tiles.clear();
+		this.tilesByPage.clear();
+		this.arrived = [];
+		this.texts.clear();
+		this.textWaiters.clear();
+		this.gl.dispose();
+		this.emit = () => {};
+	}
+
+	/** Every texture died with the old context: tiles are fetched again; pixels waiting for upload are kept. */
+	private contextRestored() {
+		if (this.disposed) return;
+		for (const tile of this.tiles.values()) tile.tex = null;
+		this.requestFrame();
 	}
 
 	// ---------------------------------------------------------------- setup
@@ -719,6 +754,7 @@ export class ViewerCore {
 	private zoomChanged() {
 		this.lastZoomChange = performance.now();
 		if (this.settleTimer) clearTimeout(this.settleTimer);
+		if (this.disposed) return;
 		this.settleTimer = setTimeout(() => this.requestFrame(), ZOOM_SETTLE_MS + 10);
 		this.requestFrame();
 	}
@@ -733,6 +769,7 @@ export class ViewerCore {
 	// ---------------------------------------------------------------- input
 
 	handle(msg: InputMsg) {
+		if (this.disposed) return;
 		switch (msg.type) {
 			case "resize": {
 				const changed = msg.w !== this.vw || msg.h !== this.vh || msg.dpr !== this.dpr;
@@ -1126,6 +1163,7 @@ export class ViewerCore {
 	}
 
 	command(cmd: Command) {
+		if (this.disposed) return;
 		switch (cmd.type) {
 			case "zoom":
 				this.cancelFlight();
@@ -1798,6 +1836,8 @@ export class ViewerCore {
 			tile.arrived = false;
 			if (this.tiles.get(tile.key) !== tile || tile.tex) continue;
 			tile.tex = this.gl.upload(pixels, tile.w, tile.h);
+			// Lost mid-frame: fetch it again after the restore.
+			if (!tile.tex) break;
 		}
 	}
 
@@ -1829,11 +1869,11 @@ export class ViewerCore {
 
 	requestFrame() {
 		this.dirty = true;
-		if (this.scheduled) return;
+		if (this.scheduled || this.disposed) return;
 		this.scheduled = true;
 		this.raf((t) => {
 			this.scheduled = false;
-			this.frame(t);
+			if (!this.disposed) this.frame(t);
 		});
 	}
 
@@ -1841,7 +1881,8 @@ export class ViewerCore {
 	private painted = false;
 
 	private frame(now: number) {
-		if (!this.dirty || !this.camReady) return;
+		// A lost context draws nothing; `contextRestored` asks for a frame.
+		if (!this.dirty || !this.camReady || this.disposed || this.gl.lost) return;
 		const cpu0 = performance.now();
 		const dt = this.lastFrame ? Math.min(64, now - this.lastFrame) : 16;
 		if (this.lastFrame && now - this.lastFrame < 50) this.frameTimes.push(now - this.lastFrame);
@@ -2091,6 +2132,7 @@ export class ViewerCore {
 	/** Emits `moving: false` once the camera has rested; hosts re-show tooltips then. */
 	private cameraIdle() {
 		if (this.idleTimer) clearTimeout(this.idleTimer);
+		if (this.disposed) return;
 		this.idleTimer = setTimeout(() => {
 			this.emit({ type: "camera", camera: { ...this.cam }, moving: false });
 			if (this.selRange && !this.dragging) this.emitSelection(true);
