@@ -42,8 +42,8 @@ jobs:
       - name: Run lint
         run: pnpm lint
 
-      - name: Release commit filter tests
-        run: node --test scripts/release/paths.test.mjs
+      - name: Release config and commit filter tests
+        run: node --test scripts/release/config.test.mjs scripts/release/paths.test.mjs
 
   test:
     name: Library tests (${{ matrix.browser }})

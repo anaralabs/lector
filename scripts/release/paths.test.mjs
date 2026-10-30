@@ -16,33 +16,39 @@ after(() => {
 	for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
-const lock = ({ root = "1.0.0", lectorDep = "1.0.0", engineDep = "", overrides = "" } = {}) => `lockfileVersion: '9.0'
-${overrides ? `\noverrides:\n  handlebars: ${overrides}\n` : ""}
-importers:
-
-  .:
-    devDependencies:
-      turbo:
-        specifier: ^2
-        version: ${root}
-
-  packages/engine:
-    devDependencies:
-      pdf-lib:
-        specifier: 1.17.1
-        version: 1.17.1${engineDep ? `\n      mupdf:\n        specifier: ${engineDep}\n        version: ${engineDep}` : ""}
-
-  packages/lector:
-    dependencies:
-      pdfjs-dist:
-        specifier: ^5
-        version: ${lectorDep}
-
-packages:
-
-  pdf-lib@1.17.1:
-    resolution: {integrity: sha512-a}
-${engineDep ? `\n  mupdf@${engineDep}:\n    resolution: {integrity: sha512-b}\n` : ""}`;
+/**
+ * A pnpm v9 lockfile. `importers`: path -> { name: version }; `snapshots`:
+ * "name@version" -> { name: version } (its dependencies).
+ */
+const lockfile = ({ overrides = "", importers, snapshots }) => {
+	const deps = (d, pad) => Object.entries(d).map(([n, v]) => `${pad}${n}:\n${pad}  specifier: ^${v}\n${pad}  version: ${v}`).join("\n");
+	const imp = Object.entries(importers)
+		.map(([path, d]) => `  ${path}:\n    dependencies:\n${deps(d, "      ")}`)
+		.join("\n\n");
+	const pkgs = Object.keys(snapshots).map((k) => `  ${k.split("(")[0]}:\n    resolution: {integrity: sha512-${k}}`);
+	const snaps = Object.entries(snapshots).map(([k, d]) =>
+		Object.keys(d).length ? `  ${k}:\n    dependencies:\n${Object.entries(d).map(([n, v]) => `      ${n}: ${v}`).join("\n")}` : `  ${k}: {}`,
+	);
+	return `lockfileVersion: '9.0'\n${overrides ? `\noverrides:\n  handlebars: ${overrides}\n` : ""}\nimporters:\n\n${imp}\n\npackages:\n\n${[...new Set(pkgs)].join("\n\n")}\n\nsnapshots:\n\n${snaps.join("\n\n")}\n`;
+};
+// Lector uses x -> y; the engine uses pdf-lib -> y (shared) and, later, mupdf.
+const base = {
+	importers: { ".": { turbo: "1.0.0" }, "packages/engine": { "pdf-lib": "1.17.1" }, "packages/lector": { x: "1.0.0" } },
+	snapshots: { "turbo@1.0.0": {}, "pdf-lib@1.17.1": { y: "1.0.0" }, "x@1.0.0": { y: "1.0.0" }, "y@1.0.0": {} },
+};
+const lock = ({ overrides = "", root = "1.0.0", lectorX = "1.0.0", engineMupdf = "", lectorY = "1.0.0" } = {}) =>
+	lockfile({
+		overrides,
+		importers: { ...base.importers, ".": { turbo: root }, "packages/engine": { "pdf-lib": "1.17.1", ...(engineMupdf ? { mupdf: engineMupdf } : {}) }, "packages/lector": { x: lectorX } },
+		snapshots: {
+			[`turbo@${root}`]: {},
+			"pdf-lib@1.17.1": { y: "1.0.0" },
+			[`x@${lectorX}`]: { y: lectorY },
+			"y@1.0.0": {},
+			...(lectorY !== "1.0.0" ? { [`y@${lectorY}`]: {} } : {}),
+			...(engineMupdf ? { [`mupdf@${engineMupdf}`]: { z: "1.0.0" }, "z@1.0.0": {} } : {}),
+		},
+	});
 
 function repo() {
 	const dir = mkdtempSync(join(tmpdir(), "release-paths-"));
@@ -75,15 +81,23 @@ test("lector: its folder, root inputs and lockfile changes beyond the engine; en
 	const { dir, commit } = repo();
 	const commits = [
 		commit("fix(deps): pin handlebars", { "package.json": '{"pnpm":{"overrides":{"handlebars":"4.7.10"}}}\n', "pnpm-lock.yaml": lock({ overrides: "4.7.10" }) }),
-		commit("fix(engine): add mupdf", { "packages/engine/package.json": "{}", "pnpm-lock.yaml": lock({ overrides: "4.7.10", engineDep: "1.27.0" }) }),
-		commit("fix(deps): bump pdfjs-dist in the lockfile", { "pnpm-lock.yaml": lock({ overrides: "4.7.10", engineDep: "1.27.0", lectorDep: "1.1.0" }) }),
+		commit("fix(engine): add mupdf", { "packages/engine/package.json": "{}", "pnpm-lock.yaml": lock({ overrides: "4.7.10", engineMupdf: "1.27.0" }) }),
+		commit("fix(deps): bump x in the lockfile", { "pnpm-lock.yaml": lock({ overrides: "4.7.10", engineMupdf: "1.27.0", lectorX: "1.1.0" }) }),
 		// A squash with a lector-affecting root change plus an unrelated engine edit.
 		commit("fix: patch an advisory everywhere", { "patches/x.patch": "p", "packages/engine/README.md": "y" }),
-		commit("chore(deps): re-resolve root tooling", { "pnpm-lock.yaml": lock({ overrides: "4.7.10", engineDep: "1.27.0", lectorDep: "1.1.0", root: "2.0.0" }) }),
+		commit("chore(deps): re-resolve root tooling", { "pnpm-lock.yaml": lock({ overrides: "4.7.10", engineMupdf: "1.27.0", lectorX: "1.1.0", root: "2.0.0" }) }),
+		// An engine importer change alongside a transitive change under lector's x.
+		commit("fix(deps): engine bump plus lector transitive", { "pnpm-lock.yaml": lock({ overrides: "4.7.10", engineMupdf: "1.28.0", lectorX: "1.1.0", root: "2.0.0", lectorY: "1.0.1" }) }),
 		commit("fix(lector): a bug", { "packages/lector/a.ts": "2" }),
 		commit("docs: readme", { "README.md": "z" }),
 	];
-	assert.deepEqual(pick(lectorPaths, dir, commits), ["fix(deps): pin handlebars", "fix(deps): bump pdfjs-dist in the lockfile", "fix: patch an advisory everywhere", "fix(lector): a bug"]);
+	assert.deepEqual(pick(lectorPaths, dir, commits), [
+		"fix(deps): pin handlebars",
+		"fix(deps): bump x in the lockfile",
+		"fix: patch an advisory everywhere",
+		"fix(deps): engine bump plus lector transitive",
+		"fix(lector): a bug",
+	]);
 	assert.deepEqual(pick(enginePaths, dir, commits), ["fix(engine): add mupdf", "fix: patch an advisory everywhere"]);
 });
 

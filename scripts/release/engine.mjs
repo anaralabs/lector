@@ -4,5 +4,5 @@ const paths = { package: "packages/engine/" };
 
 export default {
 	tagFormat: "lector-engine-v${version}",
-	plugins: [[here("./commits.mjs"), paths], "@semantic-release/npm", [here("./github.mjs"), paths]],
+	plugins: [[here("./commits.mjs"), paths], here("./npm.mjs"), [here("./github.mjs"), paths]],
 };

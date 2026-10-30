@@ -9,5 +9,5 @@ const paths = {
 
 export default {
 	tagFormat: "v${version}",
-	plugins: [[here("./commits.mjs"), paths], "@semantic-release/npm", [here("./github.mjs"), paths]],
+	plugins: [[here("./commits.mjs"), paths], here("./npm.mjs"), [here("./github.mjs"), paths]],
 };
