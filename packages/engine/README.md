@@ -76,6 +76,8 @@ const createWorker = (url: URL, name: string) =>
 
 Without Vite, serve `@anaralabs/lector-engine/pdfium.wasm` and the worker files yourself (the package exports `./raster-worker`, `./core-worker` and `./pdfium.wasm`), and pass their URLs as `wasmUrl` and `workerUrls`. Those three files are all you need: each worker is a single self-contained module (no shared chunks), so they can live in any directory or on a CDN.
 
+Serve `pdfium.wasm` as `Content-Type: application/wasm`, compressed (brotli: 4.1MB raw, 1.5MB over the wire): the raster workers then compile it while it downloads (`WebAssembly.instantiateStreaming`). With another content type they wait for the whole file first. It is PDFium trimmed to the functions the engine calls, so `@embedpdf/pdfium`'s own `pdfium.wasm` (a superset) works too, only larger.
+
 ## API reference
 
 Pages are **0-based** everywhere. Page-space geometry is in PDF points with a top-left origin; screen geometry is in CSS px relative to the viewer container.

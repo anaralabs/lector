@@ -2,11 +2,9 @@
 // One PDFium WASM instance per worker. Each worker owns its own copy of the
 // document, so workers never share memory and need no cross-origin isolation.
 
-import { init } from "@embedpdf/pdfium";
 import { BlockCache } from "./blocks";
+import { init, type Pdfium } from "./pdfium/pdfium.js";
 import type { DocSource, DocumentInfo, ErrorCode, FromRaster, Link, OutlineItem, ToRaster } from "./protocol";
-
-type Pdfium = Awaited<ReturnType<typeof init>>;
 
 const FPDF_ANNOT = 0x01;
 const FPDF_REVERSE_BYTE_ORDER = 0x10; // RGBA instead of BGRA
@@ -598,6 +596,27 @@ function readInfo(password: string | undefined): DocumentInfo {
 	};
 }
 
+/**
+ * Compiles the wasm while it downloads (instantiateStreaming), falling back to
+ * a buffered compile when the server sends another Content-Type.
+ */
+function loadPdfium(wasmUrl: string): Promise<Pdfium> {
+	return new Promise<Pdfium>((resolve, reject) => {
+		init({
+			instantiateWasm(imports: WebAssembly.Imports, receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void) {
+				(async () => {
+					const res = await fetch(wasmUrl, { credentials: "same-origin" });
+					if (!res.ok) throw new Error(`HTTP ${res.status}`);
+					const streaming = typeof WebAssembly.instantiateStreaming === "function" && res.headers.get("Content-Type")?.split(";")[0].trim() === "application/wasm";
+					const { instance, module } = streaming ? await WebAssembly.instantiateStreaming(res, imports) : await WebAssembly.instantiate(await res.arrayBuffer(), imports);
+					receive(instance, module);
+				})().catch(reject);
+				return {};
+			},
+		}).then(resolve, reject);
+	});
+}
+
 async function open(msg: Extract<ToRaster, { t: "init" }>) {
 	port = msg.port;
 	port.onmessage = (ev: MessageEvent<ToRaster>) => {
@@ -612,12 +631,8 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 			send({ t: "error", message: String((err as Error)?.stack ?? err), code: "unknown", phase: m.t === "tile" ? "render" : "text", id });
 		}
 	};
-	let wasmBinary: ArrayBuffer;
 	try {
-		const res = await fetch(msg.wasmUrl);
-		if (!res.ok) throw new Error(`HTTP ${res.status}`);
-		wasmBinary = await res.arrayBuffer();
-		P = await init({ wasmBinary });
+		P = await loadPdfium(msg.wasmUrl);
 		P.PDFiumExt_Init();
 	} catch (err) {
 		send({ t: "error", message: `lector-engine: pdfium.wasm failed to load from ${msg.wasmUrl}: ${String((err as Error)?.message ?? err)}`, code: "wasm", phase: "engine-load" });
