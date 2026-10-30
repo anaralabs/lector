@@ -41,6 +41,7 @@
 		"typecheck": "tsc --noEmit",
 		"test:types": "tsc --noEmit",
 		"test:package": "node scripts/check-package.mjs",
+		"test:unit": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
 		"bench": "node bench/frames.mjs",
 		"bench:features": "node bench/features.mjs"
 	},

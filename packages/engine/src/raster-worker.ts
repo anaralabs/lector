@@ -3,6 +3,7 @@
 // document, so workers never share memory and need no cross-origin isolation.
 
 import { init } from "@embedpdf/pdfium";
+import { BlockCache } from "./blocks";
 import type { DocSource, DocumentInfo, ErrorCode, FromRaster, Link, OutlineItem, ToRaster } from "./protocol";
 
 type Pdfium = Awaited<ReturnType<typeof init>>;
@@ -489,17 +490,15 @@ const LOAD_ERRORS: Record<number, ErrorCode> = { 2: "file", 3: "parse", 4: "pass
 // cache. No worker holds a copy of the whole file.
 const BLOB_BLOCK = 64 * 1024;
 const URL_BLOCK = 256 * 1024;
-const CACHE_MAX = 24 * 1024 * 1024;
 
 let source: DocSource | null = null;
 let fileLen = 0;
 let blockSize = BLOB_BLOCK;
-const blocks = new Map<number, Uint8Array>();
-let cacheBytes = 0;
+let cache: BlockCache | null = null;
 let fileAccess = 0;
 let reader: FileReaderSync | null = null;
 
-const heapBytes = () => heap().length + cacheBytes;
+const heapBytes = () => heap().length + (cache?.bytes ?? 0);
 
 function fetchBlock(start: number, end: number): Uint8Array {
 	const src = source!;
@@ -519,54 +518,16 @@ function fetchBlock(start: number, end: number): Uint8Array {
 		// The server ignored the range and sent everything: read from that from now on.
 		source = { kind: "blob", blob: new Blob([buf]) };
 		blockSize = BLOB_BLOCK;
-		blocks.clear();
-		cacheBytes = 0;
+		cache?.clear();
 		return new Uint8Array(buf, start, end - start).slice();
 	}
 	throw new Error(`range request ${start}-${end - 1} failed (HTTP ${xhr.status})`);
 }
 
-function block(index: number): Uint8Array {
-	const hit = blocks.get(index);
-	if (hit) {
-		blocks.delete(index);
-		blocks.set(index, hit);
-		return hit;
-	}
-	const start = index * blockSize;
-	const data = fetchBlock(start, Math.min(fileLen, start + blockSize));
-	blocks.set(index, data);
-	cacheBytes += data.length;
-	while (cacheBytes > CACHE_MAX && blocks.size > 1) {
-		const [k, v] = blocks.entries().next().value as [number, Uint8Array];
-		blocks.delete(k);
-		cacheBytes -= v.length;
-	}
-	return data;
-}
-
 /** int GetBlock(void* param, unsigned long position, unsigned char* buf, unsigned long size) */
 function getBlock(_param: number, position: number, buf: number, size: number): number {
 	try {
-		let pos = position >>> 0;
-		let out = buf;
-		let left = size >>> 0;
-		if (pos + left > fileLen) return 0;
-		while (left > 0) {
-			const size0 = blockSize;
-			const index = Math.floor(pos / size0);
-			const data = block(index);
-			// `block` may switch the source (and block size): recompute from the new block.
-			if (blockSize !== size0) continue;
-			const offset = pos - index * blockSize;
-			const n = Math.min(left, data.length - offset);
-			if (n <= 0) return 0;
-			heap().set(data.subarray(offset, offset + n), out);
-			pos += n;
-			out += n;
-			left -= n;
-		}
-		return 1;
+		return cache!.read(position >>> 0, size >>> 0, heap(), buf) ? 1 : 0;
 	} catch (err) {
 		console.error(`lector-engine: ${String((err as Error)?.message ?? err)}`);
 		return 0;
@@ -663,6 +624,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 		fileLen = source.length;
 		blockSize = URL_BLOCK;
 	}
+	cache = new BlockCache(fileLen, { size: () => blockSize, fetch: fetchBlock });
 	loadDocument(msg.password);
 }
 

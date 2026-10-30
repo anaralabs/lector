@@ -106,9 +106,10 @@ jobs:
       - run: pnpm install --frozen-lockfile --filter @anaralabs/lector-engine...
       - name: Build engine
         run: pnpm --filter @anaralabs/lector-engine build
-      - name: Check types and packed exports
+      - name: Check types, unit tests and packed exports
         run: |
           pnpm --filter @anaralabs/lector-engine test:types
+          pnpm --filter @anaralabs/lector-engine test:unit
           pnpm --filter @anaralabs/lector-engine test:package
 
   release:
