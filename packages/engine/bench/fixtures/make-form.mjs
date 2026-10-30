@@ -1,12 +1,12 @@
 // Generates demo/public/form-noap.pdf: filled AcroForm fields whose widgets have
 // no appearance streams (NeedAppearances), which only render through the form
 // fill environment (FPDF_FFLDraw).
-// Usage: PDF_LIB=/path/to/pdf-lib node bench/fixtures/make-form.mjs
+// Usage: node bench/fixtures/make-form.mjs
 import { writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { PDFDocument, PDFName, PDFBool, StandardFonts } = require(process.env.PDF_LIB ?? "/Users/giga/fun/anara-engine/node_modules/.pnpm/pdf-lib@1.17.1/node_modules/pdf-lib");
+const { PDFDocument, PDFName, PDFBool, StandardFonts } = require(process.env.PDF_LIB ?? "pdf-lib");
 const doc = await PDFDocument.create();
 const font = await doc.embedFont(StandardFonts.Helvetica);
 const page = doc.addPage([612, 792]);

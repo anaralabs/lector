@@ -1,6 +1,6 @@
 import wasmUrl, { workerUrls } from "../src/vite-wasm";
 
-// Same setup as anara: module workers started from a blob loader (survives
+// Module workers started from a blob loader, as a host app might (survives
 // extensions that re-wrap workers, and cross-origin asset hosts).
 const createWorker = (url: URL, name: string) =>
 	new Worker(URL.createObjectURL(new Blob([`import(${JSON.stringify(url.href)})`], { type: "text/javascript" })), { name });
@@ -60,7 +60,7 @@ const onEvent = (e: CoreEvent) => {
 
 async function open(source: string | ArrayBuffer) {
 	w.__viewer?.destroy();
-	// ?dark=1 previews dark mode with anara-like colours.
+	// ?dark=1 previews dark mode with near-black page colours.
 	const dark = params.get("dark") === "1" ? { dark: true, background: [0.03, 0.03, 0.03] as [number, number, number], paper: [0.05, 0.05, 0.05] as [number, number, number] } : {};
 	const password = params.get("password") ?? undefined;
 	const interceptFind = params.get("interceptFind") === "1";

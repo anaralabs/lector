@@ -2,13 +2,13 @@
 // generators do; PDFium's text page reorders them to logical order) plus an
 // LTR control line. Glyphs are Helvetica's (no Hebrew font is needed): a
 // ToUnicode CMap maps them to Hebrew, which is all text extraction sees.
-// Usage: PDF_LIB=/path/to/pdf-lib node bench/fixtures/make-rtl.mjs
+// Usage: node bench/fixtures/make-rtl.mjs
 import { writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { PDFDocument, PDFName, PDFString, StandardFonts, beginText, endText, setFontAndSize, moveText, showText } = require(
-	process.env.PDF_LIB ?? "/Users/giga/fun/anara-engine/node_modules/.pnpm/pdf-lib@1.17.1/node_modules/pdf-lib",
+	process.env.PDF_LIB ?? "pdf-lib",
 );
 // a..e -> shin, lamed, vav, final mem, ayin; space stays a space.
 const map = { a: 0x05e9, b: 0x05dc, c: 0x05d5, d: 0x05dd, e: 0x05e2, " ": 0x20 };

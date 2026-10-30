@@ -1,13 +1,12 @@
 // Generates demo/public/password.pdf (AES-256, user password "secret").
-// Usage: PDF_LIB=/path/to/pdf-lib MUPDF=/path/to/mupdf node bench/fixtures/make-password.mjs
+// Usage: node bench/fixtures/make-password.mjs
 import { writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
-const pnpm = "/Users/giga/fun/anara-engine/node_modules/.pnpm";
-const { PDFDocument, StandardFonts } = require(process.env.PDF_LIB ?? `${pnpm}/pdf-lib@1.17.1/node_modules/pdf-lib`);
-const mupdf = await import(pathToFileURL(`${process.env.MUPDF ?? `${pnpm}/mupdf@1.27.0/node_modules/mupdf`}/dist/mupdf.js`).href);
+const { PDFDocument, StandardFonts } = require(process.env.PDF_LIB ?? "pdf-lib");
+const mupdf = await import(process.env.MUPDF ? pathToFileURL(`${process.env.MUPDF}/dist/mupdf.js`).href : "mupdf");
 
 const doc = await PDFDocument.create();
 doc.setTitle("Locked fixture");

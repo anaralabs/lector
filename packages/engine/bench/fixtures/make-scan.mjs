@@ -2,13 +2,13 @@
 //   p1: a full-page near-white "scan" image with dark text pixels + invisible OCR text
 //   p2: vector text with a colourful photo in the middle (photo keeps its colours)
 //   p3: a full-page colourful photo (covers the page but is not paper: stays original)
-// Usage: PDF_LIB=/path/to/pdf-lib node bench/fixtures/make-scan.mjs
+// Usage: node bench/fixtures/make-scan.mjs
 import { writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { encodePng } from "./png.mjs";
 
 const require = createRequire(import.meta.url);
-const libPath = process.env.PDF_LIB ?? "/Users/giga/fun/anara-engine/node_modules/.pnpm/pdf-lib@1.17.1/node_modules/pdf-lib";
+const libPath = process.env.PDF_LIB ?? "pdf-lib";
 const { PDFDocument, StandardFonts, rgb, pushGraphicsState, popGraphicsState, setTextRenderingMode, TextRenderingMode } = require(libPath);
 
 const W = 612;
