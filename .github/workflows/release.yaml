@@ -163,8 +163,9 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # Separate tags (lector-engine-v*). Each package's "release" config extends
-      # semantic-release-monorepo, so it only counts commits touching its own folder.
+      # Separate tags (lector-engine-v*). Each package's "release" config counts only
+      # its own commits (scripts/release/paths.mjs): the engine its folder; lector its
+      # folder plus root dependency/CI files when a commit leaves the engine alone.
       - name: Build engine package
         run: pnpm --filter @anaralabs/lector-engine build
 

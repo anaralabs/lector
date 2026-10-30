@@ -109,7 +109,11 @@
 		}
 	],
 	"release": {
-		"extends": "semantic-release-monorepo",
-		"tagFormat": "v${version}"
+		"tagFormat": "v${version}",
+		"plugins": [
+			["../../scripts/release/commits.mjs", {"package": "packages/lector/", "shared": ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "patches/", ".github/"], "others": ["packages/engine/"]}],
+			"@semantic-release/npm",
+			["../../scripts/release/github.mjs", {"package": "packages/lector/", "shared": ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "patches/", ".github/"], "others": ["packages/engine/"]}]
+		]
 	}
 }
