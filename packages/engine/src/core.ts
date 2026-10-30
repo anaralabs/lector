@@ -1283,6 +1283,7 @@ export class ViewerCore {
 	}
 
 	private outline: Promise<OutlineItem[]> | null = null;
+	private thumbs = new Map<string, Promise<{ buf: ArrayBuffer; w: number; h: number } | null>>();
 
 	private cancelled = new Set<number>();
 
@@ -1439,12 +1440,21 @@ export class ViewerCore {
 				const scale = req.width / size.w;
 				const w = Math.max(1, Math.round(size.w * scale));
 				const h = Math.max(1, Math.round(size.h * scale));
-				return new Promise((resolve) => {
-					this.pool.request(`thumb:${req.page}:${w}`, 600 + req.page, { t: "tile", page: req.page, scale, x: 0, y: 0, w, h }, (res) =>
-						resolve(res.t === "tile" ? { buf: res.buf, w: res.w, h: res.h } : null),
-					);
-					this.pool.pump();
-				});
+				// Concurrent requests for one thumbnail share a job (the pool keeps one
+				// callback per key). Callers only read the pixels.
+				const key = `thumb:${req.page}:${w}`;
+				let job = this.thumbs.get(key);
+				if (!job) {
+					job = new Promise((resolve) => {
+						this.pool.request(key, 600 + req.page, { t: "tile", page: req.page, scale, x: 0, y: 0, w, h }, (res) => {
+							this.thumbs.delete(key);
+							resolve(res.t === "tile" ? { buf: res.buf, w: res.w, h: res.h } : null);
+						});
+						this.pool.pump();
+					});
+					this.thumbs.set(key, job);
+				}
+				return job;
 			}
 			case "outline":
 				this.outline ??= new Promise((resolve) => {
