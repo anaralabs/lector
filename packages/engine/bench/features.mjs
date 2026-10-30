@@ -403,7 +403,7 @@ const life = await page.evaluate(async (src) => {
 	const inflight = [v.loaded, v.pageText(3), v.outline(), v.thumbnail(0, 120), v.rects(0, 0, 5)].map(code);
 	v.destroy();
 	const destroyed = await timeout(Promise.all(inflight));
-	const after = await timeout(code(v.pageText(0)));
+	const after = await timeout(Promise.all([code(v.pageText(0)), v.goToPage(1), v.unlock("x")]).then((r) => r.join()));
 	const earlyLeft = early.children.length;
 	early.remove();
 	// A document that cannot open: waiting requests reject with its error.
@@ -430,7 +430,7 @@ const life = await page.evaluate(async (src) => {
 	return { partial, partialLeft, terminated, destroyed, after, earlyLeft, failed, cancelled, removed, searching: viewer.isSearching, thumbs };
 }, src);
 check("partial construction failure cleans up", life.partial === "factory failed" && life.partialLeft.children === 0 && life.partialLeft.tabindex === null && life.partialLeft.overflow === "" && life.terminated.join() === "lector-raster-0", JSON.stringify({ ...life.partialLeft, terminated: life.terminated }));
-check("destroy settles pending requests", life.destroyed.join() === "destroyed,destroyed,destroyed,destroyed,destroyed" && life.after === "destroyed" && life.earlyLeft === 0, `${life.destroyed.join()}; after: ${life.after}`);
+check("destroy settles pending requests", life.destroyed.join() === "destroyed,destroyed,destroyed,destroyed,destroyed" && life.after === "destroyed,false,false" && life.earlyLeft === 0, `${life.destroyed.join()}; after: ${life.after}`);
 check("load failure settles pending requests", life.failed === "parse", life.failed);
 check("cancelSearch cleans up", life.cancelled === "AbortError" && life.removed === 1 && !life.searching, `${life.cancelled}, abort listener removed ${life.removed}x`);
 check("duplicate thumbnails both resolve", Array.isArray(life.thumbs) && life.thumbs.join() === "160,160", JSON.stringify(life.thumbs));

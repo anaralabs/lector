@@ -500,6 +500,10 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		let nextFlight = 1;
 		const flight = (make: (id: number) => Command) =>
 			new Promise<boolean>((resolve) => {
+				if (destroyed) {
+					resolve(false);
+					return;
+				}
 				const id = nextFlight++;
 				// Registered first: an instant jump answers synchronously on the main thread.
 				flights.set(id, resolve);
@@ -766,8 +770,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				command({ type: "options", options: o });
 			},
 			unlock: (password) =>
-				opened
-					? Promise.resolve(true)
+				opened || dead
+					? Promise.resolve(opened)
 					: new Promise<boolean>((resolve) => {
 							unlocks.push(resolve);
 							command({ type: "unlock", password });
