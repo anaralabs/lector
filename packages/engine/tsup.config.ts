@@ -44,8 +44,9 @@ export default defineConfig([
 		...shared,
 		entry: { "raster-worker": "src/raster-worker.ts", "core-worker": "src/core-worker.ts" },
 		splitting: false,
-		// The PDFium glue is bundled into the raster worker; scripts/postbuild.mjs
-		// puts its wasm next to it in dist/.
-		noExternal: ["@embedpdf/pdfium"],
+		// Hosts may serve these files as they are, so ship them minified. The
+		// PDFium glue (src/pdfium/pdfium.js) is bundled into the raster worker;
+		// scripts/postbuild.mjs puts its wasm next to it in dist/.
+		minify: true,
 	},
 ]);
