@@ -210,6 +210,10 @@ async function openUrl(url: string, range: boolean): Promise<{ blob: Blob } | { 
 	return { blob: await res.blob() };
 }
 
+/** presses closer than this (ms, css px) count as a double/triple click */
+const MULTI_CLICK_MS = 500;
+const MULTI_CLICK_PX = 6;
+
 const NAV_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", "Home", "End", " ", "Escape"]);
 
 export async function createViewer(container: HTMLElement, source: string | ArrayBuffer | Uint8Array, options: ViewerOptions): Promise<Viewer> {
@@ -615,6 +619,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		on(container, "gesturechange", gesture("change"));
 		on(container, "gestureend", gesture("end"));
 
+		// Pointer events report detail 0 on down/up (per spec; some engines count),
+		// so repeated presses are counted here: same pointer type, close in time and place.
+		let press = { t: -Infinity, x: 0, y: 0, kind: "", clicks: 1 };
 		const pointer = (phase: "down" | "move" | "up" | "cancel") => (e: PointerEvent) => {
 			const kind = (e.pointerType || "mouse") as PointerKind;
 			if (kind === "touch") {
@@ -623,10 +630,14 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			}
 			if (phase === "down") {
 				container.focus({ preventScroll: true });
-				if (e.button === 0) canvas.setPointerCapture(e.pointerId);
+				if (e.button === 0) {
+					canvas.setPointerCapture(e.pointerId);
+					const again = kind === press.kind && e.timeStamp - press.t < MULTI_CLICK_MS && Math.hypot(e.clientX - press.x, e.clientY - press.y) < MULTI_CLICK_PX;
+					press = { t: e.timeStamp, x: e.clientX, y: e.clientY, kind, clicks: e.detail > 0 ? e.detail : again ? press.clicks + 1 : 1 };
+				}
 			}
 			const p = local(e);
-			send({ type: "pointer", phase, id: e.pointerId, x: p.x, y: p.y, buttons: e.buttons, kind, clicks: e.detail, shift: e.shiftKey });
+			send({ type: "pointer", phase, id: e.pointerId, x: p.x, y: p.y, buttons: e.buttons, kind, clicks: press.clicks, shift: e.shiftKey });
 		};
 		on(canvas, "pointerdown", pointer("down"));
 		on(canvas, "pointermove", pointer("move"));
