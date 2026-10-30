@@ -360,5 +360,206 @@ await page.keyboard.press("ControlOrMeta+f");
 await page.waitForTimeout(100);
 check("interceptFind emits find", await page.evaluate(() => window.__all.some((e) => e.type === "find")));
 
+// ---------------------------------------------------------------- lifecycle
+const src = new URL("../src", import.meta.url).pathname;
+const settle = (p, ms = 8000) => Promise.race([p, new Promise((r) => setTimeout(() => r("pending"), ms))]);
+
+// Construction is transactional; destroy and load failures settle every request.
+await page.goto(fixture("cadbots.pdf", "&offscreen=0"));
+await page.waitForFunction(() => window.__firstPaintMs !== undefined);
+const life = await page.evaluate(async (src) => {
+	const { createViewer } = await import(`/@fs${src}/index.ts`);
+	const { default: wasmUrl, workerUrls } = await import(`/@fs${src}/vite-wasm.ts`);
+	const timeout = (p) => Promise.race([p, new Promise((r) => setTimeout(() => r("pending"), 8000))]);
+	const demoCore = window.__core; // test viewers below replace it (debug mode)
+	const host = () => {
+		const el = document.createElement("div");
+		el.style.cssText = "position:fixed;left:0;top:0;width:400px;height:300px";
+		document.body.appendChild(el);
+		return el;
+	};
+	const loader = (url, name) => new Worker(URL.createObjectURL(new Blob([`import(${JSON.stringify(url.href)})`], { type: "text/javascript" })), { name });
+	// A factory that throws on the second worker: the first one and the canvas go.
+	const failing = host();
+	const terminated = [];
+	let made = 0;
+	const createWorker = (url, name) => {
+		if (++made === 2) throw new Error("factory failed");
+		const w = loader(url, name);
+		const t = w.terminate.bind(w);
+		w.terminate = () => {
+			terminated.push(name);
+			t();
+		};
+		return w;
+	};
+	const partial = await createViewer(failing, "/cadbots.pdf", { wasmUrl, workerUrls, createWorker, workers: 3, offscreen: false }).then(() => "resolved", (e) => e.message);
+	const partialLeft = { children: failing.children.length, tabindex: failing.getAttribute("tabindex"), overflow: failing.style.overflow };
+	failing.remove();
+	// Destroy with requests in flight (before the document opened).
+	const early = host();
+	const v = await createViewer(early, "/cadbots.pdf", { wasmUrl, workerUrls, createWorker: loader, offscreen: false });
+	const code = (p) => p.then(() => "resolved", (e) => (e instanceof DOMException ? e.name : (e.code ?? e.name)));
+	const inflight = [v.loaded, v.pageText(3), v.outline(), v.thumbnail(0, 120), v.rects(0, 0, 5)].map(code);
+	v.destroy();
+	const destroyed = await timeout(Promise.all(inflight));
+	const after = await timeout(code(v.pageText(0)));
+	const earlyLeft = early.children.length;
+	early.remove();
+	// A document that cannot open: waiting requests reject with its error.
+	const bad = host();
+	const b = await createViewer(bad, "/not-a-pdf.pdf", { wasmUrl, workerUrls, createWorker: loader, offscreen: false });
+	const failed = await timeout(code(b.pageText(0)));
+	b.destroy();
+	bad.remove();
+	window.__core = demoCore;
+	// cancelSearch removes the caller's abort listener and leaves no search running.
+	const viewer = window.__viewer;
+	const ac = new AbortController();
+	let removed = 0;
+	const remove = ac.signal.removeEventListener.bind(ac.signal);
+	ac.signal.removeEventListener = (type, fn) => {
+		if (type === "abort") removed++;
+		remove(type, fn);
+	};
+	const search = code(viewer.searchAsync("the", { signal: ac.signal }));
+	viewer.cancelSearch();
+	const cancelled = await timeout(search);
+	// Duplicate thumbnail requests share one job; both resolve.
+	const thumbs = await timeout(Promise.all([viewer.thumbnail(2, 160), viewer.thumbnail(2, 160)]).then((t) => t.map((b) => b?.width)));
+	return { partial, partialLeft, terminated, destroyed, after, earlyLeft, failed, cancelled, removed, searching: viewer.isSearching, thumbs };
+}, src);
+check("partial construction failure cleans up", life.partial === "factory failed" && life.partialLeft.children === 0 && life.partialLeft.tabindex === null && life.partialLeft.overflow === "" && life.terminated.join() === "lector-raster-0", JSON.stringify({ ...life.partialLeft, terminated: life.terminated }));
+check("destroy settles pending requests", life.destroyed.join() === "destroyed,destroyed,destroyed,destroyed,destroyed" && life.after === "destroyed" && life.earlyLeft === 0, `${life.destroyed.join()}; after: ${life.after}`);
+check("load failure settles pending requests", life.failed === "parse", life.failed);
+check("cancelSearch cleans up", life.cancelled === "AbortError" && life.removed === 1 && !life.searching, `${life.cancelled}, abort listener removed ${life.removed}x`);
+check("duplicate thumbnails both resolve", Array.isArray(life.thumbs) && life.thumbs.join() === "160,160", JSON.stringify(life.thumbs));
+
+// Selection: a newer intent wins over a programmatic selection waiting for text;
+// a collapsed range clears the old rects.
+const selRace = await page.evaluate(async () => {
+	const v = window.__viewer;
+	const c = window.__core;
+	const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+	v.select(12, 0, 50); // text not loaded yet
+	v.clearSelection();
+	v.select(0, 0, 40); // text cached: still resumes asynchronously
+	v.clearSelection();
+	await wait(600);
+	const cleared = { text: v.selectedText, rects: c.selRects.length };
+	v.select(0, 0, 40);
+	await wait(200);
+	const before = c.selRects.length;
+	v.select(0, 10, 10);
+	await wait(200);
+	return { cleared, before, collapsed: c.selRects.length, text: v.selectedText };
+});
+check("select then clearSelection stays cleared", selRace.cleared.text === "" && selRace.cleared.rects === 0, JSON.stringify(selRace.cleared));
+check("collapsed selection clears rects", selRace.before > 0 && selRace.collapsed === 0 && selRace.text === "", JSON.stringify(selRace));
+
+// Double/triple click: word, then line (pointer events report detail 0; the shell counts).
+const word = await page.evaluate(async () => {
+	const v = window.__viewer;
+	await v.goToPage(0);
+	const m = await v.pageTextMap(0);
+	const at = m.text.indexOf("toolbox");
+	const [r] = await v.rects(0, m.chars[at], m.chars[at + 7]);
+	const layout = window.__all.find((e) => e.type === "ready").layout[0];
+	const cam = v.camera;
+	return { x: (layout.x + r.x + r.w / 2 - cam.x) * cam.zoom, y: (layout.y + r.y + r.h / 2 - cam.y) * cam.zoom };
+});
+await page.mouse.dblclick(word.x, word.y);
+await page.waitForTimeout(200);
+const dbl = await page.evaluate(() => window.__viewer.selectedText);
+await page.mouse.click(word.x, word.y, { clickCount: 3 });
+await page.waitForTimeout(200);
+const triple = await page.evaluate(() => window.__viewer.selectedText);
+check("double click selects a word, triple a line", dbl === "toolbox" && triple.includes("toolbox") && triple.length > 20 && !triple.trim().includes("\n"), `${JSON.stringify(dbl)} / ${JSON.stringify(triple)}`);
+await page.evaluate(() => window.__viewer.clearSelection());
+
+// Destroying during selection autoscroll stops every frame (main-thread compositor).
+await page.mouse.move(word.x, word.y);
+await page.mouse.down();
+await page.mouse.move(word.x, 855, { steps: 4 });
+const loop = await page.evaluate(async () => {
+	const c = window.__core;
+	const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+	const f0 = c.frameId;
+	await wait(300);
+	const scrolling = c.frameId - f0;
+	window.__viewer.destroy();
+	const f1 = c.frameId;
+	await wait(400);
+	return { scrolling, after: c.frameId - f1, global: "__core" in window };
+});
+await page.mouse.up();
+check("destroy during autoscroll stops frames", loop.scrolling > 5 && loop.after === 0 && !loop.global, JSON.stringify(loop));
+
+// Worker compositor: destroy disposes the core and every worker exits.
+await page.goto(fixture("cadbots.pdf"));
+await page.waitForFunction(() => window.__firstPaintMs !== undefined);
+const workersBefore = page.workers().length;
+await page.evaluate(() => window.__viewer.destroy());
+await page.waitForTimeout(1500);
+check("destroy ends the compositor worker", workersBefore >= 3 && page.workers().length === 0, `${workersBefore} workers, then ${page.workers().length}`);
+
+// WebGL context loss: rendering stops, then resumes with re-uploaded tiles.
+const coreWorker = async () => {
+	for (const w of page.workers()) if (await w.evaluate(() => !!self.__core).catch(() => false)) return w;
+	return null;
+};
+for (const mode of ["main thread", "worker"]) {
+	await page.goto(fixture("cadbots.pdf", mode === "worker" ? "" : "&offscreen=0"));
+	await page.waitForFunction(() => window.__paintedMs !== undefined);
+	await page.waitForTimeout(800);
+	const target = mode === "worker" ? await coreWorker() : page;
+	const scope = mode === "worker" ? "self" : "window";
+	const lose = new Function(`const c = ${scope}.__core; const ext = c.gl.gl.getExtension("WEBGL_lose_context"); ext.loseContext(); ${scope}.__ext = ext; return [...c.tiles.values()].filter((t) => t.tex).length;`);
+	const before = await target.evaluate(lose);
+	await page.waitForTimeout(300);
+	await target.evaluate(new Function(`${scope}.__ext.restoreContext();`));
+	await page.mouse.move(640, 430);
+	await page.mouse.wheel(0, 40);
+	await page.waitForTimeout(1200);
+	const after = await target.evaluate(new Function(`const c = ${scope}.__core; return { lost: c.gl.lost, tiles: [...c.tiles.values()].filter((t) => t.tex).length };`));
+	const [paper] = await pixels([[640, 300]]);
+	const lostEvent = await page.evaluate(() => window.__errors.some((e) => e.code === "gpu" && e.phase === "render"));
+	check(`context loss and restore (${mode})`, before > 0 && !after.lost && after.tiles > 0 && lostEvent && paper[0] > 200, `${before} tiles, then ${after.tiles}; page pixel rgb(${paper})`);
+}
+errors.splice(0, errors.length, ...errors.filter((e) => !e.includes("WebGL context was lost")));
+
+// Fit-page jumps fit the destination page (links.pdf's last page is twice as tall).
+if (await has("links.pdf")) {
+	await page.goto(fixture("links.pdf", "&zoom=fit-page"));
+	await page.waitForFunction(() => window.__firstPaintMs !== undefined);
+	const fit = await page.evaluate(async () => {
+		const v = window.__viewer;
+		const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+		const before = v.camera.zoom;
+		await v.goToPage(14);
+		await wait(100); // the camera event follows on the next frame
+		const tall = v.camera.zoom;
+		const view = window.__all.findLast((e) => e.type === "view");
+		await v.goToPage(1);
+		await wait(100);
+		return { before, tall, back: v.camera.zoom, fit: view.fit, viewH: v.scrollState().viewportHeight };
+	});
+	check("fit-page navigation refits the destination", fit.tall * 1600 <= fit.viewH && fit.tall < fit.before * 0.6 && Math.abs(fit.back - fit.before) < 1e-6 && fit.fit === "page", JSON.stringify(fit));
+}
+
+// Mixed-direction lines: hit-test glyph boxes in visual order. Logical "abאבcd" is
+// drawn a b ב א c d (the Hebrew run reversed).
+const bidi = await page.evaluate(async (src) => {
+	const { PageText } = await import(`/@fs${src}/text.ts`);
+	const logical = "abאבcd";
+	const codes = Uint32Array.from([...logical].map((c) => c.codePointAt(0)));
+	const visualX = [0, 10, 30, 20, 40, 50]; // left edge of each logical char
+	const boxes = new Float32Array(codes.length * 4);
+	visualX.forEach((x, i) => boxes.set([x, 100, x + 10, 112], i * 4));
+	const t = new PageText(codes, boxes);
+	return [57, 53, 38, 32, 22, 2].map((x) => t.hitTest(x, 106));
+}, src);
+check("mixed-direction hit testing", bidi.join() === "6,5,2,3,4,0", bidi.join());
+
 check("no errors", errors.length === 0, errors.join(" | "));
 await browser.close();
