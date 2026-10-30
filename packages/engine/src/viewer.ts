@@ -296,9 +296,15 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				worker.addEventListener("message", onBoot);
 			});
 			// A worker script that fails to load never boots; say so instead of hanging.
+			// A worker that fails to load, or throws outside a request, is terminal:
+			// requests to it would never answer. Report it, then tear everything down.
 			worker.addEventListener("error", (ev) => {
-				// Async (after setup), so handleEvent exists; it also rejects `loaded`.
-				handleEvent({ type: "error", message: `lector-engine: ${name} worker failed${ev.message ? `: ${ev.message}` : " to load"}`, code: "worker", phase: "engine-load" });
+				if (destroyed) return;
+				const message = `lector-engine: ${name} worker failed${ev.message ? `: ${ev.message}` : " to load"}`;
+				const phase = opened ? "render" : "engine-load";
+				// Async (after setup), so handleEvent exists; before `ready` it also rejects `loaded`.
+				handleEvent({ type: "error", message, code: "worker", phase });
+				teardown(new EngineError(message, "worker", phase, typeof source === "string" ? source : undefined));
 			});
 			return { worker, booted };
 		};
@@ -394,10 +400,21 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			dead ??= err;
 			if (!opened) rejectLoaded(err);
 			for (const resolve of unlocks.splice(0)) resolve(false);
+			for (const resolve of flights.values()) resolve(false);
+			flights.clear();
 			for (const [id, p] of [...pending]) {
 				pending.delete(id);
 				p.reject(err);
 			}
+		};
+		/** Settles everything with `err` and releases every resource (destroy, or a dead worker). */
+		const teardown = (err: EngineError) => {
+			if (destroyed) return;
+			destroyed = true;
+			fail(err);
+			release();
+			core = null;
+			postToCore = () => {};
 		};
 		const progressFns = new Map<number, (r: SearchResults) => void>();
 		const flights = new Map<number, (landed: boolean) => void>();
@@ -500,7 +517,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		let nextFlight = 1;
 		const flight = (make: (id: number) => Command) =>
 			new Promise<boolean>((resolve) => {
-				if (destroyed) {
+				if (destroyed || dead) {
 					resolve(false);
 					return;
 				}
@@ -781,14 +798,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			},
 			destroy() {
 				if (destroyed) return;
-				destroyed = true;
-				for (const resolve of flights.values()) resolve(false);
-				flights.clear();
+				// Searches end as cancelled; everything else as destroyed.
 				for (const abort of [...searches.values()]) abort();
-				fail(new EngineError("lector-engine: the viewer was destroyed", "destroyed", "request"));
-				release();
-				core = null;
-				postToCore = () => {};
+				teardown(new EngineError("lector-engine: the viewer was destroyed", "destroyed", "request"));
 			},
 		};
 	}

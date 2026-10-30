@@ -312,11 +312,30 @@ else {
 	await page.goto(fixture("links.pdf", "&offscreen=0&workers=1"));
 	await page.waitForFunction(() => window.__firstPaintMs !== undefined);
 	const links = await page.evaluate(async () => {
-		await window.__viewer.pageText(0);
+		const v = window.__viewer;
+		await v.pageText(0);
 		const c = window.__core;
-		return { targets: (c.links.get(0) ?? []).map((l) => l.url ?? l.dest?.page).join(","), images: (c.images.get(0) ?? []).length / 4 };
+		const pageLinks = c.links.get(0) ?? [];
+		const tops = pageLinks.filter((l) => l.dest).map((l) => l.dest.top);
+		// Non-finite targets never reach the camera.
+		const before = { ...v.camera };
+		const nan = await v.goToPage(3, Number.NaN, { offset: Number.NaN });
+		await new Promise((r) => setTimeout(r, 100));
+		const reveal = await v.reveal(2, { x: Number.NaN, y: 0, w: 10, h: 10 });
+		v.zoomTo(Number.NaN);
+		await new Promise((r) => setTimeout(r, 100));
+		const cam = v.camera;
+		return {
+			targets: pageLinks.map((l) => l.url ?? l.dest?.page).join(","),
+			images: (c.images.get(0) ?? []).length / 4,
+			tops: tops.every((t) => Number.isFinite(t) && t > 80 && t < 100),
+			nan,
+			reveal,
+			finite: [cam.x, cam.y, cam.zoom].every(Number.isFinite) && cam.y > before.y,
+		};
 	});
-	check("links to 14 pages + images on one page", links.targets === "1,2,3,4,5,6,7,8,9,10,11,12,13,14,https://example.com/" && links.images === 1, JSON.stringify(links));
+	check("links to 14 pages + images on one page", links.targets === "1,2,3,4,5,6,7,8,9,10,11,12,13,14,https://example.com/" && links.images === 1 && links.tops, JSON.stringify(links));
+	check("non-finite navigation is ignored", links.nan === true && links.reveal === false && links.finite, JSON.stringify(links));
 }
 // Vertical (CJK top-to-bottom) lines, from synthetic char boxes: two columns, right to left.
 const vertical = await page.evaluate(async (src) => {
@@ -362,6 +381,10 @@ check("interceptFind emits find", await page.evaluate(() => window.__all.some((e
 
 // ---------------------------------------------------------------- lifecycle
 const src = new URL("../src", import.meta.url).pathname;
+const coreWorkerOf = async (p) => {
+	for (const w of p.workers()) if (await w.evaluate(() => !!self.__core).catch(() => false)) return w;
+	return null;
+};
 const settle = (p, ms = 8000) => Promise.race([p, new Promise((r) => setTimeout(() => r("pending"), ms))]);
 
 // Construction is transactional; destroy and load failures settle every request.
@@ -412,6 +435,13 @@ const life = await page.evaluate(async (src) => {
 	const failed = await timeout(code(b.pageText(0)));
 	b.destroy();
 	bad.remove();
+	// A worker that never loads: loaded rejects, and everything after settles at once.
+	const broken = host();
+	const w = await createViewer(broken, "/cadbots.pdf", { wasmUrl, workerUrls: { raster: "/missing-raster-worker.js", core: workerUrls.core }, offscreen: false, workers: 1 });
+	const preBoot = await timeout(Promise.all([code(w.loaded), w.goToPage(1), code(w.pageText(0))]).then((r) => r.join()));
+	const brokenLeft = broken.children.length;
+	w.destroy();
+	broken.remove();
 	window.__core = demoCore;
 	// cancelSearch removes the caller's abort listener and leaves no search running.
 	const viewer = window.__viewer;
@@ -427,11 +457,13 @@ const life = await page.evaluate(async (src) => {
 	const cancelled = await timeout(search);
 	// Duplicate thumbnail requests share one job; both resolve.
 	const thumbs = await timeout(Promise.all([viewer.thumbnail(2, 160), viewer.thumbnail(2, 160)]).then((t) => t.map((b) => b?.width)));
-	return { partial, partialLeft, terminated, destroyed, after, earlyLeft, failed, cancelled, removed, searching: viewer.isSearching, thumbs };
+	return { partial, partialLeft, terminated, destroyed, after, earlyLeft, failed, preBoot, brokenLeft, cancelled, removed, searching: viewer.isSearching, thumbs };
 }, src);
 check("partial construction failure cleans up", life.partial === "factory failed" && life.partialLeft.children === 0 && life.partialLeft.tabindex === null && life.partialLeft.overflow === "" && life.terminated.join() === "lector-raster-0", JSON.stringify({ ...life.partialLeft, terminated: life.terminated }));
 check("destroy settles pending requests", life.destroyed.join() === "destroyed,destroyed,destroyed,destroyed,destroyed" && life.after === "destroyed,false,false" && life.earlyLeft === 0, `${life.destroyed.join()}; after: ${life.after}`);
 check("load failure settles pending requests", life.failed === "parse", life.failed);
+errors.splice(0, errors.length, ...errors.filter((e) => !/missing-raster-worker|module script|MIME type/i.test(e)));
+check("worker that never loads: everything settles", life.preBoot === "worker,false,worker" && life.brokenLeft === 0, `${life.preBoot}; ${life.brokenLeft} elements left`);
 check("cancelSearch cleans up", life.cancelled === "AbortError" && life.removed === 1 && !life.searching, `${life.cancelled}, abort listener removed ${life.removed}x`);
 check("duplicate thumbnails both resolve", Array.isArray(life.thumbs) && life.thumbs.join() === "160,160", JSON.stringify(life.thumbs));
 
@@ -498,16 +530,40 @@ check("destroy during autoscroll stops frames", loop.scrolling > 5 && loop.after
 // Worker compositor: destroy disposes the core and every worker exits.
 await page.goto(fixture("cadbots.pdf"));
 await page.waitForFunction(() => window.__firstPaintMs !== undefined);
+// A compositor worker that dies after ready: pending requests and flights settle,
+// later ones reject, and the viewer tears down.
+{
+	const core = await coreWorkerOf(page);
+	await core.evaluate(() => {
+		self.__core.command = () => {}; // stop answering, like a wedged worker
+	});
+	await page.evaluate(() => {
+		const v = window.__viewer;
+		const code = (p) => p.then(() => "resolved", (e) => e.code ?? e.name);
+		window.__dying = Promise.all([code(v.pageText(3)), v.goToPage(5)]);
+	});
+	await page.waitForTimeout(100);
+	await core.evaluate(() => setTimeout(() => {
+		throw new Error("injected compositor failure");
+	}));
+	const died = await settle(page.evaluate(async () => {
+		const v = window.__viewer;
+		const [[text, flight], later] = await Promise.all([window.__dying, v.pageText(0).then(() => "resolved", (e) => e.code)]);
+		return `${text},${flight},${later},${document.querySelectorAll("#viewer canvas").length}`;
+	}));
+	await page.waitForTimeout(1500);
+	check("compositor failure after ready settles and tears down", died === "worker,false,worker,0" && page.workers().length === 0, `${died}; ${page.workers().length} workers`);
+	errors.splice(0, errors.length, ...errors.filter((e) => !e.includes("injected compositor failure") && !e.includes("lector-compositor worker failed")));
+	await page.goto(fixture("cadbots.pdf"));
+	await page.waitForFunction(() => window.__firstPaintMs !== undefined);
+}
 const workersBefore = page.workers().length;
 await page.evaluate(() => window.__viewer.destroy());
 await page.waitForTimeout(1500);
 check("destroy ends the compositor worker", workersBefore >= 3 && page.workers().length === 0, `${workersBefore} workers, then ${page.workers().length}`);
 
 // WebGL context loss: rendering stops, then resumes with re-uploaded tiles.
-const coreWorker = async () => {
-	for (const w of page.workers()) if (await w.evaluate(() => !!self.__core).catch(() => false)) return w;
-	return null;
-};
+const coreWorker = () => coreWorkerOf(page);
 for (const mode of ["main thread", "worker"]) {
 	await page.goto(fixture("cadbots.pdf", mode === "worker" ? "" : "&offscreen=0"));
 	await page.waitForFunction(() => window.__paintedMs !== undefined);
