@@ -5,9 +5,9 @@ import { dirname, join } from "node:path";
 
 const require = createRequire(import.meta.url);
 
-// The bundled PDFium glue resolves `new URL("pdfium.wasm", import.meta.url)`,
-// and vite-wasm.js imports it, so it lives next to raster-worker.js.
-await copyFile(require.resolve("@embedpdf/pdfium/pdfium.wasm"), "dist/pdfium.wasm");
+// The PDFium wasm trimmed to the functions the engine calls (scripts/pdfium.mjs).
+// vite-wasm.js imports it, so it lives next to raster-worker.js.
+await copyFile("src/pdfium/pdfium.wasm", "dist/pdfium.wasm");
 // PDFium's binary and EmbedPDF's glue ship under their own licenses (see THIRD_PARTY_NOTICES.md).
 const pdfiumDir = dirname(dirname(require.resolve("@embedpdf/pdfium/pdfium.wasm")));
 await copyFile(join(pdfiumDir, "LICENSE.pdfium"), "dist/LICENSE.pdfium");
