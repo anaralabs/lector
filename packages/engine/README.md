@@ -301,4 +301,4 @@ The demo sets `globalThis.__lectorEngineDebug = true`, which exposes the core as
 
 ## License
 
-MIT (see `LICENSE`). `pdfium.wasm` is PDFium (BSD-3-Clause and Apache-2.0) built by `@embedpdf/pdfium` (MIT); their licenses ship as `dist/LICENSE.pdfium` and `dist/LICENSE.embedpdf`, and `THIRD_PARTY_NOTICES.md` lists the libraries compiled into PDFium.
+MIT (see `LICENSE`). `pdfium.wasm` is PDFium (BSD-3-Clause and Apache-2.0) built by `@embedpdf/pdfium` (MIT); their licenses ship as `dist/LICENSE.pdfium` and `dist/LICENSE.embedpdf`, and `THIRD_PARTY_NOTICES.md` holds the full license texts of the libraries compiled into the wasm (and which of them are inferred rather than confirmed).

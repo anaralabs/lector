@@ -40,6 +40,23 @@ try {
 	}
 	assert.match(await readFile(join(packed, "dist/LICENSE.pdfium"), "utf8"), /PDFium Authors/);
 	assert.match(await readFile(join(packed, "dist/LICENSE.embedpdf"), "utf8"), /MIT License/);
+	// Each library compiled into pdfium.wasm: its license text, not just a link.
+	const notices = await readFile(join(packed, "THIRD_PARTY_NOTICES.md"), "utf8");
+	const required = {
+		FreeType: [/The FreeType Project LICENSE/, /Portions of this software are copyright © The FreeType Project/],
+		OpenJPEG: [/Universite catholique de Louvain/, /Redistributions in binary form must reproduce the above copyright/],
+		"Little CMS": [/Copyright \(c\) \d{4} Marti Maria Saguer/, /The above copyright notice and this permission notice shall be/],
+		libpng: [/PNG Reference Library License version 2/, /The Contributing Authors and Group 42, Inc\. specifically permit/],
+		zlib: [/Jean-loup Gailly and Mark Adler/, /This notice may not be removed or altered from any source distribution/],
+		"libjpeg-turbo": [/libjpeg-turbo Licenses/, /The Modified \(3-clause\) BSD License/, /this software is based in part on the work of\s+the Independent JPEG Group/],
+		AGG: [/Anti-Grain Geometry - Version 2\.3/, /provided this copyright notice appears in all copies/],
+		bigint: [/placing it in the public domain/],
+		Emscripten: [/Emscripten is available under 2 licenses/, /University of Illinois\/NCSA Open Source License/],
+		musl: [/Rich Felker, et al\./],
+	};
+	for (const [library, patterns] of Object.entries(required)) {
+		for (const pattern of patterns) assert.match(notices, pattern, `THIRD_PARTY_NOTICES.md: ${library} license text`);
+	}
 
 	// Workers are standalone: no static or dynamic imports of sibling files.
 	for (const worker of ["raster-worker.js", "core-worker.js"]) {
