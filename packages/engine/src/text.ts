@@ -180,27 +180,45 @@ export class PageText {
 	}
 
 	/**
-	 * Caret before the first char whose leading half is past the point: the
-	 * left half for LTR chars, the right half for RTL chars (mixed runs follow
-	 * each char's own direction), the top half in vertical lines.
+	 * Caret at a point on a line. Horizontal lines hit-test the glyph under (or
+	 * nearest to) x in visual order, then map it to a logical caret: before the
+	 * char on its leading half (the left half of an LTR char, the right half of
+	 * an RTL one), after it on the trailing half. Mixed runs (Latin in Hebrew,
+	 * Hebrew in Latin) are not visually monotonic in logical order, so the
+	 * glyph boxes decide, not a logical scan. Vertical lines go top to bottom.
 	 */
 	private caretInLine(line: Line, x: number, y: number) {
 		const { boxes } = this;
-		const vertical = line.dir === "ttb";
-		const rtl = line.dir === "rtl";
-		let last = line.start;
+		if (line.dir === "ttb") {
+			let last = line.start;
+			for (let i = line.start; i < line.end; i++) {
+				if (!this.hasBox(i)) continue;
+				if (y < (boxes[i * 4 + 1]! + boxes[i * 4 + 3]!) / 2) return i;
+				last = i + 1;
+			}
+			return last;
+		}
+		let best = -1;
+		let bestD = Infinity;
+		let bestMid = Infinity;
 		for (let i = line.start; i < line.end; i++) {
 			if (!this.hasBox(i)) continue;
-			if (vertical) {
-				if (y < (boxes[i * 4 + 1]! + boxes[i * 4 + 3]!) / 2) return i;
-			} else {
-				const mid = (boxes[i * 4]! + boxes[i * 4 + 2]!) / 2;
-				const charRtl = this.isRtl(i) || (rtl && !STRONG_LTR.test(String.fromCodePoint(this.codes[i]!)) && !/\p{N}/u.test(String.fromCodePoint(this.codes[i]!)));
-				if (charRtl ? x > mid : x < mid) return i;
+			const l = boxes[i * 4]!;
+			const r = boxes[i * 4 + 2]!;
+			const d = x < l ? l - x : x > r ? x - r : 0;
+			// Loose boxes overlap: among glyphs under the point, the nearest centre wins.
+			const mid = Math.abs(x - (l + r) / 2);
+			if (d < bestD || (d === bestD && mid < bestMid)) {
+				best = i;
+				bestD = d;
+				bestMid = mid;
 			}
-			last = i + 1;
 		}
-		return last;
+		if (best < 0) return line.start;
+		const ch = String.fromCodePoint(this.codes[best]!);
+		const rtl = this.isRtl(best) || (line.dir === "rtl" && !STRONG_LTR.test(ch) && !/\p{N}/u.test(ch));
+		const mid = (boxes[best * 4]! + boxes[best * 4 + 2]!) / 2;
+		return (rtl ? x > mid : x < mid) ? best : best + 1;
 	}
 
 	/** Selection rects for chars [from, to), one per line, in page points. */
