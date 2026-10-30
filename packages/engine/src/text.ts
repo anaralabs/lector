@@ -69,8 +69,11 @@ export class PageText {
 	/**
 	 * Groups chars into lines from their boxes, in PDFium's (logical) order.
 	 * Horizontal lines break when a char leaves the line's band or jumps back
-	 * against the reading direction (a new column). A line whose second char
-	 * sits below the first, in the same column, is vertical (CJK top to
+	 * against the reading direction (a new column). A run against the line's
+	 * direction (Hebrew inside Latin, Latin or digits inside Hebrew) is laid
+	 * out mirrored: it starts at its far edge and moves back, so it is checked
+	 * glyph by glyph against its own direction instead. A line whose second
+	 * char sits below the first, in the same column, is vertical (CJK top to
 	 * bottom) and continues while chars keep going down that column.
 	 */
 	private buildLines() {
@@ -79,6 +82,8 @@ export class PageText {
 		/** the line's direction is settled (first strong char seen / orientation known) */
 		let dirSet = false;
 		let lastT = 0;
+		/** the embedded opposite-direction run in progress: where the line ended when it began, and its last glyph */
+		let run = null as { floor: number; l: number; r: number } | null;
 		const close = () => {
 			if (line) this.lines.push(line);
 			line = null;
@@ -116,17 +121,32 @@ export class PageText {
 					breaks = false;
 				} else if (cur.dir === "ttb") {
 					breaks = hOverlap < minW * 0.5 || t < lastT - w * 0.5 || t - cur.b > w * 2;
-				} else if (cur.dir === "rtl") {
-					// RTL runs move left; digits and Latin inside them may step right a little.
-					breaks = vOverlap < minH * 0.5 || l > cur.r + h * 0.5 || r < cur.l - h * 2;
 				} else {
-					breaks = vOverlap < minH * 0.5 || l < cur.r - h * 2;
+					const rtlLine = cur.dir === "rtl";
+					const prev = run;
+					const kind = RTL.test(ch) ? "rtl" : STRONG_LTR.test(ch) || /\p{N}/u.test(ch) ? "ltr" : "neutral";
+					const against = kind === (rtlLine ? "ltr" : "rtl");
+					// RTL lines move left (Latin and digits may step right a little); LTR lines move right.
+					const leavesBase = rtlLine ? l > cur.r + h * 0.5 || r < cur.l - h * 2 : l < cur.r - h * 2;
+					// A run starts beyond the line's far edge, then moves back towards it.
+					const leavesRun = !prev
+						? rtlLine
+							? r > cur.l + h * 2
+							: l < cur.r - h * 2
+						: rtlLine
+							? r < prev.l - h * 0.5 || l > prev.floor + h * 2
+							: l > prev.r + h * 0.5 || r < prev.floor - h * 2;
+					// Neutrals (spaces, punctuation) inside a run stay in it, or end it.
+					const inRun: boolean = against || (!!prev && kind === "neutral" && !leavesRun);
+					breaks = vOverlap < minH * 0.5 || (inRun ? leavesRun : leavesBase);
+					if (!breaks) run = inRun ? { floor: prev?.floor ?? (rtlLine ? cur.l : cur.r), l, r } : null;
 				}
 				if (breaks) close();
 			}
 			if (!line) {
 				line = { start: i, end: i + 1, l, t, r, b };
 				dirSet = false;
+				run = null;
 			} else {
 				line.end = i + 1;
 				line.l = Math.min(line.l, l);

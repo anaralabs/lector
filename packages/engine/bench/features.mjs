@@ -613,9 +613,33 @@ const bidi = await page.evaluate(async (src) => {
 	const boxes = new Float32Array(codes.length * 4);
 	visualX.forEach((x, i) => boxes.set([x, 100, x + 10, 112], i * 4));
 	const t = new PageText(codes, boxes);
-	return [57, 53, 38, 32, 22, 2].map((x) => t.hitTest(x, 106));
+	const short = [57, 53, 38, 32, 22, 2].map((x) => t.hitTest(x, 106)).join();
+	// Longer runs: one line each, carets by glyph. The first strong char sets the
+	// line direction: Latin with an 8-char Hebrew run, then Hebrew with a 6-char Latin run.
+	const line = (logical, visualX, rtl) => {
+		const cs = Uint32Array.from([...logical].map((c) => c.codePointAt(0)));
+		const bs = new Float32Array(cs.length * 4);
+		visualX.forEach((x, i) => bs.set([x, 100, x + 10, 112], i * 4));
+		const p = new PageText(cs, bs);
+		return { lines: p.lines.map((l) => `${l.dir ?? "ltr"}:${l.start}-${l.end}`).join(" "), p, rtl };
+	};
+	// a b | ח ז ו ה ד ג ב א | c d  (logical: a b א..ח c d)
+	const ltr = line("abאבגדהוזחcd", [0, 10, 90, 80, 70, 60, 50, 40, 30, 20, 100, 110]);
+	// ד ג | a b c d e f | ב א  (logical: א ב a..f ג ד)
+	const rtl = line("אבabcdefגד", [90, 80, 20, 30, 40, 50, 60, 70, 10, 0]);
+	return {
+		short,
+		ltrLines: ltr.lines,
+		ltr: [42, 48, 117, 2].map((x) => ltr.p.hitTest(x, 106)).join(),
+		rtlLines: rtl.lines,
+		rtl: [42, 48, 98, 2].map((x) => rtl.p.hitTest(x, 106)).join(),
+	};
 }, src);
-check("mixed-direction hit testing", bidi.join() === "6,5,2,3,4,0", bidi.join());
+check(
+	"mixed-direction hit testing",
+	bidi.short === "6,5,2,3,4,0" && bidi.ltrLines === "ltr:0-12" && bidi.ltr === "8,7,12,0" && bidi.rtlLines === "rtl:0-10" && bidi.rtl === "4,5,0,10",
+	JSON.stringify(bidi),
+);
 
 check("no errors", errors.length === 0, errors.join(" | "));
 await browser.close();
