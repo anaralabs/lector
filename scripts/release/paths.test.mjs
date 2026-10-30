@@ -101,6 +101,26 @@ test("lector: its folder, root inputs and lockfile changes beyond the engine; en
 	assert.deepEqual(pick(enginePaths, dir, commits), ["fix(engine): add mupdf", "fix: patch an advisory everywhere"]);
 });
 
+test("lockfile reachability follows dependency aliases", () => {
+	const { dir, commit } = repo();
+	// Lector's x reaches y through an alias, and y reaches z; the engine only uses pdf-lib.
+	const aliased = (zVersion, pdfLib) =>
+		lockfile({
+			importers: { "packages/engine": { "pdf-lib": pdfLib }, "packages/lector": { x: "1.0.0" } },
+			snapshots: { [`pdf-lib@${pdfLib}`]: {}, "x@1.0.0": { "y-alias": "y@1.0.0" }, "y@1.0.0": { z: zVersion }, [`z@${zVersion}`]: {} },
+		});
+	const commits = [
+		commit("chore: base", { "pnpm-lock.yaml": aliased("1.0.0", "1.17.1") }),
+		commit("fix(deps): lector transitive through an alias", { "pnpm-lock.yaml": aliased("1.0.1", "1.17.1") }),
+		commit("fix(deps): engine bump plus aliased lector transitive", { "pnpm-lock.yaml": aliased("1.0.2", "1.18.0") }),
+		commit("fix(deps): engine-only bump", { "pnpm-lock.yaml": aliased("1.0.2", "1.19.0") }),
+	];
+	assert.deepEqual(pick(lectorPaths, dir, commits.slice(1)), [
+		"fix(deps): lector transitive through an alias",
+		"fix(deps): engine bump plus aliased lector transitive",
+	]);
+});
+
 test("merge commits are compared with their first parent", () => {
 	const { dir, git, commit } = repo();
 	git("checkout", "-q", "-b", "topic");

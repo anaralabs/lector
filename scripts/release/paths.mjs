@@ -68,18 +68,21 @@ function parseLock(text) {
 			depName = unquote(line.trim().slice(0, -1));
 		} else if (importer && inDeps && /^ {8}version:/.test(line)) {
 			const version = line.trim().slice("version:".length).trim();
-			if (!version.startsWith("link:")) importers.get(importer).push(`${depName}@${unquote(version)}`);
+			if (!version.startsWith("link:")) importers.get(importer).push(depKey(depName, unquote(version)));
 		} else if (entry && /^ {4}\S/.test(line)) {
 			inDeps = /^ {4}(dependencies|optionalDependencies):/.test(line);
 		} else if (entry && inDeps && /^ {6}\S/.test(line)) {
 			const m = /^\s+('[^']+'|"[^"]+"|[^:\s]+):\s*(.+)$/.exec(line);
-			if (m && !m[2].startsWith("link:")) deps.get(entry).push(`${unquote(m[1])}@${unquote(m[2]).replace(/^\//, "")}`);
+			if (m && !m[2].startsWith("link:")) deps.get(entry).push(depKey(unquote(m[1]), unquote(m[2]).replace(/^\//, "")));
 		}
 		if (entry) entries.set(`${top}:${entry}`, `${entries.get(`${top}:${entry}`) ?? ""}${line}\n`);
 		else sections.set(key, `${sections.get(key) ?? ""}${line}\n`);
 	}
 	return { sections, entries, importers, deps };
 }
+
+/** "name@version", or the target itself for an alias ("alias: real@1.0.0"). */
+const depKey = (name, version) => (/^(@[^@/]+\/)?[^@(/]+@/.test(version) ? version : `${name}@${version}`);
 
 /** Every entry key reachable from the given importers, with and without peers. */
 function reachable(lock, from) {
