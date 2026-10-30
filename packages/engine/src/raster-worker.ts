@@ -167,12 +167,20 @@ function readDest(dest: number): Link["dest"] {
 	// FPDF_BOOL hasX, hasY, hasZoom; FS_FLOAT x, y, zoom
 	const mem = P.pdfium.wasmExports.malloc(24);
 	let top: number | undefined;
-	if (P.FPDFDest_GetLocationInPage(dest, mem, mem + 4, mem + 8, mem + 12, mem + 16, mem + 20)) {
-		const ints = new Int32Array(heap().buffer, mem, 3);
-		const floats = new Float32Array(heap().buffer, mem + 12, 3);
-		if (ints[1] && page < pageCount) top = Math.max(0, transformFor(page)(ints[0] ? floats[0]! : 0, floats[1]!)[1]);
-	}
+	const found = P.FPDFDest_GetLocationInPage(dest, mem, mem + 4, mem + 8, mem + 12, mem + 16, mem + 20);
+	// Copied out before anything else runs: loading the destination page (transformFor)
+	// can grow the WASM heap, which detaches views over the old buffer.
+	const ints = new Int32Array(heap().buffer, mem, 3);
+	const floats = new Float32Array(heap().buffer, mem + 12, 3);
+	const hasX = !!ints[0];
+	const hasY = !!ints[1];
+	const x = floats[0]!;
+	const y = floats[1]!;
 	P.pdfium.wasmExports.free(mem);
+	if (found && hasY && page < pageCount) {
+		const t = transformFor(page)(hasX ? x : 0, y)[1];
+		if (Number.isFinite(t)) top = Math.max(0, t);
+	}
 	return { page, top };
 }
 

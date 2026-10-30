@@ -584,6 +584,7 @@ export class ViewerCore {
 	private revealTarget(page: number, rect: Rect, align: RevealAlign = "auto", ifNeeded = false, offset = 0): { cam: Camera; fit: Fit } | null {
 		const r = this.layout[page];
 		if (!r || this.vw === 0) return null;
+		if (![rect.x, rect.y, rect.w, rect.h, offset].every(Number.isFinite)) return null;
 		const m = REVEAL_MARGIN;
 		const cur = this.cam;
 		const dx0 = r.x + rect.x;
@@ -616,6 +617,9 @@ export class ViewerCore {
 	private gotoTarget(page: number, top = 0, offset?: number): { cam: Camera; fit: Fit } | null {
 		const r = this.layout[page];
 		if (!r) return null;
+		// Never let a bad destination (NaN from a broken link) reach the camera.
+		if (!Number.isFinite(top)) top = 0;
+		if (offset !== undefined && !Number.isFinite(offset)) offset = undefined;
 		// Fit-page fits the destination page, whatever the size of the one in view.
 		const z = this.fitMode === "page" ? this.clampZoom(this.fitZoom("page", page)) : this.cam.zoom;
 		if (this.fitMode === "page" && !top && offset === undefined) return { cam: this.clampCam(this.fitPageCam(page, z)), fit: "page" };
@@ -1180,6 +1184,7 @@ export class ViewerCore {
 		if (this.disposed) return;
 		switch (cmd.type) {
 			case "zoom":
+				if (!Number.isFinite(cmd.zoom)) return;
 				this.cancelFlight();
 				this.userZoom(cmd.zoom, cmd.x ?? this.vw / 2, cmd.y ?? this.vh / 2);
 				return;
@@ -1201,6 +1206,7 @@ export class ViewerCore {
 				return;
 			}
 			case "scroll-to": {
+				if (!Number.isFinite(cmd.fraction)) return;
 				this.cancelFlight();
 				const viewH = this.vh / this.cam.zoom;
 				this.cam.y = Math.max(0, Math.min(1, cmd.fraction)) * Math.max(0, this.docH - viewH);
@@ -1266,6 +1272,7 @@ export class ViewerCore {
 				this.pool.unlock(cmd.password);
 				return;
 			case "scroll-by":
+				if (!Number.isFinite(cmd.dx) || !Number.isFinite(cmd.dy)) return;
 				this.cancelFlight();
 				this.panBy(cmd.dx, cmd.dy);
 				return;
