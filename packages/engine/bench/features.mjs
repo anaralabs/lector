@@ -305,6 +305,19 @@ else {
 	});
 	check("RTL lines and carets", rtl.lines === "ltr,rtl,rtl" && rtl.right && rtl.left && rtl.layer === 2, JSON.stringify(rtl));
 }
+// A contents page linking to more pages than a worker's page cache holds: its
+// links and images are read while the destinations' pages load (and evict).
+if (!(await has("links.pdf"))) skip("links to many pages", "links.pdf");
+else {
+	await page.goto(fixture("links.pdf", "&offscreen=0&workers=1"));
+	await page.waitForFunction(() => window.__firstPaintMs !== undefined);
+	const links = await page.evaluate(async () => {
+		await window.__viewer.pageText(0);
+		const c = window.__core;
+		return { targets: (c.links.get(0) ?? []).map((l) => l.url ?? l.dest?.page).join(","), images: (c.images.get(0) ?? []).length / 4 };
+	});
+	check("links to 14 pages + images on one page", links.targets === "1,2,3,4,5,6,7,8,9,10,11,12,13,14,https://example.com/" && links.images === 1, JSON.stringify(links));
+}
 // Vertical (CJK top-to-bottom) lines, from synthetic char boxes: two columns, right to left.
 const vertical = await page.evaluate(async (src) => {
 	const { PageText } = await import(`/@fs${src}/text.ts`);

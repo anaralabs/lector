@@ -43,6 +43,11 @@ function sizeOf(index: number) {
 	return size;
 }
 const pages = new Map<number, number>(); // LRU: page index -> FPDF_PAGE
+/**
+ * Pages in use by the current job: eviction skips them. Text extraction
+ * loads link destinations' pages while it still holds its own handle.
+ */
+const pinned = new Set<number>();
 
 function loadPage(index: number): number {
 	const hit = pages.get(index);
@@ -54,13 +59,31 @@ function loadPage(index: number): number {
 	const page = P.FPDF_LoadPage(doc, index);
 	if (form) P.FORM_OnAfterLoadPage(page, form);
 	pages.set(index, page);
-	if (pages.size > PAGE_CACHE) {
-		const [oldIndex, oldPage] = pages.entries().next().value as [number, number];
+	trimPages();
+	return page;
+}
+
+function trimPages() {
+	for (const [oldIndex, oldPage] of pages) {
+		if (pages.size <= PAGE_CACHE) return;
+		if (pinned.has(oldIndex)) continue;
 		pages.delete(oldIndex);
 		if (form) P.FORM_OnBeforeClosePage(oldPage, form);
 		P.FPDF_ClosePage(oldPage);
 	}
-	return page;
+}
+
+/** Runs `fn` with page `index` loaded and safe from eviction. */
+function withPage<T>(index: number, fn: (page: number) => T): T {
+	const page = loadPage(index);
+	const held = pinned.has(index);
+	pinned.add(index);
+	try {
+		return fn(page);
+	} finally {
+		if (!held) pinned.delete(index);
+		trimPages();
+	}
 }
 
 function send(msg: FromRaster, transfer: Transferable[] = []) {
@@ -210,8 +233,11 @@ function readOutline(parent: number, depth: number): OutlineItem[] {
 }
 
 function extractText(msg: Extract<ToRaster, { t: "text" }>) {
+	withPage(msg.page, (page) => extractPageText(msg, page));
+}
+
+function extractPageText(msg: Extract<ToRaster, { t: "text" }>, page: number) {
 	const t0 = performance.now();
-	const page = loadPage(msg.page);
 	const xf = transformFor(msg.page);
 	const tp = P.FPDFText_LoadPage(page);
 	const n = Math.max(0, P.FPDFText_CountChars(tp));
