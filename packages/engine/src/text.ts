@@ -82,8 +82,12 @@ export class PageText {
 		/** the line's direction is settled (first strong char seen / orientation known) */
 		let dirSet = false;
 		let lastT = 0;
-		/** the embedded opposite-direction run in progress: where the line ended when it began, and its last glyph */
-		let run = null as { floor: number; l: number; r: number } | null;
+		/**
+		 * The embedded opposite-direction run in progress: the line's far edge when
+		 * it began (`floor`) and the run's own far edge (`edge`: its right in an LTR
+		 * line, its left in an RTL one). Its glyphs stay between the two.
+		 */
+		let run = null as { floor: number; edge: number } | null;
 		const close = () => {
 			if (line) this.lines.push(line);
 			line = null;
@@ -124,8 +128,9 @@ export class PageText {
 				} else {
 					const rtlLine = cur.dir === "rtl";
 					const prev = run;
-					const kind = RTL.test(ch) ? "rtl" : STRONG_LTR.test(ch) || /\p{N}/u.test(ch) ? "ltr" : "neutral";
-					const against = kind === (rtlLine ? "ltr" : "rtl");
+					const kind = RTL.test(ch) ? "rtl" : STRONG_LTR.test(ch) ? "ltr" : /\p{N}/u.test(ch) ? "num" : "neutral";
+					// Digits run left to right, so in an RTL line they form a run like Latin.
+					const against = rtlLine ? kind === "ltr" || kind === "num" : kind === "rtl";
 					// RTL lines move left (Latin and digits may step right a little); LTR lines move right.
 					const leavesBase = rtlLine ? l > cur.r + h * 0.5 || r < cur.l - h * 2 : l < cur.r - h * 2;
 					// A run starts beyond the line's far edge, then moves back towards it.
@@ -134,12 +139,18 @@ export class PageText {
 							? r > cur.l + h * 2
 							: l < cur.r - h * 2
 						: rtlLine
-							? r < prev.l - h * 0.5 || l > prev.floor + h * 2
-							: l > prev.r + h * 0.5 || r < prev.floor - h * 2;
-					// Neutrals (spaces, punctuation) inside a run stay in it, or end it.
-					const inRun: boolean = against || (!!prev && kind === "neutral" && !leavesRun);
+							? l > prev.floor + h * 2 || r < prev.edge - h * 0.5
+							: r < prev.floor - h * 2 || l > prev.edge + h * 0.5;
+					// Neutrals inside a run stay in it, and so do numbers inside an RTL run
+					// in an LTR line (a nested left-to-right level), unless they leave it.
+					const nested = !rtlLine && kind === "num";
+					const inRun: boolean = against || (!!prev && (kind === "neutral" || nested) && !leavesRun);
 					breaks = vOverlap < minH * 0.5 || (inRun ? leavesRun : leavesBase);
-					if (!breaks) run = inRun ? { floor: prev?.floor ?? (rtlLine ? cur.l : cur.r), l, r } : null;
+					if (!breaks) {
+						run = inRun
+							? { floor: prev?.floor ?? (rtlLine ? cur.l : cur.r), edge: prev ? (rtlLine ? Math.min(prev.edge, l) : Math.max(prev.edge, r)) : rtlLine ? l : r }
+							: null;
+					}
 				}
 				if (breaks) close();
 			}
@@ -196,6 +207,19 @@ export class PageText {
 				best = line;
 			}
 		}
+		// Lines that overlap the point's band (split mixed-direction runs): the one
+		// with the nearest glyph wins, not the first in logical order.
+		if (best.dir !== "ttb" && y >= best.t && y <= best.b) {
+			let nearest = Infinity;
+			for (const line of this.lines) {
+				if (line.dir === "ttb" || y < line.t || y > line.b) continue;
+				const d = this.glyphDistance(line, x);
+				if (d < nearest) {
+					nearest = d;
+					best = line;
+				}
+			}
+		}
 		return this.caretInLine(best, x, y);
 	}
 
@@ -207,6 +231,18 @@ export class PageText {
 	 * Hebrew in Latin) are not visually monotonic in logical order, so the
 	 * glyph boxes decide, not a logical scan. Vertical lines go top to bottom.
 	 */
+	/** Horizontal distance from x to the nearest glyph of a line. */
+	private glyphDistance(line: Line, x: number) {
+		let d = Infinity;
+		for (let i = line.start; i < line.end; i++) {
+			if (!this.hasBox(i)) continue;
+			const l = this.boxes[i * 4]!;
+			const r = this.boxes[i * 4 + 2]!;
+			d = Math.min(d, x < l ? l - x : x > r ? x - r : 0);
+		}
+		return d;
+	}
+
 	private caretInLine(line: Line, x: number, y: number) {
 		const { boxes } = this;
 		if (line.dir === "ttb") {

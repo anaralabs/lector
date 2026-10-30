@@ -627,17 +627,21 @@ const bidi = await page.evaluate(async (src) => {
 	const ltr = line("abאבגדהוזחcd", [0, 10, 90, 80, 70, 60, 50, 40, 30, 20, 100, 110]);
 	// ד ג | a b c d e f | ב א  (logical: א ב a..f ג ד)
 	const rtl = line("אבabcdefגד", [90, 80, 20, 30, 40, 50, 60, 70, 10, 0]);
+	// Digits inside a Hebrew run inside Latin: a b | ו ה ד 1 2 3 ג ב א | c d
+	const nested = line("abאבג123דהוcd", [0, 10, 100, 90, 80, 50, 60, 70, 40, 30, 20, 110, 120]);
 	return {
 		short,
 		ltrLines: ltr.lines,
 		ltr: [42, 48, 117, 2].map((x) => ltr.p.hitTest(x, 106)).join(),
 		rtlLines: rtl.lines,
 		rtl: [42, 48, 98, 2].map((x) => rtl.p.hitTest(x, 106)).join(),
+		nestedLines: nested.lines,
+		nested: [42, 48, 52, 68, 125].map((x) => nested.p.hitTest(x, 106)).join(),
 	};
 }, src);
 check(
 	"mixed-direction hit testing",
-	bidi.short === "6,5,2,3,4,0" && bidi.ltrLines === "ltr:0-12" && bidi.ltr === "8,7,12,0" && bidi.rtlLines === "rtl:0-10" && bidi.rtl === "4,5,0,10",
+	bidi.short === "6,5,2,3,4,0" && bidi.ltrLines === "ltr:0-12" && bidi.ltr === "8,7,12,0" && bidi.rtlLines === "rtl:0-10" && bidi.rtl === "4,5,0,10" && bidi.nestedLines === "ltr:0-13" && bidi.nested === "9,8,5,7,13",
 	JSON.stringify(bidi),
 );
 
