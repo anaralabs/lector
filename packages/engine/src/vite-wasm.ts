@@ -3,5 +3,5 @@
 import core from "./core-worker.ts?worker&url";
 import raster from "./raster-worker.ts?worker&url";
 
-export { default } from "@embedpdf/pdfium/pdfium.wasm?url";
+export { default } from "./pdfium/pdfium.wasm?url";
 export const workerUrls = { raster, core };

@@ -24,7 +24,7 @@ import type { Rect, TextPoint } from "./text";
 import { TextLayer, type TextLayerLine } from "./text-layer";
 
 export interface ViewerOptions extends Partial<CoreOptions> {
-	/** URL of pdfium.wasm (from `@embedpdf/pdfium/pdfium.wasm`) */
+	/** URL of the package's `pdfium.wasm` (`@anaralabs/lector-engine/pdfium.wasm`) */
 	wasmUrl: string;
 	/** number of PDFium raster workers (default: half the cores, 2-4) */
 	workers?: number;

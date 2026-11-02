@@ -10,6 +10,7 @@ import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const directory = await mkdtemp(join(tmpdir(), "lector-engine-package-"));
 try {
@@ -65,8 +66,20 @@ try {
 		assert.doesNotMatch(source, /\bimport\(\s*["']\.{1,2}\//, `${worker} must not import sibling chunks`);
 	}
 
+	// /support is the light entry for feature detection: one file, no chunks.
+	const support = await readFile(join(packed, "dist/support.js"), "utf8");
+	assert.equal(manifest.exports["./support"].import, "./dist/support.js");
+	assert.doesNotMatch(support, /\bimport\b[^;'"]*?["'][^"']+["']/, "support.js must not import other chunks");
+	assert.doesNotMatch(support, /\bimport\s*\(/, "support.js must not import other chunks");
+	assert.doesNotMatch(support, /\bexport\b[^;'"]*?\bfrom\s*["']/, "support.js must not re-export other chunks");
+	const supportModule = await import(pathToFileURL(join(packed, "dist/support.js")).href);
+	assert.equal(typeof supportModule.isEngineSupported, "function", "support.js exports isEngineSupported");
+	assert.equal(typeof supportModule.getEngineSupport, "function", "support.js exports getEngineSupport");
+	assert.equal(supportModule.isEngineSupported(), false, "no engine support under Node");
+	await stat(join(packed, "dist/support.d.ts"));
+
 	const booted = await selfHost(packed);
-	console.info(`Packed ${targets.length} export targets; worker URLs, pdfium.wasm, license notices OK; self-hosted workers: ${booted}.`);
+	console.info(`Packed ${targets.length} export targets; standalone support.js, worker URLs, pdfium.wasm, license notices OK; self-hosted workers: ${booted}.`);
 } finally {
 	await rm(directory, { recursive: true, force: true });
 }

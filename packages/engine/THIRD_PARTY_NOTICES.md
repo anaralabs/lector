@@ -4,10 +4,13 @@
 also contain third-party software:
 
 - `dist/pdfium.wasm` is a WebAssembly build of [PDFium](https://pdfium.googlesource.com/pdfium/),
-  taken unmodified from [`@embedpdf/pdfium`](https://www.npmjs.com/package/@embedpdf/pdfium) 2.15.1
-  (built with Emscripten 3.1.70).
+  from [`@embedpdf/pdfium`](https://www.npmjs.com/package/@embedpdf/pdfium) 2.15.1
+  (built with Emscripten 3.1.70). `scripts/pdfium.mjs` removes the exported
+  functions the engine does not call, and the code only they reach, with
+  Binaryen's `wasm-metadce`; nothing else changes.
 - `dist/raster-worker.js` bundles the JavaScript glue of `@embedpdf/pdfium`
-  (Emscripten-generated runtime and bindings).
+  (Emscripten-generated runtime and bindings), minus the bindings of those
+  removed functions.
 
 PDFium's license (BSD-3-Clause and Apache-2.0) ships verbatim as
 `dist/LICENSE.pdfium` and EmbedPDF's (MIT) as `dist/LICENSE.embedpdf`, both

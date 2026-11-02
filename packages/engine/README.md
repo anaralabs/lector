@@ -34,6 +34,19 @@ if (isEngineSupported()) {
 }
 ```
 
+To check support without downloading the engine, import from `/support`. It is one small file that imports nothing else, so the viewer can be loaded only when it will run:
+
+```ts
+import { isEngineSupported } from "@anaralabs/lector-engine/support";
+
+if (isEngineSupported()) {
+	const { createViewer } = await import("@anaralabs/lector-engine");
+	// ...
+}
+```
+
+The main entry re-exports the same functions, but importing them from there pulls in the engine's code.
+
 React:
 
 ```tsx
@@ -75,6 +88,8 @@ const createWorker = (url: URL, name: string) =>
 ```
 
 Without Vite, serve `@anaralabs/lector-engine/pdfium.wasm` and the worker files yourself (the package exports `./raster-worker`, `./core-worker` and `./pdfium.wasm`), and pass their URLs as `wasmUrl` and `workerUrls`. Those three files are all you need: each worker is a single self-contained module (no shared chunks), so they can live in any directory or on a CDN.
+
+Serve `pdfium.wasm` as `Content-Type: application/wasm`, compressed (brotli: 4.1MB raw, 1.5MB over the wire): the raster workers then compile it while it downloads (`WebAssembly.instantiateStreaming`). With another content type they wait for the whole file first. It is PDFium trimmed to the functions the engine calls, so `@embedpdf/pdfium`'s own `pdfium.wasm` (a superset) works too, only larger.
 
 ## API reference
 
@@ -222,7 +237,7 @@ interface SearchHit {
 
 ### Other exports
 
-- `isEngineSupported()`, `getEngineSupport()`.
+- `isEngineSupported()`, `getEngineSupport()`, also available alone from `@anaralabs/lector-engine/support`.
 - `defaultOptions`.
 - `toneMap(rgb, paper, ink, gamma?)`: the dark-mode page colour mapping. `markColor(rgba, paper?)`: the opaque fill the compositor paints for a highlight or selection colour in light mode, or in dark mode when you pass `paper`. Hosts can use these to match swatches and legends.
 - Types: `Camera`, `CoreEvent`, `CoreOptions`, `DocumentInfo`, `EngineError`, `ErrorCode`, `ErrorPhase`, `Highlight`, `Link`, `OutlineItem`, `PageSize`, `Rect`, `SearchHit`, `SearchOptions`, `SearchResults`, `SelectionInfo`, `SelectionTextOptions`, `Stats`, `TextLayerLine`, `TextPoint`.
