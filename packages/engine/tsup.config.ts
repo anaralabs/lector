@@ -39,6 +39,15 @@ export default defineConfig([
 		esbuildPlugins: [workerUrlsToJs],
 	},
 	{
+		// Feature detection on its own: dist/index.js re-exports a shared chunk
+		// that holds the whole engine, so a host that only checks support (and
+		// lazy-loads the viewer) imports this entry instead. No other chunks.
+		...shared,
+		entry: { support: "src/support.ts" },
+		splitting: false,
+		dts: { entry: { support: "src/support.ts" } },
+	},
+	{
 		// Each worker is one self-contained file (no shared chunks), so hosts can
 		// self-host the documented files: raster-worker.js, core-worker.js, pdfium.wasm.
 		...shared,

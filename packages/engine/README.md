@@ -34,6 +34,19 @@ if (isEngineSupported()) {
 }
 ```
 
+To check support without downloading the engine, import from `/support`. It is one small file that imports nothing else, so the viewer can be loaded only when it will run:
+
+```ts
+import { isEngineSupported } from "@anaralabs/lector-engine/support";
+
+if (isEngineSupported()) {
+	const { createViewer } = await import("@anaralabs/lector-engine");
+	// ...
+}
+```
+
+The main entry re-exports the same functions, but importing them from there pulls in the engine's code.
+
 React:
 
 ```tsx
@@ -224,7 +237,7 @@ interface SearchHit {
 
 ### Other exports
 
-- `isEngineSupported()`, `getEngineSupport()`.
+- `isEngineSupported()`, `getEngineSupport()`, also available alone from `@anaralabs/lector-engine/support`.
 - `defaultOptions`.
 - `toneMap(rgb, paper, ink, gamma?)`: the dark-mode page colour mapping. `markColor(rgba, paper?)`: the opaque fill the compositor paints for a highlight or selection colour in light mode, or in dark mode when you pass `paper`. Hosts can use these to match swatches and legends.
 - Types: `Camera`, `CoreEvent`, `CoreOptions`, `DocumentInfo`, `EngineError`, `ErrorCode`, `ErrorPhase`, `Highlight`, `Link`, `OutlineItem`, `PageSize`, `Rect`, `SearchHit`, `SearchOptions`, `SearchResults`, `SelectionInfo`, `SelectionTextOptions`, `Stats`, `TextLayerLine`, `TextPoint`.
