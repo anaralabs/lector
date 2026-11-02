@@ -600,13 +600,32 @@ function readInfo(password: string | undefined): DocumentInfo {
  * Compiles the wasm while it downloads (instantiateStreaming), falling back to
  * a buffered compile when the server sends another Content-Type.
  */
+const WASM_FETCH_RETRY_MS = [500, 1500];
+
+/** Network drops and 5xx are retried; a 4xx or a failed instantiate is not. */
+async function fetchWasm(wasmUrl: string): Promise<Response> {
+	for (let attempt = 0; ; attempt++) {
+		const wait = WASM_FETCH_RETRY_MS[attempt];
+		let res: Response;
+		try {
+			res = await fetch(wasmUrl, { credentials: "same-origin" });
+		} catch (err) {
+			if (wait === undefined) throw err;
+			await new Promise((r) => setTimeout(r, wait));
+			continue;
+		}
+		if (res.ok) return res;
+		if (res.status < 500 || wait === undefined) throw new Error(`HTTP ${res.status}`);
+		await new Promise((r) => setTimeout(r, wait));
+	}
+}
+
 function loadPdfium(wasmUrl: string): Promise<Pdfium> {
 	return new Promise<Pdfium>((resolve, reject) => {
 		init({
 			instantiateWasm(imports: WebAssembly.Imports, receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void) {
 				(async () => {
-					const res = await fetch(wasmUrl, { credentials: "same-origin" });
-					if (!res.ok) throw new Error(`HTTP ${res.status}`);
+					const res = await fetchWasm(wasmUrl);
 					const streaming = typeof WebAssembly.instantiateStreaming === "function" && res.headers.get("Content-Type")?.split(";")[0].trim() === "application/wasm";
 					const { instance, module } = streaming ? await WebAssembly.instantiateStreaming(res, imports) : await WebAssembly.instantiate(await res.arrayBuffer(), imports);
 					receive(instance, module);
