@@ -31,9 +31,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
-          registry-url: "https://registry.npmjs.org"
           cache-dependency-path: ./pnpm-lock.yaml
 
       - name: Install dependencies
@@ -145,9 +144,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
-          registry-url: "https://registry.npmjs.org"
           cache-dependency-path: ./pnpm-lock.yaml
 
       - name: Install dependencies
@@ -164,7 +162,6 @@ jobs:
         working-directory: packages/lector
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # Separate tags (lector-engine-v*). Each package's release config
       # (scripts/release/{lector,engine}.mjs) counts only its own commits
@@ -178,4 +175,3 @@ jobs:
         working-directory: packages/engine
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
