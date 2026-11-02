@@ -268,6 +268,8 @@ export type CoreEvent =
 	| { type: "search-progress"; id: number; results: SearchResults }
 	/** Cmd/Ctrl+F while the viewer has focus, with `interceptFind` on: open the host's search */
 	| { type: "find" }
+	/** the browser restored a lost WebGL context (after a `gpu`/`render` error); tiles are redrawing */
+	| { type: "restored" }
 	/**
 	 * An animated (or instant) reveal/goto finished. `landed: false` when input or
 	 * another jump interrupted it. `coverage`: share of the landing view already
@@ -495,6 +497,7 @@ export class ViewerCore {
 		if (this.disposed) return;
 		for (const tile of this.tiles.values()) tile.tex = null;
 		this.requestFrame();
+		this.emit({ type: "restored" });
 	}
 
 	// ---------------------------------------------------------------- setup
