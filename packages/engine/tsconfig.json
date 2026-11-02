@@ -1,0 +1,26 @@
+{
+	"compilerOptions": {
+		"strict": true,
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"target": "ES2022",
+		"lib": [
+			"DOM",
+			"DOM.Iterable",
+			"ESNext",
+			"WebWorker"
+		],
+		"types": [
+			"vite/client"
+		],
+		"noEmit": true,
+		"verbatimModuleSyntax": true,
+		"isolatedModules": true,
+		"skipLibCheck": true,
+		"jsx": "react-jsx"
+	},
+	"include": [
+		"src",
+		"demo"
+	]
+}
