@@ -101,7 +101,7 @@ export class RasterPool {
 	}
 
 	pump() {
-		if (this.queue.size === 0) return;
+		if (this.queue.size === 0 || !this.lanes.some((l) => l.ready && !l.busy)) return;
 		const jobs = [...this.queue.values()].sort((a, b) => a.priority - b.priority);
 		for (const lane of this.lanes) {
 			if (!lane.ready || lane.busy || jobs.length === 0) continue;

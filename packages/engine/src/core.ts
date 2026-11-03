@@ -365,6 +365,11 @@ const TILE = 512;
 const BASE_MAX = 1024;
 const ZOOM_SETTLE_MS = 180;
 const UPLOAD_BUDGET_MS = 2.5;
+/** per-frame texture upload budget (bytes): halves after a late frame, grows while frames are on time */
+const UPLOAD_MIN = TILE * TILE * 4;
+const UPLOAD_MAX = 64 * 1024 * 1024;
+/** at most this much texture memory is freed per frame below the hard budget */
+const EVICT_STEP = 16 * 1024 * 1024;
 const CLICK_SLOP = 4;
 const AUTOSCROLL_EDGE = 48;
 const LONG_PRESS_MS = 450;
@@ -383,6 +388,8 @@ const RIPPLE_MS = 1000;
 const FLASH_MS = 1200;
 
 const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
+const PAGE_EDGE: Color = [0, 0, 0, 0.12];
+const WHITE: Color = [1, 1, 1, 1];
 
 /** pdf-fullpage-pulse keyframes (opacity relative to the peak), eased between keys */
 const FLASH_KEYS: [number, number][] = [
@@ -513,6 +520,10 @@ export class ViewerCore {
 	private over50 = 0;
 	private over100 = 0;
 	private uploadPeak = 0;
+	private uploadBudget = 8 * 1024 * 1024;
+	private uploadedLast = 0;
+	/** shortest recent continuous frame interval: the display's refresh interval */
+	private vsync = 1000 / 60;
 	private firstTileAt = 0;
 	private sharpWait: { cause: "zoom" | "jump"; since: number } | null = null;
 	private lastView: { zoom: number; page: number; fit: Fit } = { zoom: 0, page: -1, fit: false };
@@ -1941,11 +1952,22 @@ export class ViewerCore {
 		if (tile.tex) this.gl.free(tile.tex, tile.w, tile.h);
 	}
 
-	private uploadArrived() {
+	/** 0: a visible page's base bitmap, 1: a visible sharp tile, 2: anything else */
+	private uploadRank(tile: Tile, visible: number[]) {
+		if (!visible.includes(tile.page)) return 2;
+		return tile.scale === this.baseScale(tile.page) ? 0 : tile.scale === this.targetScale ? 1 : 2;
+	}
+
+	/** Uploads arrived tiles, most visible first, within a byte budget so one frame never carries a burst. */
+	private uploadArrived(visible: number[]) {
 		const t0 = performance.now();
 		let bytes = 0;
+		if (this.arrived.length > 1) this.arrived.sort((a, b) => this.uploadRank(a.tile, visible) - this.uploadRank(b.tile, visible));
 		while (this.arrived.length > 0 && performance.now() - t0 < UPLOAD_BUDGET_MS) {
-			const { tile, pixels } = this.arrived.shift()!;
+			const next = this.arrived[0]!;
+			if (bytes > 0 && bytes + next.pixels.byteLength > this.uploadBudget) break;
+			this.arrived.shift();
+			const { tile, pixels } = next;
 			tile.arrived = false;
 			if (this.tiles.get(tile.key) !== tile || tile.tex) continue;
 			tile.tex = this.gl.upload(pixels, tile.w, tile.h);
@@ -1953,31 +1975,47 @@ export class ViewerCore {
 			if (!tile.tex) break;
 			bytes += pixels.byteLength;
 		}
+		this.uploadedLast = bytes;
 		if (bytes > this.uploadPeak) this.uploadPeak = bytes;
 	}
 
+	/**
+	 * Over the texture budget, drop least recently drawn tiles back to 85% of
+	 * it, a few MB per frame: freeing a whole batch at once is a GPU burst. Over
+	 * the hard budget everything needed goes at once.
+	 */
 	private evict(frameId: number) {
 		const budget = this.opts.textureBudgetMB * 1024 * 1024;
-		if (this.gl.textureBytes <= budget) return;
+		if (this.gl.textureBytes <= budget) {
+			if (this.evicting === 0) return;
+		} else if (this.evicting === 0) this.evicting = budget * 0.85;
+		const floor = Math.max(this.evicting, this.gl.textureBytes - EVICT_STEP);
 		// Tiles this frame drew or planned (look-ahead) stay: evicting a planned
 		// tile only makes the next plan request it again.
-		const candidates = [...this.tiles.values()]
-			.filter((t) => t.tex && t.lastUsed !== frameId && t.lastWanted !== frameId)
-			.sort((a, b) => a.lastUsed - b.lastUsed);
-		for (const t of candidates) {
-			if (this.gl.textureBytes <= budget * 0.85) break;
+		while (this.gl.textureBytes > floor || this.gl.textureBytes > budget) {
+			const t = this.oldestTile(frameId, false);
+			if (!t) break;
 			this.dropTile(t);
 		}
+		if (this.gl.textureBytes <= this.evicting) this.evicting = 0;
 		// Still over: give up look-ahead tiles too (never what is on screen, nor a
 		// flight's destination).
-		if (this.gl.textureBytes <= budget) return;
-		const ahead = [...this.tiles.values()]
-			.filter((t) => t.tex && t.lastUsed !== frameId && !this.pinned.has(t.key))
-			.sort((a, b) => a.lastUsed - b.lastUsed);
-		for (const t of ahead) {
-			if (this.gl.textureBytes <= budget) break;
+		while (this.gl.textureBytes > budget) {
+			const t = this.oldestTile(frameId, true);
+			if (!t) break;
 			this.dropTile(t);
 		}
+	}
+
+	private evicting = 0;
+
+	private oldestTile(frameId: number, ahead: boolean) {
+		let oldest: Tile | null = null;
+		for (const t of this.tiles.values()) {
+			if (!t.tex || t.lastUsed === frameId || (ahead ? this.pinned.has(t.key) : t.lastWanted === frameId)) continue;
+			if (!oldest || t.lastUsed < oldest.lastUsed) oldest = t;
+		}
+		return oldest;
 	}
 
 	// ---------------------------------------------------------------- frame
@@ -2033,7 +2071,7 @@ export class ViewerCore {
 		}
 
 		const visible = this.plan(now);
-		this.uploadArrived();
+		this.uploadArrived(visible);
 		const sharp = this.draw(visible, now);
 		if (this.marksAnimating(now)) moving = true;
 		this.evict(this.frameId);
@@ -2053,7 +2091,13 @@ export class ViewerCore {
 		const continuous = this.wantedAt === this.lastFrame;
 		const ms = now - (continuous ? this.lastFrame : Math.min(now, this.wantedAt));
 		if (ms > SUSPENDED_MS) return;
-		if (continuous) this.frameTimes.push(ms);
+		if (continuous) {
+			this.frameTimes.push(ms);
+			this.vsync = Math.min(ms, this.vsync + 0.05);
+			if (ms > this.vsync * 1.5) {
+				if (this.uploadedLast > 0) this.uploadBudget = Math.max(UPLOAD_MIN, this.uploadBudget / 2);
+			} else this.uploadBudget = Math.min(UPLOAD_MAX, this.uploadBudget + UPLOAD_MIN);
+		}
 		this.windowFrames++;
 		if (ms > this.worstFrame) this.worstFrame = ms;
 		if (ms > 33) this.over33++;
@@ -2114,8 +2158,14 @@ export class ViewerCore {
 			const r = this.layout[p]!;
 			const sx = (r.x - this.cam.x) * S;
 			const sy = (r.y - this.cam.y) * S;
-			gl.drawRect(sx - 1, sy - 1, r.w * S + 2, r.h * S + 2, [0, 0, 0, 0.12], "alpha");
-			gl.drawRect(sx, sy, r.w * S, r.h * S, dark ? [paper[0], paper[1], paper[2], 1] : [1, 1, 1, 1]);
+			const pw = r.w * S;
+			const ph = r.h * S;
+			// The 1px page edge as four strips: a blended quad under the whole page costs a full-page blend on fill-bound GPUs.
+			gl.drawRect(sx - 1, sy - 1, pw + 2, 1, PAGE_EDGE, "alpha");
+			gl.drawRect(sx - 1, sy + ph, pw + 2, 1, PAGE_EDGE, "alpha");
+			gl.drawRect(sx - 1, sy, 1, ph, PAGE_EDGE, "alpha");
+			gl.drawRect(sx + pw, sy, 1, ph, PAGE_EDGE, "alpha");
+			gl.drawRect(sx, sy, pw, ph, dark ? [paper[0], paper[1], paper[2], 1] : WHITE);
 
 			// Visible part of the page in page points, to skip off-screen tiles.
 			const vx0 = view.x0 - r.x;

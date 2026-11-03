@@ -1,7 +1,7 @@
 // Frame pacing on a long document under CPU throttling: dropped frames, uncapped
 // worst frames, per-frame upload peaks and time-to-sharp after zooms and jumps.
 // Input is dispatched every animation frame at the display's real refresh rate.
-// Usage: node bench/pacing.mjs [url] [--runs N] [--throttle N] [--json out.json] [--trace out.json]
+// Usage: node bench/pacing.mjs [url] [--runs N] [--throttle N] [--angle metal|swiftshader] [--dpr N] [--json out.json] [--trace out.json]
 // The default url opens demo/public/big.pdf (node bench/fixtures/make-big.mjs 12).
 import { writeFileSync } from "node:fs";
 import { chromium } from "playwright-core";
@@ -16,6 +16,9 @@ const runs = Number(flag("runs", 3));
 const throttle = Number(flag("throttle", 4));
 const jsonOut = flag("json");
 const traceOut = flag("trace");
+// --angle swiftshader: software GL, a stand-in for a slow integrated GPU (uploads and draws cost real time)
+const angle = flag("angle", "metal");
+const dpr = Number(flag("dpr", 2));
 
 // Each scenario gets a fresh browser: this sandbox kills Chrome after ~30s.
 const scenarios = [
@@ -34,8 +37,8 @@ const median = (xs) => {
 };
 
 async function open(query, trace) {
-	const browser = await chromium.launch({ channel: "chrome", headless: process.env.HEADED !== "1", args: ["--enable-gpu", "--use-angle=metal"] });
-	const page = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 2 });
+	const browser = await chromium.launch({ channel: "chrome", headless: process.env.HEADED !== "1", args: ["--enable-gpu", `--use-angle=${angle}`, "--enable-unsafe-swiftshader"] });
+	const page = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: dpr });
 	const errors = [];
 	page.on("pageerror", (e) => errors.push(String(e)));
 	const cdp = await page.context().newCDPSession(page);
@@ -143,9 +146,9 @@ for (let i = 0; i < runs; i++) all.push(await run(i));
 
 const pick = (fn) => median(all.map(fn));
 const fmt = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : "-");
-console.log(`throttle ${throttle}x, ${runs} runs (medians)  ${url}`);
+console.log(`throttle ${throttle}x, angle ${angle}, dpr ${dpr}, ${runs} runs (medians)  ${url}`);
 console.log("scenario".padEnd(16), "frames  fps   p95med  p95max  worst   >33  >50  >100  cpu   upload MB");
-const summary = { throttle, runs, url, scenarios: {}, sharp: {} };
+const summary = { throttle, angle, dpr, runs, url, scenarios: {}, sharp: {} };
 for (const s of scenarios) {
 	const m = (k) => pick((r) => r.scenarios[s.name][k]);
 	const row = Object.fromEntries(["frames", "fps", "p95Median", "p95Max", "worst", "over33", "over50", "over100", "cpu", "uploadPeakMB", "textureMB"].map((k) => [k, m(k)]));
