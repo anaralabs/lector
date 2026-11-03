@@ -4,7 +4,7 @@
 
 import { markColor } from "./colors";
 import { Compositor } from "./gl";
-import type { DocumentInfo, ErrorCode, ErrorPhase, Link, OpenTiming, OutlineItem, PageSize } from "./protocol";
+import type { DocumentInfo, ErrorCode, ErrorPhase, Link, LoadFailureDetail, OpenTiming, OutlineItem, PageSize } from "./protocol";
 import { RasterPool, type TextResult, type TileResult } from "./raster-pool";
 import { boundedDistance, foldQuery, insertRanked, matchPage, type RawMatch, type SearchOptions, splitLimit } from "./search";
 import { PageText, type Rect, type SelectionTextOptions, type TextPoint, comparePoints } from "./text";
@@ -312,7 +312,7 @@ export type CoreEvent =
 	/** emitted by the viewer once, right after the first `painted` */
 	| { type: "load"; timings: LoadTimings }
 	/** `code`/`phase` say what failed and when (see ErrorCode, ErrorPhase) */
-	| { type: "error"; message: string; code: ErrorCode; phase: ErrorPhase };
+	| { type: "error"; message: string; code: ErrorCode; phase: ErrorPhase; detail?: LoadFailureDetail };
 
 /** epoch ms (timeOrigin + now), comparable across the main thread and workers */
 export const epochNow = () => performance.timeOrigin + performance.now();
@@ -539,7 +539,7 @@ export class ViewerCore {
 		this.gl = new Compositor(canvas);
 		this.pool = new RasterPool(ports);
 		this.pool.onOpened = (pages, info, timing) => this.opened(pages, info, timing);
-		this.pool.onError = (message, code, phase) => this.emit({ type: "error", message, code, phase });
+		this.pool.onError = (message, code, phase, detail) => this.emit({ type: "error", message, code, phase, ...(detail && { detail }) });
 		this.gl.onLost = () => this.emit({ type: "error", message: "lector-engine: the WebGL context was lost; waiting for the browser to restore it", code: "gpu", phase: "render" });
 		this.gl.onRestored = () => this.contextRestored();
 	}

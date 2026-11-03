@@ -4,7 +4,7 @@
 
 import { BlockCache } from "./blocks";
 import { init, type Pdfium } from "./pdfium/pdfium.js";
-import type { DocSource, DocumentInfo, ErrorCode, FromRaster, Link, OutlineItem, ToRaster } from "./protocol";
+import type { DocSource, DocumentInfo, ErrorCode, FromRaster, Link, LoadFailureDetail, OutlineItem, ToRaster } from "./protocol";
 
 const FPDF_ANNOT = 0x01;
 const FPDF_REVERSE_BYTE_ORDER = 0x10; // RGBA instead of BGRA
@@ -488,6 +488,28 @@ function readImages(page: number, index: number, xf: Xf): { images: Float32Array
 
 /** FPDF_GetLastError -> ErrorCode */
 const LOAD_ERRORS: Record<number, ErrorCode> = { 2: "file", 3: "parse", 4: "password", 5: "security" };
+const PDFIUM_ERRORS: LoadFailureDetail["pdfium"][] = ["success", "unknown", "file", "format", "password", "security", "page"];
+
+const latin1 = (bytes: Uint8Array) => String.fromCharCode(...bytes);
+
+/** Reads only the first and last KB, and keeps only their shape. */
+function loadFailureDetail(err: number): LoadFailureDetail {
+	const detail: LoadFailureDetail = { pdfium: PDFIUM_ERRORS[err] ?? "unknown", header: "empty", linearized: false, encrypted: false, truncated: false, sizeKB: Math.round(fileLen / 1024) };
+	if (!fileLen || !cache) return detail;
+	try {
+		const n = Math.min(1024, fileLen);
+		const head = new Uint8Array(n);
+		const tail = new Uint8Array(n);
+		if (!cache.read(0, n, head, 0) || !cache.read(fileLen - n, n, tail, 0)) return detail;
+		const h = latin1(head);
+		const t = latin1(tail);
+		detail.header = h.includes("%PDF-") ? "pdf" : /^\s*</.test(h) ? "html" : "other";
+		detail.linearized = h.includes("/Linearized");
+		detail.encrypted = t.includes("/Encrypt");
+		detail.truncated = !t.includes("%%EOF");
+	} catch {}
+	return detail;
+}
 
 // ---------------------------------------------------------------- byte source
 // PDFium pulls bytes through FPDF_LoadCustomDocument's synchronous GetBlock
@@ -561,7 +583,7 @@ function loadDocument(password: string | undefined) {
 					? "Incorrect password: PDFium could not decrypt the document."
 					: "The document is password-protected."
 				: `PDFium could not open the document (${code === "unknown" ? `error ${err}` : code})`;
-		send({ t: "error", message, code, phase: "document-load" });
+		send({ t: "error", message, code, phase: "document-load", detail: loadFailureDetail(err) });
 		return;
 	}
 	if (P.FPDF_GetFormType(doc) !== FORMTYPE_NONE) {

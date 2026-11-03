@@ -94,9 +94,24 @@ export interface OpenTiming {
 	openMs: number;
 }
 
+/** The shape of a document PDFium could not open, for diagnosis without its content. */
+export interface LoadFailureDetail {
+	/** FPDF_GetLastError */
+	pdfium: "success" | "unknown" | "file" | "format" | "password" | "security" | "page";
+	/** what the first KB looks like: `html` is usually an error page served instead of the PDF */
+	header: "pdf" | "html" | "empty" | "other";
+	/** a /Linearized dictionary in the first KB */
+	linearized: boolean;
+	/** an /Encrypt entry in the last KB (the trailer) */
+	encrypted: boolean;
+	/** no %%EOF in the last KB: likely a cut-off download */
+	truncated: boolean;
+	sizeKB: number;
+}
+
 export type FromRaster =
 	| ({ t: "opened"; pages: PageSize[]; info: DocumentInfo } & Partial<OpenTiming>)
-	| { t: "error"; message: string; code: ErrorCode; phase: ErrorPhase; id?: number }
+	| { t: "error"; message: string; code: ErrorCode; phase: ErrorPhase; id?: number; detail?: LoadFailureDetail }
 	/** heap: the worker's WASM heap plus its block cache, in bytes */
 	| { t: "tile"; id: number; buf: ArrayBuffer; w: number; h: number; ms: number; heap: number }
 	| {

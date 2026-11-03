@@ -2,7 +2,7 @@
 // The core re-plans every frame: jobs that are no longer wanted are dropped
 // before dispatch, and the most urgent jobs go out first.
 
-import type { DocumentInfo, ErrorCode, ErrorPhase, FromRaster, OpenTiming, PageSize, ToRaster } from "./protocol";
+import type { DocumentInfo, ErrorCode, ErrorPhase, FromRaster, LoadFailureDetail, OpenTiming, PageSize, ToRaster } from "./protocol";
 
 export type TileResult = Extract<FromRaster, { t: "tile" }>;
 export type TextResult = Extract<FromRaster, { t: "text" }>;
@@ -31,7 +31,7 @@ export class RasterPool {
 	private nextId = 1;
 	onOpened: (pages: PageSize[], info: DocumentInfo, timing?: OpenTiming) => void = () => {};
 	onIdle: () => void = () => {};
-	onError: (message: string, code: ErrorCode, phase: ErrorPhase) => void = (m) => console.error(m);
+	onError: (message: string, code: ErrorCode, phase: ErrorPhase, detail?: LoadFailureDetail) => void = (m) => console.error(m);
 
 	constructor(ports: MessagePort[]) {
 		this.lanes = ports.map((port) => ({ port, ready: false, busy: null, recentPages: [], heap: 0 }));
@@ -135,7 +135,7 @@ export class RasterPool {
 		if (msg.t === "error") {
 			// Every worker opens the same bytes: report load failures once.
 			const load = msg.phase === "document-load" || msg.phase === "engine-load";
-			if (!load || index === 0) this.onError(msg.message, msg.code, msg.phase);
+			if (!load || index === 0) this.onError(msg.message, msg.code, msg.phase, msg.detail);
 			const job = lane.busy;
 			if (job) {
 				this.inflight.delete(job.msg.id);
