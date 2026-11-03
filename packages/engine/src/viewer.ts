@@ -105,7 +105,7 @@ export interface Viewer {
 	 * the view has a size. `top`: page points below the page top; `offset`: css px
 	 * kept between the viewport top and that point (default `pageGap`).
 	 */
-	goToPage(page: number, top?: number, options?: { animate?: boolean; offset?: number }): Promise<boolean>;
+	goToPage(page: number, top?: number, options?: { animate?: boolean; offset?: number; arrival?: Arrival }): Promise<boolean>;
 	/**
 	 * The vertical scroll position as a scroll container would report it, in
 	 * css px at the current zoom: for scroll persistence and custom scrollbars.
@@ -123,8 +123,19 @@ export interface Viewer {
 	 * already fully visible. Resolves like `goToPage`.
 	 */
 	reveal(page: number, rect: Rect, options?: RevealOptions): Promise<boolean>;
-	/** animate highlights by id: "ripple" (default, ~1s outward fade) or "flash" (whole-page blink) */
-	pulse(ids: string | string[], options?: { kind?: PulseKind; duration?: number }): void;
+	/**
+	 * Animate highlights by id: "ripple" (default, ~1s outward fade), "flash"
+	 * (whole-page blink) or "draw" (sweeps in along its lines). `dim` darkens
+	 * everything around them for ~650ms.
+	 */
+	pulse(ids: string | string[], options?: { kind?: PulseKind; duration?: number; dim?: boolean }): void;
+	/**
+	 * Warm the bitmaps a jump to `page` (and `rect`) would land on, at the lowest
+	 * priority, so a following `reveal`/`goToPage` starts without waiting (call it
+	 * on citation hover). One target at a time; `null` cancels; expires after 5s.
+	 * Skipped near the texture budget.
+	 */
+	prefetch(page: number | null, rect?: Rect): void;
 	/** select chars [from, to) on a page (loads its text first if needed) */
 	select(page: number, from: number, to: number): void;
 	/** restore a selection across pages, e.g. a persisted `SelectionInfo.range`; null clears */
@@ -184,7 +195,20 @@ export interface RevealOptions {
 	ifNeeded?: boolean;
 	/** css px added to where the rect lands (positive moves it down), e.g. under a sticky header */
 	offset?: number;
+	arrival?: Arrival;
 }
+
+/**
+ * A cue played on highlights when the jump lands, e.g. `{ ids: "cite", kind: "draw", dim: true }`.
+ * With "draw" the highlights stay hidden during the flight, then sweep in.
+ */
+export interface Arrival {
+	ids: string | string[];
+	kind?: PulseKind;
+	dim?: boolean;
+}
+
+const arrivalCue = (a: Arrival | undefined) => (a ? { ids: Array.isArray(a.ids) ? a.ids : [a.ids], kind: a.kind, dim: a.dim } : undefined);
 
 /** Errors mirror pdf.js wording so hosts that pattern-match load failures keep working. */
 async function fetchPdf(url: string, init: RequestInit = {}) {
@@ -718,7 +742,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				viewH = e.h;
 			} else if (e.type === "camera") {
 				camera = e.camera;
-				textLayer?.setCamera(e.camera);
+				textLayer?.setCamera(e.camera, !!e.passing);
 			}
 			else if (e.type === "cursor") container.style.cursor = e.cursor;
 			else if (e.type === "selection") {
@@ -1055,9 +1079,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			},
 			fitWidth: () => command({ type: "fit-width" }),
 			fitPage: () => command({ type: "fit-page" }),
-			goToPage: (page, top, o) => flight((id) => ({ type: "goto", page, top, animate: o?.animate, offset: o?.offset, flight: id })),
+			goToPage: (page, top, o) => flight((id) => ({ type: "goto", page, top, animate: o?.animate, offset: o?.offset, flight: id, arrival: arrivalCue(o?.arrival) })),
 			reveal: (page, rect, o) =>
-				flight((id) => ({ type: "reveal", page, rect, animate: o?.animate, align: o?.align, ifNeeded: o?.ifNeeded, offset: o?.offset, flight: id })),
+				flight((id) => ({ type: "reveal", page, rect, animate: o?.animate, align: o?.align, ifNeeded: o?.ifNeeded, offset: o?.offset, flight: id, arrival: arrivalCue(o?.arrival) })),
 			scrollState: () => {
 				const last = layout[layout.length - 1];
 				const docH = last ? last.y + last.h + resolved.pageGap : 0;
@@ -1068,7 +1092,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				return { top, height, viewportHeight: viewH, fraction: range > 0 ? top / range : 0 };
 			},
 			scrollToFraction: (fraction) => command({ type: "scroll-to", fraction }),
-			pulse: (ids, o) => command({ type: "pulse", ids: Array.isArray(ids) ? ids : [ids], kind: o?.kind, duration: o?.duration }),
+			pulse: (ids, o) => command({ type: "pulse", ids: Array.isArray(ids) ? ids : [ids], kind: o?.kind, duration: o?.duration, dim: o?.dim }),
+			prefetch: (page, rect) => command({ type: "prefetch", page, rect }),
 			select: (page, from, to) => command({ type: "select", page, from, to }),
 			setSelection: (range) => command({ type: "set-selection", range }),
 			selectAll: (scope) => command({ type: "select-all", scope }),

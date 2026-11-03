@@ -21,6 +21,7 @@ const hud = document.getElementById("hud")!;
 const info: Record<string, string> = {};
 const t0 = performance.now();
 let zoom = 1;
+let current = 0;
 
 // Exposed for the benchmark harness.
 const w = window as unknown as { __events: CoreEvent[]; __flights: CoreEvent[]; __errors: CoreEvent[]; __all: CoreEvent[]; __viewer?: Viewer; __firstPaintMs?: number };
@@ -67,6 +68,7 @@ const onEvent = (e: CoreEvent) => {
 		info.raster = `tile raster ${s.avgTileMs.toFixed(1)}ms  ×${s.workers} workers (${s.workerMB.toFixed(0)}MB)  scale ${s.targetScale.toFixed(2)}`;
 	} else if (e.type === "view") {
 		zoom = e.zoom;
+		current = e.page;
 		info.view = `page ${e.page + 1}/${e.pageCount}  zoom ${(e.zoom * 100).toFixed(0)}%`;
 	} else if (e.type === "painted") {
 		(w as unknown as { __paintedMs: number }).__paintedMs = performance.now() - t0;
@@ -131,4 +133,66 @@ jankBtn.onclick = () => {
 document.getElementById("file")!.onchange = async (ev) => {
 	const f = (ev.target as HTMLInputElement).files?.[0];
 	if (f) viewer = await open(await f.arrayBuffer());
+};
+
+// Citation-jump polish A/B: ?polish=0 starts with the previous behaviour.
+let polish = params.get("polish") !== "0";
+// ?path=zoom-out tries the pull-back path instead of the glide.
+const pathStyle = params.get("path") === "zoom-out" ? "zoom-out" : "glide";
+let reduced = false;
+const polishBtn = document.getElementById("polish")!;
+const applyPolish = () => {
+	viewer.setOptions({ flightPath: polish ? pathStyle : "cut", flightMotionBlur: polish, flightCarryVelocity: polish });
+	polishBtn.textContent = `flight: ${polish ? `${pathStyle} + blur` : "cut (main)"}`;
+};
+applyPolish();
+polishBtn.onclick = () => {
+	polish = !polish;
+	applyPolish();
+};
+const motionBtn = document.getElementById("motion")!;
+motionBtn.onclick = () => {
+	reduced = !reduced;
+	viewer.setOptions({ reducedMotion: reduced });
+	motionBtn.textContent = `motion: ${reduced ? "reduced" : "full"}`;
+};
+
+type Cite = { page: number; rect: { x: number; y: number; w: number; h: number }; rects: { x: number; y: number; w: number; h: number }[] };
+const citeAt = async (page: number): Promise<Cite> => {
+	const rects = await viewer.rects(page, 300, 560);
+	const x0 = Math.min(...rects.map((r) => r.x));
+	const y0 = Math.min(...rects.map((r) => r.y));
+	const x1 = Math.max(...rects.map((r) => r.x + r.w));
+	const y1 = Math.max(...rects.map((r) => r.y + r.h));
+	return { page, rects, rect: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } };
+};
+const pageCount = async () => (await viewer.loaded).pages.length;
+const farFrom = async (p: number) => {
+	const n = await pageCount();
+	return p < n / 2 ? Math.min(n - 1, p + Math.max(3, Math.floor(n * 0.6))) : Math.max(0, p - Math.max(3, Math.floor(n * 0.6)));
+};
+let nextFar: Promise<Cite> | null = null;
+const cite = async (c: Cite) => {
+	viewer.setHighlights([{ id: "cite", page: c.page, rects: c.rects, color: [0.35, 0.6, 1, 0.45], interactive: false }]);
+	const arrival = polish ? { ids: "cite", kind: "draw" as const, dim: true } : undefined;
+	return viewer.reveal(c.page, c.rect, { animate: true, arrival });
+};
+const farBtn = document.getElementById("cite-far")!;
+farBtn.onpointerenter = async () => {
+	nextFar = farFrom(current).then(citeAt);
+	const c = await nextFar;
+	if (polish) viewer.prefetch(c.page, c.rect);
+};
+farBtn.onpointerleave = () => viewer.prefetch(null);
+farBtn.onclick = async () => cite(await (nextFar ?? farFrom(current).then(citeAt)).finally(() => (nextFar = null)));
+document.getElementById("cite-near")!.onclick = async () => cite(await citeAt(Math.min((await pageCount()) - 1, current + 2)));
+// Three clicks 160ms apart: each retargets the moving camera.
+document.getElementById("cite-chain")!.onclick = async () => {
+	const n = await pageCount();
+	const pages = [await farFrom(current), Math.floor(n / 2), Math.min(n - 1, current + 3)];
+	const cites = await Promise.all(pages.map(citeAt));
+	for (const c of cites) {
+		void cite(c);
+		await new Promise((r) => setTimeout(r, 160));
+	}
 };

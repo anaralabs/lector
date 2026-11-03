@@ -51,6 +51,37 @@ void main() {
   }
 }`;
 
+// Directional blur of the composited frame: content at screen p moved by
+// u_pan + p * u_zoom (device px) during the shutter. 2-10 taps (one per ~3 px), flights only.
+const BLUR_FS = `#version 300 es
+precision mediump float;
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform vec2 u_size;
+uniform vec2 u_pan;
+uniform float u_zoom;
+uniform float u_max;
+out vec4 o;
+void main() {
+  vec2 p = vec2(v_uv.x, 1.0 - v_uv.y) * u_size;
+  vec2 m = u_pan + p * u_zoom;
+  float l = length(m);
+  if (l > u_max) m *= u_max / l;
+  int n = int(clamp(ceil(min(l, u_max) / 3.0), 2.0, 10.0));
+  vec2 span = vec2(m.x, -m.y) / u_size;
+  vec2 uv = v_uv - span * 0.5;
+  vec2 step = span / float(n - 1);
+  vec3 c = vec3(0.0);
+  for (int i = 0; i < 10; i++) {
+    if (i >= n) break;
+    c += texture(u_tex, uv + step * float(i)).rgb;
+  }
+  o = vec4(c / float(n), 1.0);
+}`;
+
+/** Renderers that run on the CPU: the blur pass would cost a frame there. */
+const SOFTWARE = /swiftshader|llvmpipe|softpipe|software|basic render|microsoft basic/i;
+
 /** lighten: per-channel max, so dark paper takes the colour and light ink stays on top */
 export type Blend = "none" | "alpha" | "multiply" | "lighten";
 
@@ -66,6 +97,17 @@ interface Programs {
 		ink: WebGLUniformLocation;
 	};
 	solid: { prog: WebGLProgram; rect: WebGLUniformLocation; uv: WebGLUniformLocation; view: WebGLUniformLocation; color: WebGLUniformLocation; round: WebGLUniformLocation };
+	/** compiled on the first blurred frame, so startup pays nothing for it */
+	blur: {
+		prog: WebGLProgram;
+		rect: WebGLUniformLocation;
+		uv: WebGLUniformLocation;
+		view: WebGLUniformLocation;
+		size: WebGLUniformLocation;
+		pan: WebGLUniformLocation;
+		zoom: WebGLUniformLocation;
+		max: WebGLUniformLocation;
+	} | null;
 	vao: WebGLVertexArrayObject;
 	vbo: WebGLBuffer;
 }
@@ -79,6 +121,10 @@ export class Compositor {
 	private w = 1;
 	private h = 1;
 	textureBytes = 0;
+	/** the offscreen frame the blur reads (flights only; freed when they land) */
+	blurBytes = 0;
+	private blurFb: { fb: WebGLFramebuffer; tex: WebGLTexture; w: number; h: number } | null = null;
+	private rendererName: string | null = null;
 	/**
 	 * The context is lost (GPU reset, resource pressure): nothing draws until
 	 * it is restored. Every texture is gone by then; the owner re-uploads.
@@ -118,6 +164,8 @@ export class Compositor {
 			() => {
 				this.lost = false;
 				this.textureBytes = 0;
+				this.blurBytes = 0;
+				this.blurFb = null;
 				this.mode = null;
 				this.build();
 				this.onRestored();
@@ -145,7 +193,7 @@ export class Compositor {
 			gl.enableVertexAttribArray(loc);
 			gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
 		}
-		this.res = { tex: this.tex, solid: this.solid, vao, vbo };
+		this.res = { tex: this.tex, solid: this.solid, blur: null, vao, vbo };
 	}
 
 	/** Frees programs and buffers and releases the context (textures are the owner's). */
@@ -155,6 +203,8 @@ export class Compositor {
 		if (!this.lost && !gl.isContextLost()) {
 			gl.deleteProgram(this.res.tex.prog);
 			gl.deleteProgram(this.res.solid.prog);
+			if (this.res.blur) gl.deleteProgram(this.res.blur.prog);
+			this.freeBlur();
 			gl.deleteVertexArray(this.res.vao);
 			gl.deleteBuffer(this.res.vbo);
 			// Browsers cap live contexts per page: give this one back now, not at GC.
@@ -258,6 +308,17 @@ export class Compositor {
 		this.mode = null;
 	}
 
+	/** GPU renderer string, when the browser exposes it (read on first use) */
+	get renderer(): string {
+		this.rendererName ??= rendererOf(this.gl);
+		return this.rendererName;
+	}
+
+	/** a CPU (software) rasteriser: skip optional GPU passes */
+	get software(): boolean {
+		return SOFTWARE.test(this.renderer);
+	}
+
 	/** Limit drawing to a device-pixel rect (top-left origin); null draws everywhere. */
 	clip(r: { x: number; y: number; w: number; h: number } | null) {
 		const gl = this.gl;
@@ -298,6 +359,91 @@ export class Compositor {
 		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 	}
 
+	/**
+	 * Draw the next frame offscreen for `presentBlur`. False (drawing goes to
+	 * the screen as usual) when the framebuffer cannot be made.
+	 */
+	blurTarget(): boolean {
+		const gl = this.gl;
+		if (this.lost) return false;
+		let b = this.blurFb;
+		if (b && (b.w !== this.w || b.h !== this.h)) {
+			this.freeBlur();
+			b = null;
+		}
+		if (!b) {
+			const tex = gl.createTexture();
+			const fb = gl.createFramebuffer();
+			if (!tex || !fb) return false;
+			gl.bindTexture(gl.TEXTURE_2D, tex);
+			gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, this.w, this.h);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+			gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+			gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+			if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+				gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+				gl.deleteFramebuffer(fb);
+				gl.deleteTexture(tex);
+				return false;
+			}
+			b = this.blurFb = { fb, tex, w: this.w, h: this.h };
+			this.blurBytes = this.w * this.h * 4;
+		}
+		gl.bindFramebuffer(gl.FRAMEBUFFER, b.fb);
+		return true;
+	}
+
+	/** Composites the offscreen frame to the screen, blurred along the motion (device px). */
+	presentBlur(pan: [number, number], zoom: number, max: number) {
+		const gl = this.gl;
+		const b = this.blurFb;
+		if (!b) return;
+		const p = this.blurProgram();
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		gl.disable(gl.SCISSOR_TEST);
+		gl.disable(gl.BLEND);
+		gl.viewport(0, 0, this.w, this.h);
+		gl.useProgram(p.prog);
+		this.mode = null;
+		gl.uniform2f(p.view, this.w, this.h);
+		gl.uniform4f(p.uv, 0, 1, 1, 0);
+		gl.uniform4f(p.rect, 0, 0, this.w, this.h);
+		gl.uniform2f(p.size, this.w, this.h);
+		gl.uniform2f(p.pan, pan[0], pan[1]);
+		gl.uniform1f(p.zoom, zoom);
+		gl.uniform1f(p.max, max);
+		gl.bindTexture(gl.TEXTURE_2D, b.tex);
+		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+	}
+
+	/** Compiles the blur program ahead of the first blurred frame (call when a flight is about to move). */
+	blurProgram() {
+		if (this.res.blur) return this.res.blur;
+		const gl = this.gl;
+		const prog = this.program(QUAD_VS, BLUR_FS);
+		const u = (n: string) => gl.getUniformLocation(prog, n)!;
+		const loc = gl.getAttribLocation(prog, "a_pos");
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.res.vbo);
+		gl.enableVertexAttribArray(loc);
+		gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+		this.res.blur = { prog, rect: u("u_rect"), uv: u("u_uv"), view: u("u_view"), size: u("u_size"), pan: u("u_pan"), zoom: u("u_zoom"), max: u("u_max") };
+		return this.res.blur;
+	}
+
+	freeBlur() {
+		const b = this.blurFb;
+		if (!b) return;
+		this.blurFb = null;
+		this.blurBytes = 0;
+		if (this.lost) return;
+		this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+		this.gl.deleteFramebuffer(b.fb);
+		this.gl.deleteTexture(b.tex);
+	}
+
 	/** Anti-aliased filled circle, alpha-blended. */
 	drawCircle(cx: number, cy: number, r: number, color: [number, number, number, number]) {
 		const gl = this.gl;
@@ -308,5 +454,16 @@ export class Compositor {
 		gl.uniform4f(this.solid.uv, 0, 0, 1, 1);
 		gl.uniform4f(this.solid.rect, cx - r, cy - r, r * 2, r * 2);
 		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+	}
+}
+
+function rendererOf(gl: WebGL2RenderingContext): string {
+	try {
+		const plain = String(gl.getParameter(gl.RENDERER) ?? "");
+		if (plain && plain !== "WebKit WebGL") return plain;
+		const ext = gl.getExtension("WEBGL_debug_renderer_info");
+		return ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) ?? plain) : plain;
+	} catch {
+		return "";
 	}
 }

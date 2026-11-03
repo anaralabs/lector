@@ -133,7 +133,12 @@ Pages are **0-based** everywhere. Page-space geometry is in PDF points with a to
 | `minZoom` / `maxZoom` | `0.1` / `24` | |
 | `dark`, `paper`, `ink` | `false`, near-black, near-white | dark mode: page white maps to `paper`, ink to `ink` |
 | `reducedMotion` | from `prefers-reduced-motion` | flights jump instantly |
+| `flightPath` | `"cut"` | how animated jumps travel: `"cut"` (long jumps cut to one viewport short, then ease in), `"glide"` (one continuous move at the current zoom however far, 240-600ms, fastest mid-flight; pages passed on the way draw from cached bitmaps or as blank pages, never rasterised) or `"zoom-out"` (pull back, travel, push in, van Wijk & Nuij) |
+| `flightMotionBlur` | `false` | directional blur that follows camera speed during flights (zero at rest and at both ends of a glide); off on software renderers and after slow blurred frames |
+| `flightCarryVelocity` | `false` | a goto/reveal arriving mid-flight keeps the camera's velocity (input still stops it at once) |
 | `copyOptions` | `{}` | lector's copy options: `{ lineBreaks?: "preserve" \| "space", ignoreHyphenation?: boolean }`; `false` leaves copy to the browser |
+
+`Arrival` (`{ ids: string | string[]; kind?: "ripple" | "flash" | "draw"; dim?: boolean }`) plays a cue on highlights when a jump lands. With `"draw"` they stay hidden during the flight and sweep in line by line on arrival; `dim` darkens everything around them for ~650ms. An interrupted flight shows them without a cue, and reduced motion shows them without animation.
 
 ### `Viewer`
 
@@ -152,8 +157,10 @@ interface Viewer {
 	zoomTo(zoom: number): void;
 	fitWidth(): void;
 	fitPage(): void;
-	goToPage(page: number, top?: number, options?: { animate?: boolean; offset?: number }): Promise<boolean>;
-	reveal(page: number, rect: Rect, options?: { animate?: boolean; align?: "auto" | "center" | "start" | number; ifNeeded?: boolean; offset?: number }): Promise<boolean>;
+	goToPage(page: number, top?: number, options?: { animate?: boolean; offset?: number; arrival?: Arrival }): Promise<boolean>;
+	reveal(page: number, rect: Rect, options?: { animate?: boolean; align?: "auto" | "center" | "start" | number; ifNeeded?: boolean; offset?: number; arrival?: Arrival }): Promise<boolean>;
+	// warm the landing bitmaps at the lowest priority (citation hover); one target, null cancels, 5s expiry
+	prefetch(page: number | null, rect?: Rect): void;
 	scrollState(): { top: number; height: number; viewportHeight: number; fraction: number }; // css px
 	scrollToFraction(fraction: number): void;
 
@@ -174,7 +181,7 @@ interface Viewer {
 
 	// marks
 	setHighlights(items: Highlight[]): void;
-	pulse(ids: string | string[], options?: { kind?: "ripple" | "flash"; duration?: number }): void;
+	pulse(ids: string | string[], options?: { kind?: "ripple" | "flash" | "draw"; duration?: number; dim?: boolean }): void;
 
 	// document
 	unlock(password: string): Promise<boolean>;
@@ -220,7 +227,7 @@ interface SearchHit {
 | `layout { pages, layout, complete }` | estimated sizes resolved (range loading); the camera moved with them, so the content on screen did not |
 | `painted { page }` | first bitmap on screen |
 | `view { zoom, page, pageCount, fitWidth, fit }` | `fit`: `"width" \| "page" \| null`; `fitWidth` is kept for compatibility |
-| `camera { camera, moving }` | every camera change; `moving: false` once it rests (persist scroll here) |
+| `camera { camera, moving, passing? }` | every camera change; `moving: false` once it rests (persist scroll here); `passing` while a long glide crosses pages it will not stop on |
 | `selection { selection, final }` | |
 | `cursor`, `resized`, `link { url }`, `click { page, x, y }` | |
 | `highlight-click { id, screen }`, `highlight-hover { id, screen }` | |

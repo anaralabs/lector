@@ -405,6 +405,156 @@ await page.keyboard.press("ControlOrMeta+f");
 await page.waitForTimeout(100);
 check("interceptFind emits find", await page.evaluate(() => window.__all.some((e) => e.type === "find")));
 
+// ---------------------------------------------------------------- flight polish
+await page.goto(fixture("cadbots.pdf", "&offscreen=0"));
+await page.waitForFunction(() => window.__paintedMs !== undefined);
+await page.waitForTimeout(600);
+const fp = await page.evaluate(async () => {
+	const v = window.__viewer;
+	const c = window.__core;
+	const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+	const target = async (p) => {
+		const rects = await v.rects(p, 300, 520);
+		const x0 = Math.min(...rects.map((r) => r.x));
+		const y0 = Math.min(...rects.map((r) => r.y));
+		return { page: p, rects, rect: { x: x0, y: y0, w: Math.max(...rects.map((r) => r.x + r.w)) - x0, h: Math.max(...rects.map((r) => r.y + r.h)) - y0 } };
+	};
+	const hl = (t) => v.setHighlights([{ id: "cite", page: t.page, rects: t.rects, interactive: false }]);
+	const out = {};
+	v.setOptions({ flightPath: "glide", flightMotionBlur: true, flightCarryVelocity: true, reducedMotion: false });
+	const far = await target(22);
+	// The polished path lands exactly where an instant reveal does.
+	v.goToPage(0);
+	await v.reveal(far.page, far.rect);
+	const exact = { ...c.cam };
+	v.goToPage(0);
+	await frame();
+	const z0 = c.cam.zoom;
+	hl(far);
+	let minZoom = Infinity;
+	let maxZoom = 0;
+	let blurred = false;
+	let hiddenMid = false;
+	let backwards = false;
+	let lastY = -Infinity;
+	let flightFrames = 0;
+	const draw = c.frame.bind(c);
+	c.frame = (now) => {
+		draw(now);
+		if (c.flight) {
+			flightFrames++;
+			minZoom = Math.min(minZoom, c.cam.zoom);
+			maxZoom = Math.max(maxZoom, c.cam.zoom);
+			backwards ||= c.cam.y < lastY - 1e-6;
+			lastY = c.cam.y;
+			blurred ||= c.blurOn;
+			hiddenMid ||= c.hiddenUntilLand.has("cite");
+		}
+	};
+	const midRaster = [];
+	const req = c.pool.request.bind(c.pool);
+	c.pool.request = (key, ...rest) => {
+		const p = Number(key.split(":")[0]);
+		if (c.flight && p >= 4 && p <= 17) midRaster.push(key);
+		return req(key, ...rest);
+	};
+	out.landed = await v.reveal(far.page, far.rect, { animate: true, arrival: { ids: "cite", kind: "draw", dim: true } });
+	c.frame = draw;
+	c.pool.request = req;
+	out.glide = { frames: flightFrames, sameZoom: minZoom === z0 && maxZoom === z0, backwards, midRaster: midRaster.length };
+	const cam = c.cam;
+	out.exact = Math.abs(cam.x - exact.x) + Math.abs(cam.y - exact.y) + Math.abs(cam.zoom - exact.zoom);
+	out.blurred = blurred || c.gl.software;
+	out.software = c.gl.software;
+	out.blurFreed = c.gl.blurBytes === 0;
+	out.hiddenMid = hiddenMid;
+	out.drawing = c.pulses.get("cite")?.kind === "draw" && !!c.dim && !c.hiddenUntilLand.size;
+	// Input during a draw-arrival flight shows the highlight at once, without a cue.
+	c.pulses.clear();
+	const p = v.reveal(0, far.rect, { animate: true, arrival: { ids: "cite", kind: "draw" } });
+	await frame();
+	await frame();
+	document.getElementById("viewer").dispatchEvent(new WheelEvent("wheel", { deltaY: 10, bubbles: true, cancelable: true }));
+	out.interrupted = (await p) === false && !c.hiddenUntilLand.size && !c.pulses.has("cite");
+	// A second jump mid-flight keeps moving: no wait, carried speed.
+	const first = v.reveal(far.page, far.rect, { animate: true });
+	await new Promise((r) => setTimeout(r, 160));
+	const second = v.reveal(3, far.rect, { animate: true });
+	out.carry = { wait: c.flight?.wait, v0: c.flight?.v0, moved: (c.flight?.v0 ?? 0) > 0 || Math.abs(c.flight?.rest.cy ?? 0) > 0 };
+	out.retarget = [await first, await second];
+	// Reduced motion: instant, and the arrival shows without animation.
+	v.setOptions({ reducedMotion: true });
+	hl(far);
+	const before = window.__flights.length;
+	out.reduced = await v.reveal(far.page, far.rect, { animate: true, arrival: { ids: "cite", kind: "draw", dim: true } });
+	const f = window.__flights.slice(before).at(-1);
+	out.reducedInstant = f?.durationMs === 0 && !c.flight && !c.pulses.has("cite") && !c.dim && !c.hiddenUntilLand.size;
+	v.setOptions({ reducedMotion: false });
+	v.setOptions({ flightPath: "zoom-out" });
+	v.goToPage(0);
+	await frame();
+	let zMin = Infinity;
+	c.frame = (now) => {
+		draw(now);
+		if (c.flight) zMin = Math.min(zMin, c.cam.zoom);
+	};
+	const zl = await v.reveal(far.page, far.rect, { animate: true });
+	c.frame = draw;
+	out.zoomOut = { landed: zl, exact: Math.abs(c.cam.x - exact.x) + Math.abs(c.cam.y - exact.y) + Math.abs(c.cam.zoom - exact.zoom), pulledBack: zMin / z0 };
+	// A jump caught pulled back still lands at the zoom the first one was heading for.
+	v.goToPage(0);
+	await frame();
+	const pulled = v.reveal(far.page, far.rect, { animate: true });
+	await new Promise((r) => setTimeout(r, 200));
+	const zMid = c.cam.zoom;
+	await v.reveal(3, far.rect, { animate: true });
+	await pulled;
+	out.zoomOut.retargetZoom = c.cam.zoom / z0;
+	out.zoomOut.caughtAt = zMid / z0;
+	v.setOptions({ flightPath: "glide" });
+	// Prefetch: lowest priority, at most two base bitmaps, cancellable, skipped near the budget.
+	v.goToPage(0);
+	await frame();
+	const asked = [];
+	const request = c.pool.request.bind(c.pool);
+	c.pool.request = (key, priority, ...rest) => {
+		if (priority >= 100 && !key.startsWith("text:")) asked.push(key);
+		return request(key, priority, ...rest);
+	};
+	const jobs = () => [...c.pool.queue.values(), ...c.pool.inflight.values()].filter((j) => j.priority >= 100 && j.msg.t === "tile");
+	const t14 = await target(14);
+	v.setOptions({ textureBudgetMB: 1 });
+	v.prefetch(t14.page, t14.rect);
+	await frame();
+	out.prefetchBudget = asked.length === 0;
+	v.setOptions({ textureBudgetMB: 384 });
+	v.prefetch(t14.page, t14.rect);
+	await frame();
+	out.prefetchJobs = new Set(asked).size;
+	out.prefetchBounded = out.prefetchJobs > 0 && out.prefetchJobs <= 2 && asked.every((k) => k.endsWith(":0:0")) && jobs().length <= 2;
+	await new Promise((r) => setTimeout(r, 600));
+	const at = window.__flights.length;
+	await v.reveal(t14.page, t14.rect, { animate: true });
+	out.prefetchWait = window.__flights.slice(at).at(-1)?.waitMs;
+	v.prefetch(18);
+	v.prefetch(null);
+	await frame();
+	out.prefetchCancel = c.prefetchTarget === null && jobs().every((j) => c.pool.inflight.has(j.msg.id));
+	return out;
+});
+check("flight polish: glide lands exactly, one continuous move at the same zoom", fp.landed && fp.exact < 1e-6 && fp.glide.sameZoom && !fp.glide.backwards && fp.glide.frames >= 10, `off by ${fp.exact}, ${JSON.stringify(fp.glide)}`);
+check("flight polish: glide rasters nothing for the pages it passes", fp.glide.midRaster === 0, `${fp.glide.midRaster} mid-path jobs`);
+check("flight polish: zoom-out path lands exactly and pulls back", fp.zoomOut.landed && fp.zoomOut.exact < 1e-6 && fp.zoomOut.pulledBack < 0.9 && fp.zoomOut.pulledBack > 0.15, JSON.stringify(fp.zoomOut));
+check("flight polish: a jump caught pulled back keeps the destination zoom", fp.zoomOut.caughtAt < 0.95 && Math.abs(fp.zoomOut.retargetZoom - 1) < 1e-6, JSON.stringify(fp.zoomOut));
+check("flight polish: motion blur only in flight", fp.blurred && fp.blurFreed, `software ${fp.software}`);
+check("flight polish: draw arrival hidden in flight, sweeps + dims on landing", fp.hiddenMid && fp.drawing);
+check("flight polish: input shows the arrival without a cue", fp.interrupted);
+check("flight polish: retarget carries velocity", fp.carry.wait === false && fp.carry.moved && fp.retarget.join() === "false,true", JSON.stringify(fp.carry));
+check("flight polish: reduced motion is instant, no cue", fp.reduced && fp.reducedInstant);
+check("prefetch: bounded, lowest priority, skipped near the budget", fp.prefetchBudget && fp.prefetchBounded, `${fp.prefetchJobs} base bitmaps`);
+check("prefetch: the next jump does not wait", fp.prefetchWait === 0, `wait ${fp.prefetchWait}ms`);
+check("prefetch: null cancels", fp.prefetchCancel);
+
 // ---------------------------------------------------------------- lifecycle
 const src = new URL("../src", import.meta.url).pathname;
 const coreWorkerOf = async (p) => {
@@ -658,6 +808,7 @@ if (await has("links.pdf")) {
 	const fit = await page.evaluate(async () => {
 		const v = window.__viewer;
 		const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+		await wait(100); // ready comes before the first camera event
 		const before = v.camera.zoom;
 		await v.goToPage(14);
 		await wait(100); // the camera event follows on the next frame

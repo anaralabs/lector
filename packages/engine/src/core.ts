@@ -3,6 +3,7 @@
 // code runs on the main thread or inside a worker with an OffscreenCanvas.
 
 import { markColor } from "./colors";
+import { type CamState, easePath, fromState, glidePath, kick, matchVelocity, type Path, progress, toState, zoomPath } from "./flight-path";
 import { Compositor } from "./gl";
 import { anchoredY, buildLayout, estimateSizes } from "./layout";
 import { uploadRank } from "./upload-rank";
@@ -63,6 +64,16 @@ export interface CoreOptions {
 	ink: [number, number, number];
 	/** camera flights (animated reveal/goto) jump instantly; set from prefers-reduced-motion */
 	reducedMotion: boolean;
+	/**
+	 * How animated jumps travel. "cut": long jumps cut to one viewport short and
+	 * ease in. "glide": one continuous move at the current zoom, however far (pair
+	 * with `flightMotionBlur`). "zoom-out": pull back, travel, push in (van Wijk & Nuij).
+	 */
+	flightPath: "cut" | "glide" | "zoom-out";
+	/** a directional blur that follows camera speed while a flight moves (skipped on software GPUs) */
+	flightMotionBlur: boolean;
+	/** a goto/reveal that arrives mid-flight keeps the camera's velocity instead of restarting from rest */
+	flightCarryVelocity: boolean;
 	/** how selected text is copied (lector's `copyOptions`); false leaves Cmd/Ctrl+C to the browser */
 	copyOptions: false | SelectionTextOptions;
 }
@@ -88,6 +99,9 @@ export const defaultOptions: CoreOptions = {
 	paper: [0.12, 0.12, 0.13],
 	ink: [0.88, 0.88, 0.86],
 	reducedMotion: false,
+	flightPath: "cut",
+	flightMotionBlur: false,
+	flightCarryVelocity: false,
 	copyOptions: {},
 };
 
@@ -143,8 +157,21 @@ export interface Highlight {
  * ripple: a copy of the highlight grows outward and fades (repeat-click / landing cue).
  * flash: the highlight itself blinks in and out (whole-page citations); it stays
  * hidden after the flash until it is removed.
+ * draw: the highlight sweeps in along its rects, line by line (arrival cue).
  */
-export type PulseKind = "ripple" | "flash";
+export type PulseKind = "ripple" | "flash" | "draw";
+
+/**
+ * Played on highlights when a goto/reveal lands. With `draw`, the highlights
+ * stay hidden during the flight. `dim` darkens everything around them for
+ * ~650ms. Interrupted flights show the highlights without a cue; reduced
+ * motion shows them without animation.
+ */
+export interface ArrivalCue {
+	ids: string[];
+	kind?: PulseKind;
+	dim?: boolean;
+}
 
 /**
  * Where a revealed rect lands: its top at this fraction of the viewport height
@@ -216,16 +243,22 @@ export type Command =
 	/** workers read the document over the network (true) or have the whole file (false) */
 	| { type: "remote"; on: boolean }
 	/** `flight`: id echoed in the `flight` event when the camera lands (or is interrupted) */
-	| { type: "goto"; page: number; top?: number; animate?: boolean; flight?: number; offset?: number }
+	| { type: "goto"; page: number; top?: number; animate?: boolean; flight?: number; offset?: number; arrival?: ArrivalCue }
 	/**
 	 * Bring `rect` (page points) into view: its top lands at `align` (default 0.3 of
 	 * the viewport height), x only moves if it does not fit, and the zoom only drops
 	 * if the rect is taller than 80% of the viewport. `ifNeeded`: no move when the
 	 * rect is already fully visible.
 	 */
-	| { type: "reveal"; page: number; rect: Rect; animate?: boolean; align?: RevealAlign; ifNeeded?: boolean; flight?: number; offset?: number }
-	/** animate highlights by id (see PulseKind) */
-	| { type: "pulse"; ids: string[]; kind?: PulseKind; duration?: number }
+	| { type: "reveal"; page: number; rect: Rect; animate?: boolean; align?: RevealAlign; ifNeeded?: boolean; flight?: number; offset?: number; arrival?: ArrivalCue }
+	/** animate highlights by id (see PulseKind); `dim` darkens around them briefly */
+	| { type: "pulse"; ids: string[]; kind?: PulseKind; duration?: number; dim?: boolean }
+	/**
+	 * Raster the base bitmaps a jump to `page` (and `rect`) would land on, at the
+	 * lowest priority, so the flight skips its wait (e.g. on citation hover). One
+	 * target at a time: a new one replaces it; page null cancels. Expires after 5s.
+	 */
+	| { type: "prefetch"; page: number | null; rect?: Rect }
 	| { type: "request"; id: number; request: Request }
 	/** stop a running request (searches); it answers with `{ error: "cancelled" }` */
 	| { type: "cancel"; id: number }
@@ -306,7 +339,8 @@ export type CoreEvent =
 	| { type: "painted"; page: number; timing?: { firstTileAt: number; paintedAt: number } }
 	/** `fitWidth`: fit-width mode (kept for compatibility); `fit`: the sticky fit mode, if any */
 	| { type: "view"; zoom: number; page: number; pageCount: number; fitWidth: boolean; fit: "width" | "page" | null }
-	| { type: "camera"; camera: Camera; moving: boolean }
+	/** `passing`: a long glide/zoom-out is crossing pages it will not stop on (skip per-page work for them) */
+	| { type: "camera"; camera: Camera; moving: boolean; passing?: boolean }
 	| { type: "selection"; selection: SelectionInfo | null; final: boolean }
 	| { type: "cursor"; cursor: Cursor }
 	/** the canvas buffer now matches this css size (hosts size the element after this) */
@@ -421,9 +455,25 @@ const FADE_IN_MS = 150;
 const RIPPLE_MS = 1000;
 const FLASH_MS = 1200;
 
+/** past this many viewports (flightPath "zoom-out") a flight pulls back instead of easing straight */
+const ZOOM_PATH_MIN = 2;
+/** a pulled-back view is at most this many times taller than the start or end view */
+const ZOOM_OUT_MAX = 5;
+/** ...and never taller than this many pages, so pages stay readable as shapes */
+const ZOOM_OUT_PAGES = 3.5;
+/** blur length per unit of speed (css px per css px/ms) and its cap */
+const BLUR_SHUTTER_MS = 6;
+const BLUR_MAX_CSS = 24;
+/** blurred frames slower than this (median) turn the blur off for the session */
+const BLUR_SLOW_MS = 24;
+const DIM_MS = 650;
+const PREFETCH_MS = 5000;
+const PREFETCH_PRIORITY = 100;
+
 const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
 const PAGE_EDGE: Color = [0, 0, 0, 0.12];
 const WHITE: Color = [1, 1, 1, 1];
+const easeOutQuad = (t: number) => 1 - (1 - t) ** 2;
 
 /** pdf-fullpage-pulse keyframes (opacity relative to the peak), eased between keys */
 const FLASH_KEYS: [number, number][] = [
@@ -451,6 +501,15 @@ interface Flight {
 	id: number;
 	from: Camera;
 	to: Camera;
+	path: Path;
+	/** start speed (see `progress`) and the residual velocity a retarget carries off (state units/ms) */
+	v0: number;
+	rest: CamState;
+	/** false when a retarget keeps moving: waiting would freeze a moving camera */
+	wait: boolean;
+	/** pages passed on the way draw from the cache only: a far glide would otherwise raster every frame's view */
+	skim: boolean;
+	arrival: ArrivalCue | null;
 	/** fit mode once landed */
 	fit: Fit;
 	requested: number;
@@ -468,6 +527,11 @@ interface PendingJump {
 	id: number;
 	requested: number;
 	retarget: Flight["retarget"];
+	arrival: ArrivalCue | null;
+}
+
+function arrivalOf(a: ArrivalCue | undefined): ArrivalCue | null {
+	return a && Array.isArray(a.ids) && a.ids.length ? a : null;
 }
 
 export class ViewerCore {
@@ -538,6 +602,15 @@ export class ViewerCore {
 	private pending: PendingJump | null = null;
 	/** tiles a flight needs at its destination: eviction never drops these */
 	private pinned = new Set<string>();
+	/** a `draw` arrival keeps these hidden until the flight lands */
+	private hiddenUntilLand = new Set<string>();
+	private dim: { ids: string[]; start: number } | null = null;
+	private prefetchTarget: { page: number; rect?: Rect; at: number } | null = null;
+	/** this frame went through the motion-blur pass */
+	private blurOn = false;
+	/** the GPU proved too slow for the blur (or is a software renderer) */
+	private blurOff = false;
+	private blurIntervals: number[] = [];
 
 	// touch
 	private touches = new Map<number, { x: number; y: number }>();
@@ -694,16 +767,8 @@ export class ViewerCore {
 			const viewH = this.vh / this.cam.zoom;
 			if (this.pendingFraction !== null) this.cam.y = this.pendingFraction * Math.max(0, this.docH - viewH);
 			else this.cam.y = anchoredY(before, this.layout, this.cam.y, viewH);
-			const f = this.flight;
-			if (f) {
-				f.from = { ...f.from, y: anchoredY(before, this.layout, f.from.y, this.vh / f.from.zoom) };
-				const next = f.retarget();
-				if (next) {
-					f.to = next.cam;
-					f.fit = next.fit;
-				}
-			}
 			this.clampCamera();
+			this.reaimFlight();
 		}
 		if (this.unknown === 0) this.pendingFraction = null;
 		this.emit({ type: "layout", pages: this.pages.map((p) => ({ ...p })), layout: this.layout.map((r) => ({ ...r })), complete: this.unknown === 0 });
@@ -899,50 +964,139 @@ export class ViewerCore {
 	}
 
 	/** Move the camera to the target, animated unless asked otherwise or reduced motion is on. */
-	private fly(id: number, animate: boolean, retarget: Flight["retarget"]) {
+	private fly(id: number, animate: boolean, retarget: Flight["retarget"], arrival: ArrivalCue | null = null) {
+		const prev = this.flight;
+		const carry = prev && prev.start >= 0 && this.opts.flightCarryVelocity && !this.opts.reducedMotion ? this.flightVelocity(prev, performance.now()) : null;
 		this.cancelFlight("jump");
 		this.velocity = { x: 0, y: 0 };
+		this.prefetchTarget = null;
+		this.dim = null;
 		if (!this.canAim()) {
-			this.pending = { id, requested: performance.now(), retarget };
+			this.pending = { id, requested: performance.now(), retarget, arrival };
 			return;
 		}
-		const target = retarget();
+		const target = prev ? this.aimFrom(prev, retarget) : retarget();
 		if (!target) {
+			this.showArrival(arrival, false);
 			if (id) this.emit({ type: "flight", id, landed: false, cause: "no-target", coverage: 0, waitMs: 0, durationMs: 0 });
 			return;
 		}
 		const to = target.cam;
-		const from = { ...this.cam };
-		const centre = (c: Camera) => ({ x: c.x + this.vw / 2 / c.zoom, y: c.y + this.vh / 2 / c.zoom });
-		const a = centre(from);
-		const b = centre(to);
-		const zoomSteps = Math.abs(Math.log2(to.zoom / from.zoom));
-		let dist = Math.hypot(b.x - a.x, b.y - a.y) * to.zoom;
+		const a = toState(this.cam, this.vw, this.vh);
+		const b = toState(to, this.vw, this.vh);
+		const zoomSteps = Math.abs(b.lz - a.lz) / Math.LN2;
+		const dist = Math.hypot(b.cx - a.cx, b.cy - a.cy) * to.zoom;
 		if (!animate || this.opts.reducedMotion || (dist < 1 && zoomSteps < 0.01)) {
-			this.land(id, target, 0);
+			this.land(id, target, 0, arrival);
 			return;
 		}
-		// Long jumps cut to one viewport short of the target and ease in from
-		// there: the pages in between are never drawn (or rasterised).
-		if (dist > FLIGHT_TELEPORT * this.vh) {
-			const k = 1 - this.vh / dist;
-			const cx = a.x + (b.x - a.x) * k;
-			const cy = a.y + (b.y - a.y) * k;
-			from.x = cx - this.vw / 2 / from.zoom;
-			from.y = cy - this.vh / 2 / from.zoom;
-			dist = this.vh;
-		}
-		const travel = dist / this.vh + zoomSteps * 0.5;
-		const dur = Math.min(600, Math.max(220, 180 + 90 * Math.log2(1 + travel)));
-		const fv = this.viewRect(0, from);
-		const tv = this.viewRect(0, to);
-		const pages = this.pagesIn({ y0: Math.min(fv.y0, tv.y0), y1: Math.max(fv.y1, tv.y1) });
-		this.flight = { id, from, to, fit: target.fit, requested: performance.now(), start: -1, dur, pages, retarget };
+		this.flight = this.makeFlight(id, target, retarget, arrival, carry);
+		if (this.opts.flightMotionBlur && !this.blurOff && !this.gl.software && !this.gl.lost) this.gl.blurProgram();
+		if (arrival && (arrival.kind ?? "ripple") === "draw") for (const h of arrival.ids) this.hiddenUntilLand.add(h);
 		this.requestFrame();
 	}
 
+	/**
+	 * Aims a jump that replaces `prev` as if `prev` had already reached its zoom
+	 * and fit mode: a camera caught mid-zoom (pulled back) must not set the new zoom.
+	 */
+	private aimFrom(prev: Flight, retarget: Flight["retarget"]) {
+		const live = this.cam;
+		const fit = this.fitMode;
+		this.cam = fromState({ ...toState(live, this.vw, this.vh), lz: Math.log(prev.to.zoom) }, this.vw, this.vh);
+		this.fitMode = prev.fit;
+		const target = retarget();
+		this.cam = live;
+		this.fitMode = fit;
+		return target;
+	}
+
+	/** Path, timing and the pages that must be ready, from the current camera to `target`. */
+	private makeFlight(id: number, target: { cam: Camera; fit: Fit }, retarget: Flight["retarget"], arrival: ArrivalCue | null, carry: CamState | null): Flight {
+		const to = target.cam;
+		const from = { ...this.cam };
+		let a = toState(from, this.vw, this.vh);
+		const b = toState(to, this.vw, this.vh);
+		const dist = Math.hypot(b.cx - a.cx, b.cy - a.cy) * to.zoom;
+		let path: Path;
+		let pages: number[];
+		let teleport = false;
+		const fv = this.viewRect(0, from);
+		const tv = this.viewRect(0, to);
+		const style = this.opts.flightPath;
+		if (style === "glide") {
+			path = glidePath(a, b, this.vh);
+			pages = [...new Set([...this.pagesIn(fv), ...this.pagesIn(tv)])];
+		} else if (style === "zoom-out" && dist > ZOOM_PATH_MIN * this.vh) {
+			const wide = Math.max(this.vh / from.zoom, this.vh / to.zoom);
+			const stride = this.pages.length ? Math.max(...this.pages.map((p) => p.h)) + this.opts.pageGap : wide;
+			const capW = Math.min(this.vh / this.opts.minZoom, Math.max(wide, Math.min(wide * ZOOM_OUT_MAX, stride * ZOOM_OUT_PAGES)));
+			path = zoomPath(a, b, this.vh, { capW, snapSkip: (skip, at, dir) => this.snapSkip(skip, at, dir) });
+			// Only the ends must be ready: pages passed while pulled back draw from whatever is cached.
+			pages = [...new Set([...this.pagesIn(fv), ...this.pagesIn(tv)])];
+		} else {
+			// Long jumps cut to one viewport short of the target and ease in from
+			// there: the pages in between are never drawn (or rasterised).
+			if (dist > FLIGHT_TELEPORT * this.vh) {
+				teleport = true;
+				const k = 1 - this.vh / dist;
+				a = { cx: a.cx + (b.cx - a.cx) * k, cy: a.cy + (b.cy - a.cy) * k, lz: a.lz };
+				Object.assign(from, fromState(a, this.vw, this.vh));
+			}
+			path = easePath(a, b, this.vh);
+			const cv = this.viewRect(0, from);
+			pages = this.pagesIn({ y0: Math.min(cv.y0, tv.y0), y1: Math.max(cv.y1, tv.y1) });
+		}
+		const dur = path.dur;
+		let v0 = path.kind === "ease" ? 3 : path.kind === "glide" ? 0 : 1.5;
+		let rest: CamState = { cx: 0, cy: 0, lz: 0 };
+		// A teleport cuts on its first frame anyway, so it may as well wait for bitmaps.
+		if (carry && !teleport) ({ v0, rest } = matchVelocity(path, dur, carry, from.zoom, this.vh));
+		const skim = path.kind !== "ease" && dist > FLIGHT_TELEPORT * this.vh;
+		return { id, from, to, path, v0, rest, skim, wait: !carry || teleport, arrival, fit: target.fit, requested: performance.now(), start: -1, dur, pages, retarget };
+	}
+
+	/** Moves a skip so the cut lands at the same spot of another page: the page grid looks unchanged across it. */
+	private snapSkip(skip: number, at: CamState, dir: { x: number; y: number }) {
+		if (Math.abs(dir.y) < 0.9 || this.layout.length < 2) return skip;
+		const pa = this.pageAtDocY(at.cy);
+		const pb = this.pageAtDocY(at.cy + skip * dir.y);
+		if (pa === pb) return skip;
+		const shift = this.layout[pb]!.y - this.layout[pa]!.y;
+		const sameSize = Math.abs(this.layout[pb]!.h - this.layout[pa]!.h) < 0.5;
+		return sameSize ? shift / dir.y : skip;
+	}
+
+	/** Camera state of a flight at time `now` (unclamped). */
+	private flightState(f: Flight, now: number): CamState {
+		const t = Math.max(0, Math.min(1, (now - f.start) / f.dur));
+		const s = f.path.at(progress(t, f.v0));
+		const k = kick(t) * f.dur;
+		return { cx: s.cx + f.rest.cx * k, cy: s.cy + f.rest.cy * k, lz: s.lz + f.rest.lz * k };
+	}
+
+	/** Camera velocity of a moving flight, state units per ms. */
+	private flightVelocity(f: Flight, now: number): CamState {
+		let t = Math.min(now, f.start + f.dur);
+		const h = (ms: number) => progress(Math.max(0, Math.min(1, (ms - f.start) / f.dur)), f.v0);
+		// Never difference across a capped path's skip: that is a cut, not motion.
+		if (h(t - 8) < f.path.cutAt && h(t) >= f.path.cutAt) t = h(t + 8) < 1 ? t + 8 : t - 8;
+		const a = this.flightState(f, t - 8);
+		const b = this.flightState(f, t);
+		return { cx: (b.cx - a.cx) / 8, cy: (b.cy - a.cy) / 8, lz: (b.lz - a.lz) / 8 };
+	}
+
+	/** A flight in progress re-aims at the same target from where the camera is now (new viewport or layout), keeping its speed. */
+	private reaimFlight() {
+		const f = this.flight;
+		const next = f?.retarget();
+		if (!f || !next) return;
+		const vel = f.start >= 0 ? this.flightVelocity(f, performance.now()) : null;
+		this.flight = { ...this.makeFlight(f.id, next, f.retarget, f.arrival, vel), requested: f.requested };
+	}
+
 	/** Put the camera on `target` now. */
-	private land(id: number, target: { cam: Camera; fit: Fit }, waitMs: number) {
+	private land(id: number, target: { cam: Camera; fit: Fit }, waitMs: number, arrival: ArrivalCue | null) {
 		this.pendingFraction = null;
 		const zoomed = target.cam.zoom !== this.cam.zoom;
 		this.cam = { ...target.cam };
@@ -950,6 +1104,7 @@ export class ViewerCore {
 		if (zoomed) this.zoomChanged();
 		this.sharpWait = { cause: "jump", since: performance.now() };
 		this.requestFrame();
+		this.showArrival(arrival, true);
 		if (id) this.emit({ type: "flight", id, landed: true, coverage: this.coverage(this.pagesIn(this.viewRect())), waitMs, durationMs: 0 });
 	}
 
@@ -959,8 +1114,12 @@ export class ViewerCore {
 		if (!p || !this.canAim()) return;
 		this.pending = null;
 		const target = p.retarget();
-		if (target) this.land(p.id, target, performance.now() - p.requested);
-		else if (p.id) this.emit({ type: "flight", id: p.id, landed: false, cause: "no-target", coverage: 0, waitMs: 0, durationMs: 0 });
+		if (target) {
+			this.land(p.id, target, performance.now() - p.requested, p.arrival);
+			return;
+		}
+		this.showArrival(p.arrival, false);
+		if (p.id) this.emit({ type: "flight", id: p.id, landed: false, cause: "no-target", coverage: 0, waitMs: 0, durationMs: 0 });
 	}
 
 	/** The view lost its size mid-flight: finish the move unseen and re-aim once it is back. */
@@ -969,11 +1128,12 @@ export class ViewerCore {
 		if (!f) return;
 		this.flight = null;
 		this.pinned.clear();
+		this.endBlur();
 		const zoomed = f.to.zoom !== this.cam.zoom;
 		this.cam = { ...f.to };
 		this.fitMode = f.fit;
 		if (zoomed) this.zoomChanged();
-		this.pending = { id: f.id, requested: f.requested, retarget: f.retarget };
+		this.pending = { id: f.id, requested: f.requested, retarget: f.retarget, arrival: f.arrival };
 	}
 
 	/** Stop a flight where it is (user input or another jump); a waiting jump is dropped. */
@@ -982,12 +1142,15 @@ export class ViewerCore {
 		const p = this.pending;
 		if (p) {
 			this.pending = null;
+			this.showArrival(p.arrival, false);
 			if (p.id) this.emit({ type: "flight", id: p.id, landed: false, cause, coverage: 0, waitMs: 0, durationMs: 0 });
 		}
 		const f = this.flight;
 		if (!f) return;
 		this.flight = null;
 		this.pinned.clear();
+		this.endBlur();
+		this.showArrival(f.arrival, false);
 		if (this.cam.zoom !== f.from.zoom) {
 			this.fitMode = false;
 			this.zoomChanged();
@@ -996,12 +1159,40 @@ export class ViewerCore {
 		this.requestFrame();
 	}
 
+	/** Un-hides an arrival's highlights; plays its cue only when the camera landed. */
+	private showArrival(arrival: ArrivalCue | null, landed: boolean) {
+		if (!arrival) return;
+		for (const h of arrival.ids) this.hiddenUntilLand.delete(h);
+		if (landed && !this.opts.reducedMotion) this.pulse(arrival.ids, arrival.kind ?? "ripple", undefined, !!arrival.dim);
+		this.requestFrame();
+	}
+
+	private pulse(ids: string[], kind: PulseKind, duration: number | undefined, dim: boolean) {
+		const now = performance.now();
+		for (const id of ids) {
+			const h = this.highlights.find((x) => x.id === id);
+			const dur = duration ?? (kind === "flash" ? FLASH_MS : kind === "draw" ? Math.min(700, 280 + 90 * (h?.rects.length ?? 1)) : RIPPLE_MS);
+			this.pulses.set(id, { kind, start: now, dur });
+		}
+		if (dim && !this.opts.reducedMotion) this.dim = { ids, start: now };
+		this.requestFrame();
+	}
+
+	private endBlur() {
+		if (this.blurIntervals.length >= 6) {
+			const s = [...this.blurIntervals].sort((a, b) => a - b);
+			if (s[s.length >> 1]! > BLUR_SLOW_MS) this.blurOff = true;
+		}
+		this.blurIntervals = [];
+		this.gl.freeBlur();
+	}
+
 	/** Advance the flight for this frame; true while it is still going. */
 	private stepFlight(now: number) {
 		const f = this.flight;
 		if (!f) return false;
 		if (f.start < 0) {
-			const ready = f.pages.every((p) => this.hasPageBitmap(p));
+			const ready = !f.wait || f.pages.every((p) => this.hasPageBitmap(p));
 			if (!ready && performance.now() - f.requested < FLIGHT_WAIT_MS) return true;
 			f.start = now;
 		}
@@ -1012,20 +1203,15 @@ export class ViewerCore {
 			this.flight = null;
 			this.pinned.clear();
 			this.sharpWait = { cause: "jump", since: performance.now() };
+			this.endBlur();
+			this.showArrival(f.arrival, true);
 			if (f.id) {
 				const waitMs = Math.max(0, f.start - f.requested);
 				this.emit({ type: "flight", id: f.id, landed: true, coverage: this.coverage(this.pagesIn(this.viewRect())), waitMs, durationMs: f.dur });
 			}
 			return false;
 		}
-		const e = easeOutCubic(t);
-		// Zoom moves in log space; the viewport centre moves in a straight line.
-		const z = Math.exp(Math.log(f.from.zoom) + (Math.log(f.to.zoom) - Math.log(f.from.zoom)) * e);
-		const ax = f.from.x + this.vw / 2 / f.from.zoom;
-		const ay = f.from.y + this.vh / 2 / f.from.zoom;
-		const bx = f.to.x + this.vw / 2 / f.to.zoom;
-		const by = f.to.y + this.vh / 2 / f.to.zoom;
-		this.cam = this.clampCam({ x: ax + (bx - ax) * e - this.vw / 2 / z, y: ay + (by - ay) * e - this.vh / 2 / z, zoom: z });
+		this.cam = this.clampCam(fromState(this.flightState(f, now), this.vw, this.vh));
 		return true;
 	}
 
@@ -1122,13 +1308,7 @@ export class ViewerCore {
 					this.cam.x = anchorX - this.vw / 2 / this.cam.zoom;
 					this.cam.y = anchorY;
 					this.clampCamera();
-					// A flight in progress re-aims at the same rect in the new viewport.
-					const f = this.flight;
-					const next = f?.retarget();
-					if (f && next) {
-						f.to = next.cam;
-						f.fit = next.fit;
-					}
+					this.reaimFlight();
 				}
 				if (this.vw > 0 && this.vh > 0) this.measuredW = this.vw;
 				this.landPending();
@@ -1546,7 +1726,7 @@ export class ViewerCore {
 			}
 			case "goto": {
 				const { page, top, offset } = cmd;
-				this.fly(cmd.flight ?? 0, cmd.animate ?? false, () => this.gotoTarget(page, top, offset));
+				this.fly(cmd.flight ?? 0, cmd.animate ?? false, () => this.gotoTarget(page, top, offset), arrivalOf(cmd.arrival));
 				return;
 			}
 			case "reveal": {
@@ -1557,7 +1737,7 @@ export class ViewerCore {
 					const t = this.revealTarget(page, rect, align, first && ifNeeded, offset);
 					first = false;
 					return t;
-				});
+				}, arrivalOf(cmd.arrival));
 				return;
 			}
 			case "highlights": {
@@ -1571,11 +1751,13 @@ export class ViewerCore {
 				this.requestFrame();
 				return;
 			}
-			case "pulse": {
-				const now = performance.now();
-				const kind = cmd.kind ?? "ripple";
-				const dur = cmd.duration ?? (kind === "flash" ? FLASH_MS : RIPPLE_MS);
-				for (const id of cmd.ids) this.pulses.set(id, { kind, start: now, dur });
+			case "pulse":
+				this.pulse(cmd.ids, cmd.kind ?? "ripple", cmd.duration, !!cmd.dim);
+				return;
+			case "prefetch": {
+				const { page, rect } = cmd;
+				const valid = page !== null && Number.isInteger(page) && page >= 0 && page < this.layout.length && (!rect || [rect.x, rect.y, rect.w, rect.h].every(Number.isFinite));
+				this.prefetchTarget = valid ? { page, rect, at: performance.now() } : null;
 				this.requestFrame();
 				return;
 			}
@@ -2181,9 +2363,19 @@ export class ViewerCore {
 		const nearSet = new Set(near);
 		for (let p = first; p <= last; p++) baseTile(p, (nearSet.has(p) ? 0 : 25) + Math.abs(this.layout[p]!.y + this.layout[p]!.h / 2 - cy) / 1e6);
 
+		const pf = this.prefetchTarget;
+		if (pf && now - pf.at > PREFETCH_MS) this.prefetchTarget = null;
+		else if (pf && !flight && roomAhead) {
+			const t = pf.rect ? this.revealTarget(pf.page, pf.rect) : this.gotoTarget(pf.page);
+			const land = t ? this.pagesIn(this.viewRect(0, t.cam)).slice(0, 2) : [];
+			// range loading: an estimated page needs its real size before it can be rastered
+			this.requestSizes([pf.page, ...land], PREFETCH_PRIORITY);
+			for (const p of land) baseTile(p, PREFETCH_PRIORITY + p * 1e-6);
+		}
+
 		// 2. sharp tiles: visible first (by distance from centre), then look-ahead.
 		// In flight, what passes by mid-way comes after the destination.
-		const passing = flight && flight.to.zoom === this.cam.zoom ? ([visible, this.viewRect(), 20] as const) : null;
+		const passing = flight && !flight.skim && flight.to.zoom === this.cam.zoom ? ([visible, this.viewRect(), 20] as const) : null;
 		for (const [pages, region, base] of [[targetVisible, view, 10] as const, ...(passing ? [passing] : []), [near, ahead, 30] as const]) {
 			for (const p of pages) {
 				if (base === 10) this.requestText(p, 20);
@@ -2324,6 +2516,7 @@ export class ViewerCore {
 		// A lost context draws nothing; `contextRestored` asks for a frame.
 		if (!this.dirty || !this.canAim() || this.disposed || this.gl.lost) return;
 		const cpu0 = performance.now();
+		if (this.blurOn && this.lastFrame) this.blurIntervals.push(now - this.lastFrame);
 		const dt = this.lastFrame ? Math.min(64, now - this.lastFrame) : 16;
 		if (this.lastFrame) this.recordFrame(now);
 		this.lastFrame = now;
@@ -2356,7 +2549,10 @@ export class ViewerCore {
 
 		const visible = this.plan(now);
 		this.uploadArrived(visible);
+		const blur = this.motionBlur(now);
+		this.blurOn = !!blur && this.gl.blurTarget();
 		const sharp = this.draw(visible, now);
+		if (this.blurOn && blur) this.gl.presentBlur(blur.pan, blur.zoom, blur.max);
 		if (this.marksAnimating(now)) moving = true;
 		this.evict(this.frameId);
 		this.reportSharp(sharp);
@@ -2403,6 +2599,7 @@ export class ViewerCore {
 
 	/** Highlight opacity from its fade-in and any flash pulse. */
 	private markAlpha(id: string, now: number) {
+		if (this.hiddenUntilLand.has(id)) return 0;
 		let a = 1;
 		const born = this.born.get(id);
 		if (born !== undefined && now - born < FADE_IN_MS) a *= easeOutCubic(Math.max(0, now - born) / FADE_IN_MS);
@@ -2415,8 +2612,10 @@ export class ViewerCore {
 		for (const born of this.born.values()) if (now - born < FADE_IN_MS) return true;
 		for (const [id, p] of this.pulses) {
 			if (now - p.start < p.dur) return true;
-			if (p.kind === "ripple") this.pulses.delete(id);
+			if (p.kind !== "flash") this.pulses.delete(id);
 		}
+		if (this.dim && now - this.dim.start < DIM_MS) return true;
+		this.dim = null;
 		return false;
 	}
 
@@ -2465,8 +2664,11 @@ export class ViewerCore {
 			}
 			// Coarse first, the target scale last so it ends up on top.
 			ready.sort((a, b) => (a.scale === target ? 1 : 0) - (b.scale === target ? 1 : 0) || a.scale - b.scale);
+			// Pulled back below the base bitmap's scale: sharper tiles would only shimmer (no mipmaps).
+			const baseOnly = this.flight?.path.kind === "zoom" && S <= this.baseScale(p) ? ready.findIndex((t) => t.scale === this.baseScale(p) && t.x === 0 && t.y === 0) : -1;
+			if (baseOnly >= 0) ready.splice(0, ready.length, ready[baseOnly]!);
 			// If the target scale fully covers the view, skip the fallbacks.
-			const covered = this.coveredByTarget(p, ready, target);
+			const covered = baseOnly < 0 && this.coveredByTarget(p, ready, target);
 			const start = covered ? ready.findIndex((t) => t.scale === target) : 0;
 			const base = this.baseScale(p);
 			if (!covered && !(target <= base && ready.some((t) => t.scale === base))) sharp = false;
@@ -2491,8 +2693,8 @@ export class ViewerCore {
 			};
 			const drawMarks = (dark: boolean) => {
 				const markBlend = dark ? "lighten" : "multiply";
-				const drawHighlight = (h: Highlight, alpha: number, grow: number) => {
-					if (alpha <= 0.002) return;
+				const drawHighlight = (h: Highlight, alpha: number, grow: number, sweep = 1) => {
+					if (alpha <= 0.002 || sweep <= 0) return;
 					const base = h.color ?? highlightColor;
 					const c: Color = [base[0], base[1], base[2], base[3] * alpha];
 					const color = mark(c, dark);
@@ -2503,10 +2705,14 @@ export class ViewerCore {
 						h.rects.some(
 							(o) => o !== q && o.x < q.x + q.w && q.x < o.x + o.w && Math.abs(edge === "top" ? o.y + o.h - q.y : q.y + q.h - o.y) < 1,
 						);
+					let left = sweep < 1 ? sweep * h.rects.reduce((sum, q) => sum + q.w, 0) : Infinity;
 					for (const q of h.rects) {
+						const qw = Math.min(q.w, left);
+						left -= q.w;
+						if (qw <= 0) break;
 						let x = sx + q.x * S;
 						let y = sy + q.y * S;
-						let w = q.w * S;
+						let w = qw * S;
 						let hh = q.h * S;
 						if (grow > 0) {
 							const g = grow * S;
@@ -2531,8 +2737,9 @@ export class ViewerCore {
 				for (const h of this.highlights) {
 					if (h.page !== p) continue;
 					const alpha = this.markAlpha(h.id, now);
-					drawHighlight(h, alpha, 0);
 					const pulse = this.pulses.get(h.id);
+					const sweep = pulse?.kind === "draw" ? easeOutQuad(Math.min(1, Math.max(0, now - pulse.start) / pulse.dur)) : 1;
+					drawHighlight(h, alpha, 0, sweep);
 					if (pulse?.kind !== "ripple") continue;
 					const t = Math.max(0, now - pulse.start) / pulse.dur;
 					if (t >= 1) continue;
@@ -2581,6 +2788,7 @@ export class ViewerCore {
 				gl.setTone({ paper, ink });
 			}
 		}
+		this.drawDim(now, dark);
 		const ends = this.handles ? this.handleEnds() : null;
 		if (ends) {
 			const d = this.dpr;
@@ -2613,6 +2821,61 @@ export class ViewerCore {
 		const log = this.tileLog;
 		this.tileLog = [];
 		return { drawn: area ? drawn / area : 1, sharp: this.coverage(this.pagesIn(view)), pending: this.pool.pending, textureMB: this.gl.textureBytes / 1048576, workerMB: this.pool.heapBytes / 1048576, log };
+	}
+
+	/** Darkens everything but the dimmed highlights' bounding box: in fast, hold, out slow. */
+	private drawDim(now: number, dark: boolean) {
+		const dim = this.dim;
+		if (!dim) return;
+		const t = (now - dim.start) / DIM_MS;
+		if (t < 0 || t >= 1) return;
+		const k = t < 0.15 ? t / 0.15 : t < 0.45 ? 1 : 1 - (t - 0.45) / 0.55;
+		const a = (dark ? 0.3 : 0.06) * k * k * (3 - 2 * k);
+		const S = this.cam.zoom * this.dpr;
+		let x0 = Infinity;
+		let y0 = Infinity;
+		let x1 = -Infinity;
+		let y1 = -Infinity;
+		for (const h of this.highlights) {
+			if (!dim.ids.includes(h.id)) continue;
+			const r = this.layout[h.page];
+			if (!r) continue;
+			for (const q of h.rects) {
+				x0 = Math.min(x0, (r.x + q.x - this.cam.x) * S);
+				y0 = Math.min(y0, (r.y + q.y - this.cam.y) * S);
+				x1 = Math.max(x1, (r.x + q.x + q.w - this.cam.x) * S);
+				y1 = Math.max(y1, (r.y + q.y + q.h - this.cam.y) * S);
+			}
+		}
+		if (!(x1 > x0 && y1 > y0)) return;
+		const pad = 4 * this.dpr;
+		const W = this.vw * this.dpr;
+		const H = this.vh * this.dpr;
+		x0 = Math.max(0, x0 - pad);
+		y0 = Math.max(0, y0 - pad);
+		x1 = Math.min(W, x1 + pad);
+		y1 = Math.min(H, y1 + pad);
+		const c: Color = [0, 0, 0, a];
+		this.gl.drawRect(0, 0, W, y0, c, "alpha");
+		this.gl.drawRect(0, y1, W, H - y1, c, "alpha");
+		this.gl.drawRect(0, y0, x0, y1 - y0, c, "alpha");
+		this.gl.drawRect(x1, y0, W - x1, y1 - y0, c, "alpha");
+	}
+
+	/** Screen motion of the page content over the blur's shutter, or null when too slow to see. */
+	private motionBlur(now: number): { pan: [number, number]; zoom: number; max: number } | null {
+		const f = this.flight;
+		if (!f || f.start < 0 || !this.opts.flightMotionBlur || this.opts.reducedMotion || this.blurOff || this.gl.software) return null;
+		const c0 = this.clampCam(fromState(this.flightState(f, now - 8), this.vw, this.vh));
+		const c1 = this.cam;
+		const k = BLUR_SHUTTER_MS / 8;
+		const d = this.dpr;
+		// A doc point at screen s moves by s * (1 - z0/z1) - (cam1 - cam0) * z0.
+		const zoom = (1 - c0.zoom / c1.zoom) * k;
+		const pan: [number, number] = [-(c1.x - c0.x) * c0.zoom * d * k, -(c1.y - c0.y) * c0.zoom * d * k];
+		const reach = Math.hypot(pan[0], pan[1]) + Math.abs(zoom) * Math.hypot(this.vw * d, this.vh * d);
+		if (reach < 2.5) return null;
+		return { pan, zoom, max: BLUR_MAX_CSS * d };
 	}
 
 	private coveredByTarget(page: number, ready: Tile[], target: number) {
@@ -2653,7 +2916,7 @@ export class ViewerCore {
 		const cam = this.cam;
 		if (cam.x !== this.lastCam.x || cam.y !== this.lastCam.y || cam.zoom !== this.lastCam.zoom) {
 			this.lastCam = { ...cam };
-			this.emit({ type: "camera", camera: { ...cam }, moving: true });
+			this.emit({ type: "camera", camera: { ...cam }, moving: true, ...(this.flight?.skim ? { passing: true } : {}) });
 			this.cameraIdle();
 		}
 		if (page === this.lastView.page && this.cam.zoom === this.lastView.zoom && this.fitMode === this.lastView.fit) return;

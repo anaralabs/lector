@@ -9,7 +9,8 @@
   #viewer { position: fixed; inset: 0; outline: none; }
   #hud { position: fixed; top: 8px; right: 8px; padding: 8px 10px; background: rgba(20,20,24,.82); color: #e8e8ec; border-radius: 8px; pointer-events: none; white-space: pre; min-width: 220px; }
   #bar { position: fixed; top: 8px; left: 8px; display: flex; gap: 6px; }
-  #bar button, #bar label { font: inherit; padding: 4px 8px; border-radius: 6px; border: 1px solid #c8c8d0; background: #fff; cursor: pointer; }
+  #polishbar { position: fixed; bottom: 8px; left: 8px; display: flex; gap: 6px; }
+  #bar button, #bar label, #polishbar button { font: inherit; padding: 4px 8px; border-radius: 6px; border: 1px solid #c8c8d0; background: #fff; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -18,6 +19,13 @@
   <button id="zin">+</button><button id="zout">−</button><button id="fit">fit</button>
   <button id="jank" title="Block the main thread 50ms every 100ms, to prove frames don't depend on it">jank: off</button>
   <label>open <input id="file" type="file" accept="application/pdf" hidden /></label>
+</div>
+<div id="polishbar">
+  <button id="polish" title="Citation jumps: glide + motion blur + carried velocity + draw-in arrival + hover prefetch, or main's cut">flight</button>
+  <button id="cite-far" title="Jump to a passage far away (hover prefetches it)">cite far</button>
+  <button id="cite-near" title="Jump to a passage two pages away">cite near</button>
+  <button id="cite-chain" title="Three jumps 160ms apart: each retargets the moving camera">cite ×3</button>
+  <button id="motion" title="prefers-reduced-motion">motion: full</button>
 </div>
 <div id="hud">loading…</div>
 <script type="module" src="./main.ts"></script>

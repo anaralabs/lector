@@ -67,12 +67,13 @@ export class TextLayer {
 		this.update();
 	}
 
-	setCamera(cam: Camera) {
+	/** `passing`: a long jump is crossing pages it will not stop on; their text is not loaded. */
+	setCamera(cam: Camera, passing = false) {
 		this.cam = cam;
 		const z = cam.zoom;
 		// The only per-frame write: a compositor-only transform.
 		this.root.style.transform = `matrix(${z},0,0,${z},${-cam.x * z},${-cam.y * z})`;
-		this.update();
+		if (!passing) this.update();
 	}
 
 	/** Pages whose text is in the DOM (visible ±1). */
