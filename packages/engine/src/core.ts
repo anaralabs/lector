@@ -1962,10 +1962,11 @@ export class ViewerCore {
 	private uploadArrived(visible: number[]) {
 		const t0 = performance.now();
 		let bytes = 0;
-		// Pixels for tiles this frame no longer plans are dropped rather than held until the budget reaches them.
-		if (this.arrived.some((a) => a.tile.lastWanted !== this.frameId)) {
+		// Off-screen pixels nothing plans any more are dropped; on-screen ones still serve as fallbacks (old zoom levels).
+		const stale = (tile: Tile) => tile.lastWanted !== this.frameId && !visible.includes(tile.page);
+		if (this.arrived.some((a) => stale(a.tile))) {
 			this.arrived = this.arrived.filter(({ tile }) => {
-				if (tile.lastWanted === this.frameId) return true;
+				if (!stale(tile)) return true;
 				tile.arrived = false;
 				if (this.tiles.get(tile.key) === tile && !tile.tex) this.dropTile(tile);
 				return false;
