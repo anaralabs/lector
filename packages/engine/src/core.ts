@@ -81,6 +81,13 @@ export const defaultOptions: CoreOptions = {
 
 export type PointerKind = "mouse" | "touch" | "pen";
 
+/**
+ * Why a flight did not land: `input` (wheel, gesture, pointer down or key on the
+ * viewer), `command` (the host sent zoom/fit/scroll), `jump` (a newer
+ * goto/reveal), `no-target` (no camera yet, or the destination was invalid).
+ */
+export type FlightCause = "input" | "command" | "jump" | "no-target";
+
 export type InputMsg =
 	| { type: "resize"; w: number; h: number; dpr: number }
 	| { type: "wheel"; x: number; y: number; dx: number; dy: number; ctrl: boolean; mode: number }
@@ -273,11 +280,11 @@ export type CoreEvent =
 	/** the browser restored a lost WebGL context (after a `gpu`/`render` error); tiles are redrawing */
 	| { type: "restored" }
 	/**
-	 * An animated (or instant) reveal/goto finished. `landed: false` when input or
-	 * another jump interrupted it. `coverage`: share of the landing view already
+	 * An animated (or instant) reveal/goto finished. `landed: false` comes with a
+	 * `cause` (see FlightCause). `coverage`: share of the landing view already
 	 * covered by sharp tiles; `waitMs`: how long the flight waited for bitmaps.
 	 */
-	| { type: "flight"; id: number; landed: boolean; coverage: number; waitMs: number; durationMs: number }
+	| { type: "flight"; id: number; landed: boolean; cause?: FlightCause; coverage: number; waitMs: number; durationMs: number }
 	| { type: "stats"; stats: Stats }
 	/** `code`/`phase` say what failed and when (see ErrorCode, ErrorPhase) */
 	| { type: "error"; message: string; code: ErrorCode; phase: ErrorPhase };
@@ -634,11 +641,11 @@ export class ViewerCore {
 
 	/** Move the camera to the target, animated unless asked otherwise or reduced motion is on. */
 	private fly(id: number, animate: boolean, retarget: Flight["retarget"]) {
-		this.cancelFlight();
+		this.cancelFlight("jump");
 		this.velocity = { x: 0, y: 0 };
 		const target = this.camReady ? retarget() : null;
 		if (!target) {
-			if (id) this.emit({ type: "flight", id, landed: false, coverage: 0, waitMs: 0, durationMs: 0 });
+			if (id) this.emit({ type: "flight", id, landed: false, cause: "no-target", coverage: 0, waitMs: 0, durationMs: 0 });
 			return;
 		}
 		const to = target.cam;
@@ -677,7 +684,7 @@ export class ViewerCore {
 	}
 
 	/** Stop a flight where it is (user input or another jump). */
-	private cancelFlight() {
+	private cancelFlight(cause: FlightCause) {
 		const f = this.flight;
 		if (!f) return;
 		this.flight = null;
@@ -686,7 +693,7 @@ export class ViewerCore {
 			this.fitMode = false;
 			this.zoomChanged();
 		}
-		if (f.id) this.emit({ type: "flight", id: f.id, landed: false, coverage: 0, waitMs: 0, durationMs: 0 });
+		if (f.id) this.emit({ type: "flight", id: f.id, landed: false, cause, coverage: 0, waitMs: 0, durationMs: 0 });
 		this.requestFrame();
 	}
 
@@ -827,7 +834,7 @@ export class ViewerCore {
 				return;
 			}
 			case "wheel": {
-				this.cancelFlight();
+				this.cancelFlight("input");
 				const unit = msg.mode === 1 ? 16 : msg.mode === 2 ? this.vh : 1;
 				if (msg.ctrl) {
 					if (this.gestureZoom !== null) return;
@@ -841,19 +848,19 @@ export class ViewerCore {
 				return;
 			}
 			case "gesture": {
-				this.cancelFlight();
+				this.cancelFlight("input");
 				if (msg.phase === "start") this.gestureZoom = this.cam.zoom;
 				else if (msg.phase === "change" && this.gestureZoom !== null) this.userZoom(this.gestureZoom * msg.scale, msg.x, msg.y);
 				else this.gestureZoom = null;
 				return;
 			}
 			case "pointer":
-				if (msg.phase === "down") this.cancelFlight();
+				if (msg.phase === "down") this.cancelFlight("input");
 				if (msg.kind === "touch") this.touch(msg);
 				else this.mouse(msg);
 				return;
 			case "key":
-				this.cancelFlight();
+				this.cancelFlight("input");
 				this.key(msg);
 				return;
 			case "leave":
@@ -1192,17 +1199,17 @@ export class ViewerCore {
 		switch (cmd.type) {
 			case "zoom":
 				if (!Number.isFinite(cmd.zoom)) return;
-				this.cancelFlight();
+				this.cancelFlight("command");
 				this.userZoom(cmd.zoom, cmd.x ?? this.vw / 2, cmd.y ?? this.vh / 2);
 				return;
 			case "fit-width":
-				this.cancelFlight();
+				this.cancelFlight("command");
 				this.zoomAt(this.fitZoom("width"), this.vw / 2, 0);
 				this.fitMode = "width";
 				this.requestFrame();
 				return;
 			case "fit-page": {
-				this.cancelFlight();
+				this.cancelFlight("command");
 				const page = this.currentPage();
 				const zoom = this.clampZoom(this.fitZoom("page", page));
 				const zoomed = zoom !== this.cam.zoom;
@@ -1214,7 +1221,7 @@ export class ViewerCore {
 			}
 			case "scroll-to": {
 				if (!Number.isFinite(cmd.fraction)) return;
-				this.cancelFlight();
+				this.cancelFlight("command");
 				const viewH = this.vh / this.cam.zoom;
 				this.cam.y = Math.max(0, Math.min(1, cmd.fraction)) * Math.max(0, this.docH - viewH);
 				this.clampCamera();
@@ -1280,7 +1287,7 @@ export class ViewerCore {
 				return;
 			case "scroll-by":
 				if (!Number.isFinite(cmd.dx) || !Number.isFinite(cmd.dy)) return;
-				this.cancelFlight();
+				this.cancelFlight("command");
 				this.panBy(cmd.dx, cmd.dy);
 				return;
 			case "select-all":
