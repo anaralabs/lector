@@ -4,7 +4,7 @@
 // worker expected to finish it soonest: a worker that already has the page
 // loaded skips the parse and image decode, which dominate scanned pages.
 
-import type { DocumentInfo, ErrorCode, ErrorPhase, FromRaster, PageSize, ToRaster } from "./protocol";
+import type { DocumentInfo, ErrorCode, ErrorPhase, FromRaster, LoadFailureDetail, OpenTiming, PageSize, ToRaster } from "./protocol";
 
 export type TileResult = Extract<FromRaster, { t: "tile" }>;
 export type TextResult = Extract<FromRaster, { t: "text" }>;
@@ -87,9 +87,9 @@ export class RasterPool {
 	private nextId = 1;
 	/** in-flight tile jobs the last plan no longer wanted (cancelled when visible work waits) */
 	private unwanted = new Set<number>();
-	onOpened: (pages: PageSize[], info: DocumentInfo) => void = () => {};
+	onOpened: (pages: PageSize[], info: DocumentInfo, timing?: OpenTiming) => void = () => {};
 	onIdle: () => void = () => {};
-	onError: (message: string, code: ErrorCode, phase: ErrorPhase) => void = (m) => console.error(m);
+	onError: (message: string, code: ErrorCode, phase: ErrorPhase, detail?: LoadFailureDetail) => void = (m) => console.error(m);
 	now: () => number = () => performance.now();
 
 	constructor(ports: MessagePort[]) {
@@ -272,14 +272,15 @@ export class RasterPool {
 	private receive(lane: Lane, index: number, msg: FromRaster) {
 		if (msg.t === "opened") {
 			lane.ready = true;
-			if (index === 0) this.onOpened(msg.pages, msg.info);
+			const { wasmMs, wasmShared = false, openMs } = msg;
+			if (index === 0) this.onOpened(msg.pages, msg.info, wasmMs !== undefined && openMs !== undefined ? { wasmMs, wasmShared, openMs } : undefined);
 			this.pump();
 			return;
 		}
 		if (msg.t === "error") {
 			// Every worker opens the same bytes: report load failures once.
 			const load = msg.phase === "document-load" || msg.phase === "engine-load";
-			if (!load || index === 0) this.onError(msg.message, msg.code, msg.phase);
+			if (!load || index === 0) this.onError(msg.message, msg.code, msg.phase, msg.detail);
 			const job = lane.busy;
 			if (job) {
 				this.inflight.delete(job.msg.id);

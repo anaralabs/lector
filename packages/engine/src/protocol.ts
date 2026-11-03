@@ -86,9 +86,34 @@ export interface OutlineItem {
 	children: OutlineItem[];
 }
 
+/** the first raster worker's open path (worker-local durations) */
+export interface OpenTiming {
+	/** instantiating pdfium.wasm, including the download and compile when no preloaded module was shared */
+	wasmMs: number;
+	/** a preloaded module was shared with the worker */
+	wasmShared: boolean;
+	/** PDFium opening the document and reading the page sizes */
+	openMs: number;
+}
+
+/** The shape of a document PDFium could not open, for diagnosis without its content. */
+export interface LoadFailureDetail {
+	/** FPDF_GetLastError */
+	pdfium: "success" | "unknown" | "file" | "format" | "password" | "security" | "page";
+	/** what the first KB looks like: `html` is usually an error page served instead of the PDF */
+	header: "pdf" | "html" | "empty" | "other";
+	/** a /Linearized dictionary in the first KB */
+	linearized: boolean;
+	/** an /Encrypt entry in the last KB (the trailer) */
+	encrypted: boolean;
+	/** no %%EOF in the last KB: likely a cut-off download */
+	truncated: boolean;
+	sizeKB: number;
+}
+
 export type FromRaster =
-	| { t: "opened"; pages: PageSize[]; info: DocumentInfo }
-	| { t: "error"; message: string; code: ErrorCode; phase: ErrorPhase; id?: number }
+	| ({ t: "opened"; pages: PageSize[]; info: DocumentInfo } & Partial<OpenTiming>)
+	| { t: "error"; message: string; code: ErrorCode; phase: ErrorPhase; id?: number; detail?: LoadFailureDetail }
 	/** heap: the worker's WASM heap plus its block cache, in bytes */
 	| { t: "tile"; id: number; buf: ArrayBuffer; w: number; h: number; ms: number; heap: number }
 	| {
