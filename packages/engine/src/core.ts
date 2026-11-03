@@ -1962,6 +1962,15 @@ export class ViewerCore {
 	private uploadArrived(visible: number[]) {
 		const t0 = performance.now();
 		let bytes = 0;
+		// Pixels for tiles this frame no longer plans are dropped rather than held until the budget reaches them.
+		if (this.arrived.some((a) => a.tile.lastWanted !== this.frameId)) {
+			this.arrived = this.arrived.filter(({ tile }) => {
+				if (tile.lastWanted === this.frameId) return true;
+				tile.arrived = false;
+				if (this.tiles.get(tile.key) === tile && !tile.tex) this.dropTile(tile);
+				return false;
+			});
+		}
 		if (this.arrived.length > 1) this.arrived.sort((a, b) => this.uploadRank(a.tile, visible) - this.uploadRank(b.tile, visible));
 		while (this.arrived.length > 0 && performance.now() - t0 < UPLOAD_BUDGET_MS) {
 			const next = this.arrived[0]!;
@@ -2093,10 +2102,11 @@ export class ViewerCore {
 		if (ms > SUSPENDED_MS) return;
 		if (continuous) {
 			this.frameTimes.push(ms);
-			this.vsync = Math.min(ms, this.vsync + 0.05);
-			if (ms > this.vsync * 1.5) {
-				if (this.uploadedLast > 0) this.uploadBudget = Math.max(UPLOAD_MIN, this.uploadBudget / 2);
-			} else this.uploadBudget = Math.min(UPLOAD_MAX, this.uploadBudget + UPLOAD_MIN);
+			const late = ms > this.vsync * 1.5;
+			// Late frames without uploads are the display's cadence (30Hz, throttled tab), so they still move the estimate.
+			if (!late || this.uploadedLast === 0) this.vsync += (ms - this.vsync) * 0.05;
+			if (!late) this.uploadBudget = Math.min(UPLOAD_MAX, this.uploadBudget + UPLOAD_MIN);
+			else if (this.uploadedLast > 0) this.uploadBudget = Math.max(UPLOAD_MIN, this.uploadBudget / 2);
 		}
 		this.windowFrames++;
 		if (ms > this.worstFrame) this.worstFrame = ms;
