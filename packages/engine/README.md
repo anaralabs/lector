@@ -184,7 +184,7 @@ interface Viewer {
 }
 ```
 
-- `goToPage`/`reveal` resolve `true` when the camera lands and `false` when input or another jump interrupted it. `offset` is in css px: for `goToPage`, the gap kept above the target (default `pageGap`); for `reveal`, added to where the rect lands (e.g. under a sticky header).
+- `goToPage`/`reveal` resolve `true` when the camera lands and `false` when input, a view command or another jump interrupted it, or the destination does not exist. They can be called at any time, even before `ready` or while the container is hidden (`display: none`, a collapsed pane, a background tab): the jump waits until the document is open and the view has a size, then lands there instantly, before the first frame at that size. Only the latest waiting jump is kept (an older one resolves `false` with cause `jump`). `offset` is in css px: for `goToPage`, the gap kept above the target (default `pageGap`); for `reveal`, added to where the rect lands (e.g. under a sticky header).
 - `scrollState()` reports the position as a scroll container would (`top` of `height`, at the current zoom), for persistence and custom scrollbars. Restore with `initialOffset` (same zoom) or `initialCamera` (exact).
 - In fit-page mode, `goToPage`, `reveal` and link jumps fit the destination page (pages of different sizes get different zooms).
 - `destroy()` stops the frame loop, terminates the workers, frees GPU resources, removes the canvas and overlay and restores the container's styles. Nothing is left pending: `loaded` (if still waiting) and every waiting request (`pageText`, `outline`, `thumbnail`, `rects`, ...) reject with an `EngineError` whose `code` is `"destroyed"` (phase `"request"`), running searches reject with an `AbortError`, `goToPage`/`reveal` resolve `false` and `unlock` resolves `false`. Requests made after `destroy()` reject right away. If the document or the engine fails to load, waiting requests reject with that load error instead. A worker that fails (fails to load, or throws outside a request, before or after `ready`) is terminal: an `error` event with code `worker` is emitted, then the viewer tears itself down as `destroy()` would, rejecting waiting requests with that error.
@@ -222,7 +222,7 @@ interface SearchHit {
 | `selection { selection, final }` | |
 | `cursor`, `resized`, `link { url }`, `click { page, x, y }` | |
 | `highlight-click { id, screen }`, `highlight-hover { id, screen }` | |
-| `flight { id, landed, cause, coverage, waitMs, durationMs }` | a goto/reveal finished; when `landed` is false, `cause` is `"input"` (wheel, gesture, pointer down or key), `"command"` (a zoom/fit/scroll call), `"jump"` (a newer goto/reveal) or `"no-target"` (no camera yet or an invalid destination) |
+| `flight { id, landed, cause, coverage, waitMs, durationMs }` | a goto/reveal finished; when `landed` is false, `cause` is `"input"` (wheel, gesture, pointer down or key), `"command"` (a zoom/fit/scroll call), `"jump"` (a newer goto/reveal) or `"no-target"` (no such page, or a non-finite rect). `waitMs` includes the time a jump waited for the view to get a size |
 | `search-progress { id, results }` | partial `searchAsync` results |
 | `find` | Cmd/Ctrl+F with `interceptFind` |
 | `stats` | frame and memory statistics (`workerMB`: PDFium heaps + block caches) |
