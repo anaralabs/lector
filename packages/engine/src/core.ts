@@ -4,9 +4,10 @@
 
 import { markColor } from "./colors";
 import { Compositor } from "./gl";
+import { anchoredY, buildLayout, estimateSizes } from "./layout";
 import { uploadRank } from "./upload-rank";
-import type { DocumentInfo, ErrorCode, ErrorPhase, Link, LoadFailureDetail, OpenTiming, OutlineItem, PageSize } from "./protocol";
-import { RasterPool, type TextResult, type TileResult } from "./raster-pool";
+import type { DocumentInfo, ErrorCode, ErrorPhase, Link, LoadFailureDetail, OpenTiming, OutlineItem, PageSize, SizeEntry } from "./protocol";
+import { RasterPool, type SizesResult, type TextResult, type TileResult } from "./raster-pool";
 import { boundedDistance, foldQuery, insertRanked, matchPage, type RawMatch, type SearchOptions, splitLimit } from "./search";
 import { PageText, type Rect, type SelectionTextOptions, type TextPoint, comparePoints } from "./text";
 
@@ -45,6 +46,15 @@ export interface CoreOptions {
 	initialOffset: number | null;
 	/** exact restore of a saved `camera` event (doc points + zoom); wins over the other initial options */
 	initialCamera: Camera | null;
+	/**
+	 * Where the first view opens, before the first paint; wins over
+	 * `initialPage`/`initialTop`/`initialOffset`. With range loading, this
+	 * page (and its neighbours) is fetched and drawn first.
+	 * - `{ page, top? }`: points below the page top; `{ page, topFraction }`: that fraction of the page's height
+	 * - `{ fraction }`: like `scrollToFraction` (0-1 of the scrollable height)
+	 * - `{ page, rect, align?, units? }`: like `reveal` (a citation); `units: "fraction"` for a rect in 0-1 of the page
+	 */
+	initialTarget: InitialTarget | null;
 	minZoom: number;
 	maxZoom: number;
 	/** dark mode: page white maps to `paper`, ink maps to `ink` */
@@ -71,6 +81,7 @@ export const defaultOptions: CoreOptions = {
 	initialTop: 0,
 	initialOffset: null,
 	initialCamera: null,
+	initialTarget: null,
 	minZoom: 0.1,
 	maxZoom: 24,
 	dark: false,
@@ -79,6 +90,12 @@ export const defaultOptions: CoreOptions = {
 	reducedMotion: false,
 	copyOptions: {},
 };
+
+/** `units: "fraction"`: the rect is 0-1 of the page (its size is not known before the document opens) */
+export type InitialTarget =
+	| { page: number; top?: number; topFraction?: number }
+	| { fraction: number }
+	| { page: number; rect: Rect; align?: RevealAlign; units?: "points" | "fraction" };
 
 export type PointerKind = "mouse" | "touch" | "pen";
 
@@ -196,6 +213,8 @@ export type Command =
 	| { type: "fit-page" }
 	/** scroll so the viewport top is at `fraction` (0-1) of the scrollable height */
 	| { type: "scroll-to"; fraction: number }
+	/** workers read the document over the network (true) or have the whole file (false) */
+	| { type: "remote"; on: boolean }
 	/** `flight`: id echoed in the `flight` event when the camera lands (or is interrupted) */
 	| { type: "goto"; page: number; top?: number; animate?: boolean; flight?: number; offset?: number }
 	/**
@@ -276,8 +295,13 @@ export interface SelectionInfo {
 export type Cursor = "default" | "text" | "pointer";
 
 export type CoreEvent =
-	/** the document opened: page sizes (points), their layout in doc space, and its metadata */
-	| { type: "ready"; pages: PageSize[]; layout: Rect[]; info: DocumentInfo; timing?: OpenTiming }
+	/**
+	 * the document opened: page sizes (points), their layout in doc space, and its metadata.
+	 * `complete: false` (range loading): some sizes are estimates; `layout` events follow as they resolve.
+	 */
+	| { type: "ready"; pages: PageSize[]; layout: Rect[]; info: DocumentInfo; complete: boolean; timing?: OpenTiming }
+	/** estimated page sizes resolved (range loading); the camera kept the content in view where it was */
+	| { type: "layout"; pages: PageSize[]; layout: Rect[]; complete: boolean }
 	/** the first page bitmap reached the screen (once per document) */
 	| { type: "painted"; page: number; timing?: { firstTileAt: number; paintedAt: number } }
 	/** `fitWidth`: fit-width mode (kept for compatibility); `fit`: the sticky fit mode, if any */
@@ -387,6 +411,8 @@ const HANDLE_R = 6;
 const HANDLE_HIT = 32;
 /** a flight waits this long at most for destination bitmaps before it starts */
 const FLIGHT_WAIT_MS = 80;
+/** pages per background `sizes` job (the worker answers early after a few ms) */
+const SIZES_BATCH = 48;
 /** jumps longer than this many viewports cut to one viewport short, then ease in */
 const FLIGHT_TELEPORT = 3;
 /** css px kept between a revealed rect and the viewport edge */
@@ -461,6 +487,14 @@ export class ViewerCore {
 	private fitMode: Fit = false;
 
 	private pages: PageSize[] = [];
+	/** sizes not read yet (range loading): laid out as a neighbour's size, never rasterised */
+	private estimated: boolean[] = [];
+	private unknown = 0;
+	/** page -> key of the `sizes` job that will read it */
+	private sizesWanted = new Map<number, string>();
+	private sizesPriority = new Map<string, number>();
+	/** a `scroll-to` (or initial fraction) made with estimated sizes: re-applied as they resolve, until the reader moves */
+	private pendingFraction: number | null = null;
 	private layout: PageRect[] = [];
 	private docW = 0;
 	private docH = 0;
@@ -558,7 +592,7 @@ export class ViewerCore {
 		this.opts = { ...defaultOptions, ...options };
 		this.gl = new Compositor(canvas);
 		this.pool = new RasterPool(ports);
-		this.pool.onOpened = (pages, info, timing) => this.opened(pages, info, timing);
+		this.pool.onOpened = (pageCount, sizes, info, timing) => this.opened(pageCount, sizes, info, timing);
 		this.pool.onError = (message, code, phase, detail) => this.emit({ type: "error", message, code, phase, ...(detail && { detail }) });
 		this.gl.onLost = () => this.emit({ type: "error", message: "lector-engine: the WebGL context was lost; waiting for the browser to restore it", code: "gpu", phase: "render" });
 		this.gl.onRestored = () => this.contextRestored();
@@ -601,20 +635,131 @@ export class ViewerCore {
 
 	// ---------------------------------------------------------------- setup
 
-	private opened(pages: PageSize[], info: DocumentInfo, timing?: OpenTiming) {
-		this.pages = pages;
-		let y = this.opts.pageGap;
-		this.docW = 0;
-		this.layout = pages.map((p) => {
-			const r = { x: -p.w / 2, y, w: p.w, h: p.h };
-			y += p.h + this.opts.pageGap;
-			this.docW = Math.max(this.docW, p.w);
-			return r;
-		});
-		this.docH = y;
-		this.emit({ type: "ready", pages, layout: this.layout.map((r) => ({ ...r })), info, timing });
+	private opened(pageCount: number, entries: SizeEntry[], info: DocumentInfo, timing?: OpenTiming) {
+		const known: (PageSize | null)[] = new Array(pageCount).fill(null);
+		for (const [i, w, h] of entries) if (i >= 0 && i < pageCount) known[i] = { w, h };
+		const { sizes, estimated } = estimateSizes(known);
+		this.pages = sizes;
+		this.estimated = estimated;
+		this.unknown = estimated.filter(Boolean).length;
+		this.relayout();
+		this.emit({ type: "ready", pages: this.pages.map((p) => ({ ...p })), layout: this.layout.map((r) => ({ ...r })), info, complete: this.unknown === 0, timing });
 		this.initCamera();
 		this.requestFrame();
+	}
+
+	private relayout() {
+		const { rects, docW, docH } = buildLayout(this.pages, this.opts.pageGap);
+		this.layout = rects;
+		this.docW = docW;
+		this.docH = docH;
+	}
+
+	/** Real sizes replace estimates; what is on screen stays where it is. */
+	private applySizes(entries: SizeEntry[]) {
+		let changed = false;
+		const resolved: number[] = [];
+		for (const [i, w, h] of entries) {
+			this.sizesWanted.delete(i);
+			if (!this.estimated[i]) continue;
+			this.estimated[i] = false;
+			this.unknown--;
+			resolved.push(i);
+			const p = this.pages[i]!;
+			if (p.w !== w || p.h !== h) changed = true;
+			this.pages[i] = { w, h };
+		}
+		queueMicrotask(() => {
+			for (const i of resolved) {
+				for (const fn of this.sizeWaiters.get(i) ?? []) fn();
+				this.sizeWaiters.delete(i);
+			}
+		});
+		// Estimated pages after a resolved one take its size: the next real size is more likely that than the old guess.
+		if (changed) {
+			let last: PageSize | null = null;
+			for (let i = 0; i < this.pages.length; i++) {
+				if (!this.estimated[i]) last = this.pages[i]!;
+				else if (last) this.pages[i] = last;
+			}
+		}
+		if (!changed && this.unknown > 0) {
+			// Same layout, but these pages may be drawn now.
+			if (resolved.length) this.requestFrame();
+			return;
+		}
+		const before = this.layout;
+		this.relayout();
+		if (changed && this.camReady) {
+			const viewH = this.vh / this.cam.zoom;
+			if (this.pendingFraction !== null) this.cam.y = this.pendingFraction * Math.max(0, this.docH - viewH);
+			else this.cam.y = anchoredY(before, this.layout, this.cam.y, viewH);
+			const f = this.flight;
+			if (f) {
+				f.from = { ...f.from, y: anchoredY(before, this.layout, f.from.y, this.vh / f.from.zoom) };
+				const next = f.retarget();
+				if (next) {
+					f.to = next.cam;
+					f.fit = next.fit;
+				}
+			}
+			this.clampCamera();
+		}
+		if (this.unknown === 0) this.pendingFraction = null;
+		this.emit({ type: "layout", pages: this.pages.map((p) => ({ ...p })), layout: this.layout.map((r) => ({ ...r })), complete: this.unknown === 0 });
+		this.requestFrame();
+	}
+
+	/** Asks for real sizes: pages in view first, then the rest in the background, nearest first. */
+	private requestSizes(pages: number[], priority: number) {
+		const want: number[] = [];
+		for (const p of pages) {
+			if (!this.estimated[p]) continue;
+			const queued = this.sizesWanted.get(p);
+			// Already in a job: make that job as urgent as this ask.
+			if (queued && priority < (this.sizesPriority.get(queued) ?? 0)) {
+				this.sizesPriority.set(queued, priority);
+				this.pool.request(queued, priority, { t: "sizes", page: -1, pages: [] }, () => {});
+			} else if (!queued) want.push(p);
+		}
+		if (!want.length) return;
+		const key = `sizes:${want[0]}`;
+		for (const p of want) this.sizesWanted.set(p, key);
+		this.sizesPriority.set(key, priority);
+		this.pool.request(key, priority, { t: "sizes", page: -1, pages: want }, (res) => {
+			this.sizesPriority.delete(key);
+			for (const p of want) this.sizesWanted.delete(p);
+			const sizes = res.t === "sizes" ? (res as SizesResult).sizes : [];
+			this.applySizes(sizes);
+			// The worker stopped early: pages in view ask again on the next frame.
+			if (sizes.length < want.length) this.requestFrame();
+			this.backgroundSizes(this.currentPage());
+			this.pool.pump();
+		});
+	}
+
+	private sizeWaiters = new Map<number, (() => void)[]>();
+
+	private knownSize(page: number): Promise<void> {
+		if (!this.estimated[page]) return Promise.resolve();
+		return new Promise((resolve) => {
+			const list = this.sizeWaiters.get(page) ?? [];
+			list.push(resolve);
+			this.sizeWaiters.set(page, list);
+			this.requestSizes([page], 300);
+			this.pool.pump();
+		});
+	}
+
+	private backgroundSizes(center: number, priority = 700) {
+		// Background reads wait for the first paint: they would share its bandwidth.
+		if (this.unknown === 0 || (priority === 700 && (this.sizesWanted.size > 0 || !this.painted))) return;
+		const out: number[] = [];
+		for (let d = 0; out.length < SIZES_BATCH && d < this.pages.length; d++) {
+			if (this.estimated[center + d] && !this.sizesWanted.has(center + d)) out.push(center + d);
+			if (d > 0 && this.estimated[center - d] && !this.sizesWanted.has(center - d)) out.push(center - d);
+		}
+		this.requestSizes(out, priority);
 	}
 
 	/** The camera can be aimed: the document is laid out and the view has a size. */
@@ -628,16 +773,34 @@ export class ViewerCore {
 		const o = this.opts;
 		const initial = o.initialZoom;
 		this.fitMode = initial === "fit-width" ? "width" : initial === "fit-page" ? "page" : false;
-		const page = Math.max(0, Math.min(this.pages.length - 1, Math.floor(o.initialPage) || 0));
+		const t = o.initialTarget;
+		const wanted = t && "page" in t ? t.page : o.initialPage;
+		const page = Math.max(0, Math.min(this.pages.length - 1, Math.floor(wanted) || 0));
 		if (o.initialCamera) {
 			this.fitMode = false;
 			this.cam = { ...o.initialCamera, zoom: this.clampZoom(o.initialCamera.zoom) };
 		} else {
 			this.cam.zoom = this.clampZoom(this.fitMode ? this.fitZoom(this.fitMode, page) : (initial as number));
 			const zoom = this.cam.zoom;
-			if (o.initialOffset != null) this.cam.y = o.initialOffset / zoom;
+			const r = this.layout[page]!;
+			if (t && "rect" in t) {
+				const rect = t.units === "fraction" ? { x: t.rect.x * r.w, y: t.rect.y * r.h, w: t.rect.w * r.w, h: t.rect.h * r.h } : t.rect;
+				const target = this.revealTarget(page, rect, t.align ?? "auto");
+				if (target) {
+					this.cam = target.cam;
+					this.fitMode = target.fit;
+				}
+			} else if (t && "fraction" in t && Number.isFinite(t.fraction)) {
+				const fraction = Math.max(0, Math.min(1, t.fraction));
+				this.cam.y = fraction * Math.max(0, this.docH - this.vh / zoom);
+				if (this.unknown > 0) this.pendingFraction = fraction;
+			} else if (t && "page" in t) {
+				const top = t.topFraction !== undefined && Number.isFinite(t.topFraction) ? t.topFraction * r.h : Number.isFinite(t.top) ? t.top! : 0;
+				if (this.fitMode === "page" && !top) this.cam = this.fitPageCam(page, zoom);
+				else this.cam.y = r.y + top - this.opts.pageGap;
+			} else if (o.initialOffset != null) this.cam.y = o.initialOffset / zoom;
 			else if (this.fitMode === "page") this.cam = this.fitPageCam(page, zoom);
-			else this.cam.y = this.layout[page]!.y + o.initialTop - this.opts.pageGap;
+			else this.cam.y = r.y + o.initialTop - this.opts.pageGap;
 		}
 		this.clampCamera();
 		this.landPending();
@@ -780,6 +943,7 @@ export class ViewerCore {
 
 	/** Put the camera on `target` now. */
 	private land(id: number, target: { cam: Camera; fit: Fit }, waitMs: number) {
+		this.pendingFraction = null;
 		const zoomed = target.cam.zoom !== this.cam.zoom;
 		this.cam = { ...target.cam };
 		this.fitMode = target.fit;
@@ -814,6 +978,7 @@ export class ViewerCore {
 
 	/** Stop a flight where it is (user input or another jump); a waiting jump is dropped. */
 	private cancelFlight(cause: FlightCause) {
+		this.pendingFraction = null;
 		const p = this.pending;
 		if (p) {
 			this.pending = null;
@@ -921,6 +1086,7 @@ export class ViewerCore {
 	}
 
 	private panBy(dx: number, dy: number) {
+		this.pendingFraction = null;
 		this.cam.x += dx / this.cam.zoom;
 		this.cam.y += dy / this.cam.zoom;
 		this.clampCamera();
@@ -1359,12 +1525,22 @@ export class ViewerCore {
 				this.requestFrame();
 				return;
 			}
+			case "remote":
+				if (cmd.on) this.pool.affinity = true;
+				else this.pool.releaseAffinity();
+				return;
 			case "scroll-to": {
 				if (!Number.isFinite(cmd.fraction)) return;
 				this.cancelFlight("command");
 				const viewH = this.vh / this.cam.zoom;
-				this.cam.y = Math.max(0, Math.min(1, cmd.fraction)) * Math.max(0, this.docH - viewH);
+				const fraction = Math.max(0, Math.min(1, cmd.fraction));
+				this.cam.y = fraction * Math.max(0, this.docH - viewH);
 				this.clampCamera();
+				// Exact only once every size is known: the target is re-solved as they arrive (pages around it first).
+				if (this.unknown > 0) {
+					this.pendingFraction = fraction;
+					this.backgroundSizes(Math.floor(fraction * (this.pages.length - 1)), 100);
+				}
 				this.requestFrame();
 				return;
 			}
@@ -1610,6 +1786,7 @@ export class ViewerCore {
 				return text.layerLines();
 			}
 			case "thumbnail": {
+				if (this.estimated[req.page]) await this.knownSize(req.page);
 				const size = this.pages[req.page];
 				if (!size) throw new Error(`no page ${req.page}`);
 				const scale = req.width / size.w;
@@ -1855,6 +2032,7 @@ export class ViewerCore {
 				return;
 			}
 			const r = res as TextResult;
+			if (this.estimated[page]) this.applySizes([[page, r.size.w, r.size.h]]);
 			this.texts.set(page, new PageText(r.codes, r.boxes));
 			this.links.set(page, r.links);
 			if (r.images.length) {
@@ -1963,8 +2141,12 @@ export class ViewerCore {
 		const near = this.pagesIn(ahead);
 		const cx = (view.x0 + view.x1) / 2;
 		const cy = (view.y0 + view.y1) / 2;
+		// Pages whose size is still an estimate get their size first, and no tiles until then.
+		this.requestSizes(near, -2);
+		this.backgroundSizes(visible[0] ?? 0);
 		const shown = new Set(targetVisible);
 		const baseTile = (p: number, priority: number, pin = false) => {
+			if (this.estimated[p]) return;
 			const s = this.baseScale(p);
 			const size = this.pages[p]!;
 			const w = Math.round(size.w * s);
@@ -2005,6 +2187,7 @@ export class ViewerCore {
 		for (const [pages, region, base] of [[targetVisible, view, 10] as const, ...(passing ? [passing] : []), [near, ahead, 30] as const]) {
 			for (const p of pages) {
 				if (base === 10) this.requestText(p, 20);
+				if (this.estimated[p]) continue;
 				const s = this.targetScale;
 				if (s <= this.baseScale(p)) continue;
 				const r = this.layout[p]!;

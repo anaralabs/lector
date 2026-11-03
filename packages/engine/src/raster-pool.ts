@@ -4,10 +4,11 @@
 // worker expected to finish it soonest: a worker that already has the page
 // loaded skips the parse and image decode, which dominate scanned pages.
 
-import type { DocumentInfo, ErrorCode, ErrorPhase, FromRaster, LoadFailureDetail, OpenTiming, PageSize, ToRaster } from "./protocol";
+import type { DocumentInfo, ErrorCode, ErrorPhase, FromRaster, LoadFailureDetail, OpenTiming, SizeEntry, ToRaster } from "./protocol";
 
 export type TileResult = Extract<FromRaster, { t: "tile" }>;
 export type TextResult = Extract<FromRaster, { t: "text" }>;
+export type SizesResult = Extract<FromRaster, { t: "sizes" }>;
 
 type JobMsg = Extract<ToRaster, { t: "tile" } | { t: "text" } | { t: "outline" }>;
 
@@ -60,6 +61,8 @@ const MIN_FRAC = 0.002;
 const EMA = 0.3;
 /** jobs considered per dispatch round */
 const LOOKAHEAD = 64;
+/** what loading a page costs a worker that does not have it while the file is still remote (a range round trip or more) */
+const REMOTE_PAGE_MS = 400;
 
 /**
  * Raster workers for this device: half the cores (2-4) on desktops, 2 where
@@ -87,7 +90,12 @@ export class RasterPool {
 	private nextId = 1;
 	/** in-flight tile jobs the last plan no longer wanted (cancelled when visible work waits) */
 	private unwanted = new Set<number>();
-	onOpened: (pages: PageSize[], info: DocumentInfo, timing?: OpenTiming) => void = () => {};
+	onOpened: (pageCount: number, sizes: SizeEntry[], info: DocumentInfo, timing?: OpenTiming) => void = () => {};
+	/**
+	 * While workers read the document over the network, a page another worker
+	 * already loaded costs a download to load again: its jobs stay there.
+	 */
+	affinity = false;
 	onIdle: () => void = () => {};
 	onError: (message: string, code: ErrorCode, phase: ErrorPhase, detail?: LoadFailureDetail) => void = (m) => console.error(m);
 	now: () => number = () => performance.now();
@@ -138,7 +146,11 @@ export class RasterPool {
 	request(
 		key: string,
 		priority: number,
-		msg: Omit<Extract<ToRaster, { t: "tile" }>, "id"> | Omit<Extract<ToRaster, { t: "text" }>, "id"> | Omit<Extract<ToRaster, { t: "outline" }>, "id">,
+		msg:
+			| Omit<Extract<ToRaster, { t: "tile" }>, "id">
+			| Omit<Extract<ToRaster, { t: "text" }>, "id">
+			| Omit<Extract<ToRaster, { t: "outline" }>, "id">
+			| Omit<Extract<ToRaster, { t: "sizes" }>, "id">,
 		onDone: (res: FromRaster) => void,
 		frac = msg.t === "tile" ? 1 : 0,
 	) {
@@ -182,7 +194,10 @@ export class RasterPool {
 	private cost(job: Job, warm: boolean) {
 		const c = this.known(job.page);
 		const work = job.msg.t === "tile" ? c.content * job.frac : TEXT_MS;
-		return warm ? work : work + c.overhead;
+		if (warm) return work;
+		// Range loading: loading a page another worker has means downloading it again.
+		const elsewhere = this.affinity && job.page >= 0 && this.lanes.some((l) => l.pages.includes(job.page));
+		return work + c.overhead + (elsewhere ? REMOTE_PAGE_MS : 0);
 	}
 
 	/** ms until a busy lane frees up; a job past its estimate is assumed to take as long again */
@@ -269,11 +284,19 @@ export class RasterPool {
 		if (known.length) this.prior = { content: median(known.map((k) => k.content))!, overhead: median(known.map((k) => k.overhead))!, warm: 0 };
 	}
 
+
+
+	/** The whole file is local now: any worker can take any page. */
+	releaseAffinity() {
+		this.affinity = false;
+		this.pump();
+	}
+
 	private receive(lane: Lane, index: number, msg: FromRaster) {
 		if (msg.t === "opened") {
 			lane.ready = true;
 			const { wasmMs, wasmShared = false, openMs } = msg;
-			if (index === 0) this.onOpened(msg.pages, msg.info, wasmMs !== undefined && openMs !== undefined ? { wasmMs, wasmShared, openMs } : undefined);
+			if (index === 0) this.onOpened(msg.pageCount, msg.sizes, msg.info, wasmMs !== undefined && openMs !== undefined ? { wasmMs, wasmShared, openMs } : undefined);
 			this.pump();
 			return;
 		}

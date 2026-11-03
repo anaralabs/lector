@@ -4,7 +4,8 @@
 
 import { BlockCache } from "./blocks";
 import { init, type Pdfium } from "./pdfium/pdfium.js";
-import type { DocSource, DocumentInfo, ErrorCode, FromRaster, Link, LoadFailureDetail, OutlineItem, ToRaster } from "./protocol";
+import type { DocSource, DocumentInfo, ErrorCode, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
+import { blockVerdict, RANGE_BLOCK } from "./range";
 
 const FPDF_ANNOT = 0x01;
 const FPDF_REVERSE_BYTE_ORDER = 0x10; // RGBA instead of BGRA
@@ -24,11 +25,13 @@ const FORMTYPE_NONE = 0;
 let port: MessagePort;
 const pageSizes: { w: number; h: number }[] = [];
 /**
- * Only the first worker reads every page size up front (the core's layout
- * needs them; each one parses a page dictionary, which with range loading can
- * mean a request per page). The others read sizes as pages are used.
+ * Only the first worker reads sizes before `opened`, and with range loading
+ * only the pages the view opens on: each size parses a page dictionary, which
+ * can mean a request per page. The rest arrive through `sizes` jobs.
  */
-let allSizes = true;
+let sizeHint: SizeHint | undefined;
+/** a `sizes` job answers after this long with the pages read so far */
+const SIZES_SLICE_MS = 25;
 function sizeOf(index: number) {
 	let size = pageSizes[index];
 	if (!size) {
@@ -320,7 +323,7 @@ function extractPageText(msg: Extract<ToRaster, { t: "text" }>, page: number) {
 	const links = readLinks(page, xf);
 	const { images, scans } = readImages(page, msg.page, xf);
 	send(
-		{ t: "text", id: msg.id, page: msg.page, codes, boxes, links, images, scans, ms: performance.now() - t0, heap: heapBytes() },
+		{ t: "text", id: msg.id, page: msg.page, codes, boxes, links, images, scans, size: sizeOf(msg.page), ms: performance.now() - t0, heap: heapBytes() },
 		[codes.buffer, boxes.buffer, images.buffer],
 	);
 }
@@ -569,13 +572,17 @@ function loadFailureDetail(err: number): LoadFailureDetail {
 // from HTTP range requests (sync XHR, allowed in workers), through a small LRU
 // cache. No worker holds a copy of the whole file.
 const BLOB_BLOCK = 64 * 1024;
-const URL_BLOCK = 256 * 1024;
+// Small: misses next to each other coalesce into one request, and sequential reads grow their read-ahead.
+const URL_BLOCK = RANGE_BLOCK;
 
 let source: DocSource | null = null;
 let fileLen = 0;
 let blockSize = BLOB_BLOCK;
 let cache: BlockCache | null = null;
 let fileAccess = 0;
+let pendingPassword: string | undefined;
+/** blocks other workers shared before this one had a cache */
+const early: [number, Uint8Array][] = [];
 let reader: FileReaderSync | null = null;
 
 const heapBytes = () => heap().length + (cache?.bytes ?? 0);
@@ -593,8 +600,9 @@ function fetchBlock(start: number, end: number): Uint8Array {
 	xhr.setRequestHeader("Range", `bytes=${start}-${end - 1}`);
 	xhr.send();
 	const buf = xhr.response as ArrayBuffer | null;
-	if (xhr.status === 206 && buf && buf.byteLength === end - start) return new Uint8Array(buf);
-	if (xhr.status === 200 && buf && buf.byteLength === fileLen) {
+	const verdict = blockVerdict(xhr.status, buf?.byteLength ?? 0, start, end, fileLen);
+	if (verdict === "ok") return new Uint8Array(buf!);
+	if (verdict === "full" && buf) {
 		// The server ignored the range and sent everything: read from that from now on.
 		source = { kind: "blob", blob: new Blob([buf]) };
 		blockSize = BLOB_BLOCK;
@@ -646,8 +654,40 @@ function loadDocument(password: string | undefined) {
 	}
 	pageCount = P.FPDF_GetPageCount(doc);
 	// Sizes come from the page tree without parsing page content.
-	if (allSizes) for (let i = 0; i < pageCount; i++) sizeOf(i);
-	send({ t: "opened", pages: allSizes ? pageSizes : [], info: readInfo(password), wasmMs, wasmShared, openMs: performance.now() - t0 });
+	const sizes: SizeEntry[] = [];
+	for (const i of hintedPages()) {
+		const { w, h } = sizeOf(i);
+		sizes.push([i, w, h]);
+	}
+	send({ t: "opened", pageCount, sizes, info: readInfo(password), wasmMs, wasmShared, openMs: performance.now() - t0 });
+	// The main thread starts the other workers now, so they parse from the blocks this one shared.
+	self.postMessage({ t: "opened" });
+}
+
+function hintedPages(): number[] {
+	const hint = sizeHint;
+	if (!hint) return [];
+	if (hint.all) return Array.from({ length: pageCount }, (_, i) => i);
+	const want = new Set<number>([0]);
+	const around = (p: number) => {
+		for (let i = p - 1; i <= p + 2; i++) if (i >= 0 && i < pageCount) want.add(i);
+	};
+	for (const p of hint.pages) around(Math.min(pageCount - 1, Math.max(0, Math.floor(p))));
+	// Pages of one size are the common case: the fraction maps to a page linearly.
+	if (hint.fraction !== undefined && Number.isFinite(hint.fraction)) around(Math.floor(Math.max(0, Math.min(1, hint.fraction)) * pageCount));
+	return [...want].sort((a, b) => a - b);
+}
+
+function readSizes(msg: Extract<ToRaster, { t: "sizes" }>) {
+	const t0 = performance.now();
+	const sizes: SizeEntry[] = [];
+	for (const i of msg.pages) {
+		if (i < 0 || i >= pageCount) continue;
+		const { w, h } = sizeOf(i);
+		sizes.push([i, w, h]);
+		if (performance.now() - t0 > SIZES_SLICE_MS) break;
+	}
+	send({ t: "sizes", id: msg.id, sizes, heap: heapBytes() });
 }
 
 function readInfo(password: string | undefined): DocumentInfo {
@@ -741,6 +781,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 				if (m.t === "tile") await renderTile(m);
 				else if (m.t === "text") extractText(m);
 				else if (m.t === "outline") send({ t: "outline", id: m.id, items: readOutline(0, 0) });
+				else if (m.t === "sizes") readSizes(m);
 				else if (m.t === "unlock" && P && !doc && fileAccess) loadDocument(m.password);
 			} catch (err) {
 				const id = "id" in m ? m.id : undefined;
@@ -753,6 +794,11 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 		const m = ev.data;
 		if (m.t === "cancel") {
 			if (m.id === rendering) cancelled = true;
+			return;
+		}
+		// Before pdfium is ready the password waits for the first open.
+		if (m.t === "unlock" && !P) {
+			pendingPassword = m.password;
 			return;
 		}
 		queue.push(m);
@@ -769,7 +815,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 		return;
 	}
 	source = msg.source;
-	allSizes = msg.sizes !== false;
+	sizeHint = msg.sizes;
 	if (source.kind === "blob") {
 		fileLen = source.blob.size;
 		blockSize = BLOB_BLOCK;
@@ -777,8 +823,15 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 		fileLen = source.length;
 		blockSize = URL_BLOCK;
 	}
-	cache = new BlockCache(fileLen, { size: () => blockSize, fetch: fetchBlock });
-	loadDocument(msg.password);
+	// Blocks this worker downloads go to the other workers (through the main thread), so each byte crosses the network once.
+	const share = (start: number, data: Uint8Array) => {
+		if (source?.kind !== "url") return;
+		const copy = data.slice();
+		self.postMessage({ t: "block", start, data: copy }, [copy.buffer]);
+	};
+	cache = new BlockCache(fileLen, { size: () => blockSize, fetch: fetchBlock }, { onFetched: share });
+	if (source.kind === "url") for (const [start, data] of [...(source.seeds ?? []), ...early.splice(0)]) cache.seed(start, data);
+	loadDocument(pendingPassword ?? msg.password);
 }
 
 // Hosts may load this module through a wrapper (dynamic import from a blob
@@ -789,6 +842,11 @@ self.onmessage = (ev: MessageEvent<ToRaster>) => {
 	if (ev.data.t === "source") {
 		// The full file arrived: no more network round-trips. Cached blocks stay valid.
 		if (source?.kind === "url" && ev.data.blob.size === fileLen) source = { kind: "blob", blob: ev.data.blob };
+		return;
+	}
+	if (ev.data.t === "block") {
+		if (!cache) early.push([ev.data.start, ev.data.data]);
+		else if (source?.kind === "url" && blockSize === URL_BLOCK) cache.seed(ev.data.start, ev.data.data);
 		return;
 	}
 	if (ev.data.t !== "init") return;
