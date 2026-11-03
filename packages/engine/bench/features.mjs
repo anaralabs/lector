@@ -256,7 +256,7 @@ await page.goto(fixture("cadbots.pdf", `&offset=${pos.state.top}`));
 await page.waitForFunction(() => window.__paintedMs !== undefined);
 const restored = await page.evaluate(() => window.__viewer.scrollState());
 check("initialOffset restores scroll", Math.abs(restored.top - pos.state.top) < 1, `${restored.top.toFixed(0)} vs ${pos.state.top.toFixed(0)}`);
-// Why a jump did not land: user input, a newer jump, or no target.
+// Why a jump did not land: user input, a view command, a newer jump, or no target.
 await page.evaluate(() => {
 	window.__outcomes = () => window.__flights.splice(0).map((f) => (f.landed ? "landed" : f.cause)).join(",");
 	window.__outcomes();
@@ -278,8 +278,8 @@ const causes = await page.evaluate(async () => {
 	return { wheel, zoom, jump, missing };
 });
 check(
-	"flight cause: input, newer jump, no target",
-	causes.wheel.join() === "false,input" && causes.zoom.join() === "false,input" && causes.jump.join() === "false,true,jump,landed" && causes.missing.join() === "false,no-target",
+	"flight cause: input, command, newer jump, no target",
+	causes.wheel.join() === "false,input" && causes.zoom.join() === "false,command" && causes.jump.join() === "false,true,jump,landed" && causes.missing.join() === "false,no-target",
 	JSON.stringify(causes),
 );
 const fz = await page.evaluate(async () => {

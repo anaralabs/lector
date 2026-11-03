@@ -82,11 +82,11 @@ export const defaultOptions: CoreOptions = {
 export type PointerKind = "mouse" | "touch" | "pen";
 
 /**
- * Why a flight did not land: `input` (the user scrolled, zoomed, pressed a key
- * or touched the page, or the host sent a view command), `jump` (a newer
+ * Why a flight did not land: `input` (wheel, gesture, pointer down or key on the
+ * viewer), `command` (the host sent zoom/fit/scroll), `jump` (a newer
  * goto/reveal), `no-target` (no camera yet, or the destination was invalid).
  */
-export type FlightCause = "input" | "jump" | "no-target";
+export type FlightCause = "input" | "command" | "jump" | "no-target";
 
 export type InputMsg =
 	| { type: "resize"; w: number; h: number; dpr: number }
@@ -1199,17 +1199,17 @@ export class ViewerCore {
 		switch (cmd.type) {
 			case "zoom":
 				if (!Number.isFinite(cmd.zoom)) return;
-				this.cancelFlight("input");
+				this.cancelFlight("command");
 				this.userZoom(cmd.zoom, cmd.x ?? this.vw / 2, cmd.y ?? this.vh / 2);
 				return;
 			case "fit-width":
-				this.cancelFlight("input");
+				this.cancelFlight("command");
 				this.zoomAt(this.fitZoom("width"), this.vw / 2, 0);
 				this.fitMode = "width";
 				this.requestFrame();
 				return;
 			case "fit-page": {
-				this.cancelFlight("input");
+				this.cancelFlight("command");
 				const page = this.currentPage();
 				const zoom = this.clampZoom(this.fitZoom("page", page));
 				const zoomed = zoom !== this.cam.zoom;
@@ -1221,7 +1221,7 @@ export class ViewerCore {
 			}
 			case "scroll-to": {
 				if (!Number.isFinite(cmd.fraction)) return;
-				this.cancelFlight("input");
+				this.cancelFlight("command");
 				const viewH = this.vh / this.cam.zoom;
 				this.cam.y = Math.max(0, Math.min(1, cmd.fraction)) * Math.max(0, this.docH - viewH);
 				this.clampCamera();
@@ -1287,7 +1287,7 @@ export class ViewerCore {
 				return;
 			case "scroll-by":
 				if (!Number.isFinite(cmd.dx) || !Number.isFinite(cmd.dy)) return;
-				this.cancelFlight("input");
+				this.cancelFlight("command");
 				this.panBy(cmd.dx, cmd.dy);
 				return;
 			case "select-all":
