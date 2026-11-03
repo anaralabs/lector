@@ -99,7 +99,8 @@ export interface Viewer {
 	fitPage(): void;
 	/**
 	 * Resolves true once the camera lands, false if input or another jump
-	 * interrupted it. `top`: page points below the page top; `offset`: css px
+	 * interrupted it. Callable before `ready` or while hidden: it lands once
+	 * the view has a size. `top`: page points below the page top; `offset`: css px
 	 * kept between the viewport top and that point (default `pageGap`).
 	 */
 	goToPage(page: number, top?: number, options?: { animate?: boolean; offset?: number }): Promise<boolean>;

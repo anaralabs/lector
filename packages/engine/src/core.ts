@@ -85,7 +85,8 @@ export type PointerKind = "mouse" | "touch" | "pen";
 /**
  * Why a flight did not land: `input` (wheel, gesture, pointer down or key on the
  * viewer), `command` (the host sent zoom/fit/scroll), `jump` (a newer
- * goto/reveal), `no-target` (no camera yet, or the destination was invalid).
+ * goto/reveal), `no-target` (the destination does not exist: no such page,
+ * or a non-finite rect).
  */
 export type FlightCause = "input" | "command" | "jump" | "no-target";
 
@@ -300,7 +301,9 @@ export type CoreEvent =
 	/**
 	 * An animated (or instant) reveal/goto finished. `landed: false` comes with a
 	 * `cause` (see FlightCause). `coverage`: share of the landing view already
-	 * covered by sharp tiles; `waitMs`: how long the flight waited for bitmaps.
+	 * covered by sharp tiles; `waitMs`: how long the flight waited for bitmaps
+	 * (or for the view to get a size: a goto/reveal before `ready` or while the
+	 * container is hidden waits, then lands instantly).
 	 */
 	| { type: "flight"; id: number; landed: boolean; cause?: FlightCause; coverage: number; waitMs: number; durationMs: number }
 	| { type: "stats"; stats: Stats }
@@ -434,6 +437,13 @@ interface Flight {
 	retarget: () => { cam: Camera; fit: Fit } | null;
 }
 
+/** A goto/reveal asked for while the view cannot place a camera (not open yet, or 0 px wide/tall). */
+interface PendingJump {
+	id: number;
+	requested: number;
+	retarget: Flight["retarget"];
+}
+
 export class ViewerCore {
 	private gl: Compositor;
 	private pool: RasterPool;
@@ -445,6 +455,8 @@ export class ViewerCore {
 	private dpr = 1;
 	private cam = { x: 0, y: 0, zoom: 1 };
 	private camReady = false;
+	/** the last width with a measurable view: a hidden viewer keeps its camera for that size */
+	private measuredW = 0;
 	/** fit-width/fit-page is sticky across resizes until the user zooms by hand */
 	private fitMode: Fit = false;
 
@@ -489,6 +501,7 @@ export class ViewerCore {
 	private pulses = new Map<string, { kind: PulseKind; start: number; dur: number }>();
 
 	private flight: Flight | null = null;
+	private pending: PendingJump | null = null;
 	/** tiles a flight needs at its destination: eviction never drops these */
 	private pinned = new Set<string>();
 
@@ -561,6 +574,7 @@ export class ViewerCore {
 		if (this.disposed) return;
 		this.disposed = true;
 		this.flight = null;
+		this.pending = null;
 		this.dragging = false;
 		this.velocity = { x: 0, y: 0 };
 		for (const timer of [this.settleTimer, this.idleTimer, this.press?.timer]) if (timer) clearTimeout(timer);
@@ -603,8 +617,13 @@ export class ViewerCore {
 		this.requestFrame();
 	}
 
+	/** The camera can be aimed: the document is laid out and the view has a size. */
+	private canAim() {
+		return this.camReady && this.vw > 0 && this.vh > 0;
+	}
+
 	private initCamera() {
-		if (this.camReady || this.vw === 0 || this.pages.length === 0) return;
+		if (this.camReady || this.vw === 0 || this.vh === 0 || this.pages.length === 0) return;
 		this.camReady = true;
 		const o = this.opts;
 		const initial = o.initialZoom;
@@ -621,6 +640,7 @@ export class ViewerCore {
 			else this.cam.y = this.layout[page]!.y + o.initialTop - this.opts.pageGap;
 		}
 		this.clampCamera();
+		this.landPending();
 	}
 
 	/** Camera that centres `page` at `zoom`. */
@@ -671,7 +691,7 @@ export class ViewerCore {
 	/** Camera that shows `rect` on `page` (see the `reveal` command). */
 	private revealTarget(page: number, rect: Rect, align: RevealAlign = "auto", ifNeeded = false, offset = 0): { cam: Camera; fit: Fit } | null {
 		const r = this.layout[page];
-		if (!r || this.vw === 0) return null;
+		if (!r) return null;
 		if (![rect.x, rect.y, rect.w, rect.h, offset].every(Number.isFinite)) return null;
 		const m = REVEAL_MARGIN;
 		const cur = this.cam;
@@ -719,7 +739,11 @@ export class ViewerCore {
 	private fly(id: number, animate: boolean, retarget: Flight["retarget"]) {
 		this.cancelFlight("jump");
 		this.velocity = { x: 0, y: 0 };
-		const target = this.camReady ? retarget() : null;
+		if (!this.canAim()) {
+			this.pending = { id, requested: performance.now(), retarget };
+			return;
+		}
+		const target = retarget();
 		if (!target) {
 			if (id) this.emit({ type: "flight", id, landed: false, cause: "no-target", coverage: 0, waitMs: 0, durationMs: 0 });
 			return;
@@ -732,13 +756,7 @@ export class ViewerCore {
 		const zoomSteps = Math.abs(Math.log2(to.zoom / from.zoom));
 		let dist = Math.hypot(b.x - a.x, b.y - a.y) * to.zoom;
 		if (!animate || this.opts.reducedMotion || (dist < 1 && zoomSteps < 0.01)) {
-			const zoomed = to.zoom !== this.cam.zoom;
-			this.cam = { ...to };
-			this.fitMode = target.fit;
-			if (zoomed) this.zoomChanged();
-			this.sharpWait = { cause: "jump", since: performance.now() };
-			this.requestFrame();
-			if (id) this.emit({ type: "flight", id, landed: true, coverage: this.coverage(this.pagesIn(this.viewRect())), waitMs: 0, durationMs: 0 });
+			this.land(id, target, 0);
 			return;
 		}
 		// Long jumps cut to one viewport short of the target and ease in from
@@ -760,8 +778,47 @@ export class ViewerCore {
 		this.requestFrame();
 	}
 
-	/** Stop a flight where it is (user input or another jump). */
+	/** Put the camera on `target` now. */
+	private land(id: number, target: { cam: Camera; fit: Fit }, waitMs: number) {
+		const zoomed = target.cam.zoom !== this.cam.zoom;
+		this.cam = { ...target.cam };
+		this.fitMode = target.fit;
+		if (zoomed) this.zoomChanged();
+		this.sharpWait = { cause: "jump", since: performance.now() };
+		this.requestFrame();
+		if (id) this.emit({ type: "flight", id, landed: true, coverage: this.coverage(this.pagesIn(this.viewRect())), waitMs, durationMs: 0 });
+	}
+
+	/** Lands instantly: the reader never saw where a waiting jump started. */
+	private landPending() {
+		const p = this.pending;
+		if (!p || !this.canAim()) return;
+		this.pending = null;
+		const target = p.retarget();
+		if (target) this.land(p.id, target, performance.now() - p.requested);
+		else if (p.id) this.emit({ type: "flight", id: p.id, landed: false, cause: "no-target", coverage: 0, waitMs: 0, durationMs: 0 });
+	}
+
+	/** The view lost its size mid-flight: finish the move unseen and re-aim once it is back. */
+	private parkFlight() {
+		const f = this.flight;
+		if (!f) return;
+		this.flight = null;
+		this.pinned.clear();
+		const zoomed = f.to.zoom !== this.cam.zoom;
+		this.cam = { ...f.to };
+		this.fitMode = f.fit;
+		if (zoomed) this.zoomChanged();
+		this.pending = { id: f.id, requested: f.requested, retarget: f.retarget };
+	}
+
+	/** Stop a flight where it is (user input or another jump); a waiting jump is dropped. */
 	private cancelFlight(cause: FlightCause) {
+		const p = this.pending;
+		if (p) {
+			this.pending = null;
+			if (p.id) this.emit({ type: "flight", id: p.id, landed: false, cause, coverage: 0, waitMs: 0, durationMs: 0 });
+		}
 		const f = this.flight;
 		if (!f) return;
 		this.flight = null;
@@ -878,7 +935,7 @@ export class ViewerCore {
 			case "resize": {
 				const changed = msg.w !== this.vw || msg.h !== this.vh || msg.dpr !== this.dpr;
 				// Keep the doc point at the top-centre of the view fixed.
-				const anchorX = this.cam.x + this.vw / 2 / this.cam.zoom;
+				const anchorX = this.cam.x + this.measuredW / 2 / this.cam.zoom;
 				const anchorY = this.cam.y;
 				this.vw = msg.w;
 				this.vh = msg.h;
@@ -886,7 +943,9 @@ export class ViewerCore {
 				this.gl.resize(Math.round(msg.w * msg.dpr), Math.round(msg.h * msg.dpr));
 				const wasReady = this.camReady;
 				this.initCamera();
-				if (changed && wasReady) {
+				// A hidden view keeps its camera for the last size it had.
+				if (!this.canAim()) this.parkFlight();
+				else if (changed && wasReady) {
 					if (this.fitMode) {
 						const z = this.clampZoom(this.fitZoom(this.fitMode));
 						if (z !== this.cam.zoom) {
@@ -904,6 +963,10 @@ export class ViewerCore {
 						f.to = next.cam;
 						f.fit = next.fit;
 					}
+				}
+				if (this.canAim()) {
+					this.measuredW = this.vw;
+					this.landPending();
 				}
 				// Resizing clears the drawing buffer: draw synchronously so the
 				// new size never shows an empty frame.
@@ -2078,7 +2141,7 @@ export class ViewerCore {
 
 	private frame(now: number) {
 		// A lost context draws nothing; `contextRestored` asks for a frame.
-		if (!this.dirty || !this.camReady || this.disposed || this.gl.lost) return;
+		if (!this.dirty || !this.canAim() || this.disposed || this.gl.lost) return;
 		const cpu0 = performance.now();
 		const dt = this.lastFrame ? Math.min(64, now - this.lastFrame) : 16;
 		if (this.lastFrame) this.recordFrame(now);

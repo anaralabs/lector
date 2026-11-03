@@ -712,5 +712,181 @@ check(
 	JSON.stringify(bidi),
 );
 
+// A goto/reveal while the view has no size (hidden pane, before the first
+// resize) waits and lands there instantly once it is shown.
+const pendPage = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 2 });
+pendPage.on("pageerror", (e) => errors.push(String(e.stack || e)));
+await pendPage.goto(fixture("cadbots.pdf"));
+await pendPage.waitForFunction(() => window.__paintedMs !== undefined);
+const pend = await pendPage.evaluate(async () => {
+	window.__outcomes = () => window.__flights.splice(0).map((f) => (f.landed ? "landed" : f.cause)).join(",");
+	const v = window.__viewer;
+	const el = document.getElementById("viewer");
+	const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+	const idle = () => new Promise((r) => setTimeout(r, 250));
+	const state = (p) => {
+		const s = { v: "pending" };
+		p.then((x) => (s.v = x));
+		return s;
+	};
+	const near = (a, b) => Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.zoom - b.zoom) < 1e-4;
+	const rect = { x: 120, y: 420, w: 220, h: 36 };
+	const reset = async () => {
+		v.fitWidth();
+		await v.goToPage(0);
+		await idle();
+		window.__outcomes();
+	};
+	const hide = async () => {
+		el.style.display = "none";
+		await frames();
+	};
+	const show = () => {
+		el.style.display = "";
+	};
+	// Where the same jumps land when the viewer is visible.
+	await reset();
+	await v.reveal(14, rect);
+	await idle();
+	const revealAt = { ...v.camera };
+	await reset();
+	await v.goToPage(9, 50);
+	await idle();
+	const gotoAt = { ...v.camera };
+	await reset();
+	await v.reveal(18, rect);
+	await idle();
+	const secondAt = { ...v.camera };
+
+	await reset();
+	await hide();
+	const hidden = v.reveal(14, rect, { animate: true });
+	const s = state(hidden);
+	await idle();
+	const waited = s.v;
+	show();
+	const reveal = [waited, await hidden, window.__flights.at(-1)?.waitMs >= 200];
+	await idle();
+	reveal.push(near(v.camera, revealAt));
+
+	await reset();
+	await hide();
+	const g = v.goToPage(9, 50, { animate: true });
+	await idle();
+	show();
+	const gotoRes = [await g];
+	await idle();
+	gotoRes.push(near(v.camera, gotoAt));
+
+	await reset();
+	await hide();
+	const first = v.reveal(14, rect, { animate: true });
+	const second = v.reveal(18, rect, { animate: true });
+	await idle();
+	show();
+	const two = [await first, await second];
+	await idle();
+	two.push(window.__outcomes(), near(v.camera, secondAt));
+
+	await reset();
+	await hide();
+	const wheeled = v.reveal(14, rect);
+	el.dispatchEvent(new WheelEvent("wheel", { deltaY: 40, bubbles: true, cancelable: true }));
+	const zoomed = v.goToPage(9);
+	v.zoomTo(1.2);
+	const cancel = [await wheeled, await zoomed, window.__outcomes()];
+	show();
+	await idle();
+
+	await reset();
+	const invalid = [await v.reveal(2, { x: Number.NaN, y: 0, w: 10, h: 10 }), await v.reveal(9999, rect), await v.goToPage(-1), window.__outcomes()];
+	await hide();
+	const later = v.reveal(9999, rect);
+	await idle();
+	show();
+	invalid.push(await later, window.__outcomes());
+	await idle();
+
+	// Hidden mid-flight: the jump finishes unseen and re-aims once shown.
+	await reset();
+	const flying = v.reveal(14, rect, { animate: true });
+	await new Promise((r) => setTimeout(r, 60));
+	await hide();
+	await idle();
+	show();
+	const parked = [await flying];
+	await idle();
+	parked.push(window.__outcomes(), near(v.camera, revealAt));
+	return { reveal, gotoRes, two, cancel, invalid, parked };
+});
+await pendPage.close();
+check("reveal while hidden lands on show", pend.reveal.join() === "pending,true,true,true", JSON.stringify(pend.reveal));
+check("goto while hidden lands on show", pend.gotoRes.join() === "true,true", JSON.stringify(pend.gotoRes));
+check("two jumps while hidden: newer wins", pend.two.join() === "false,true,jump,landed,true", JSON.stringify(pend.two));
+check("input or command cancels a waiting jump", pend.cancel.join() === "false,false,input,command", JSON.stringify(pend.cancel));
+check("invalid destination: no-target", pend.invalid.join() === "false,false,false,no-target,no-target,no-target,false,no-target", JSON.stringify(pend.invalid));
+check("hidden mid-flight re-aims on show", pend.parked.join() === "true,landed,true", JSON.stringify(pend.parked));
+
+// Fresh mount: a jump before the first sized resize (or before ready) is the first frame drawn.
+const freshPage = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 2 });
+freshPage.on("pageerror", (e) => errors.push(String(e.stack || e)));
+await freshPage.goto(fixture("cadbots.pdf"));
+await freshPage.waitForFunction(() => window.__firstPaintMs !== undefined);
+const fresh = await freshPage.evaluate(async (src) => {
+	const { createViewer } = await import(`/@fs${src}/index.ts`);
+	const { default: wasmUrl, workerUrls } = await import(`/@fs${src}/vite-wasm.ts`);
+	const loader = (url, name) => new Worker(URL.createObjectURL(new Blob([`import(${JSON.stringify(url.href)})`], { type: "text/javascript" })), { name });
+	const rect = { x: 120, y: 420, w: 220, h: 36 };
+	const run = async (hidden, early) => {
+		const el = document.createElement("div");
+		el.style.cssText = `position:fixed;left:0;top:0;width:400px;height:300px;${hidden ? "display:none" : ""}`;
+		document.body.appendChild(el);
+		const cams = [];
+		let layout = null;
+		const onEvent = (e) => {
+			if (e.type === "camera") cams.push(e.camera);
+			if (e.type === "ready") layout = e.layout;
+		};
+		const v = await createViewer(el, "/cadbots.pdf", { wasmUrl, workerUrls, createWorker: loader, offscreen: false, workers: 1, onEvent });
+		let jump = early ? v.reveal(14, rect, { animate: true }) : null;
+		await v.loaded;
+		await new Promise((r) => setTimeout(r, 200));
+		jump ??= v.reveal(14, rect, { animate: true });
+		const before = cams.length;
+		el.style.display = "";
+		const landed = await jump;
+		await new Promise((r) => setTimeout(r, 300));
+		const cam = cams[0];
+		const top = cam ? ((layout[14].y + rect.y - cam.y) * cam.zoom) / 300 : -1;
+		const core = window.__core;
+		v.destroy();
+		el.remove();
+		return { before, landed, firstAtTarget: !!cam && cams.every((c) => Math.abs(c.y - cam.y) < 0.5), top: Math.round(top * 100) / 100, pending: core?.pending ?? null };
+	};
+	const hidden = await run(true, false);
+	const early = await run(false, true);
+	// Destroyed while waiting: the promise settles and the core lets go of it.
+	const el = document.createElement("div");
+	el.style.cssText = "position:fixed;left:0;top:0;width:400px;height:300px;display:none";
+	document.body.appendChild(el);
+	const v = await createViewer(el, "/cadbots.pdf", { wasmUrl, workerUrls, createWorker: loader, offscreen: false, workers: 1 });
+	await v.loaded;
+	const jump = v.reveal(14, rect);
+	const core = window.__core;
+	const waiting = !!core.pending;
+	v.destroy();
+	el.remove();
+	const destroyed = await Promise.race([jump, new Promise((r) => setTimeout(() => r("pending"), 3000))]);
+	return { hidden, early, destroy: [waiting, destroyed, core.pending] };
+}, new URL("../src", import.meta.url).pathname);
+await freshPage.close();
+check(
+	"jump before the first sized resize is the first frame",
+	fresh.hidden.before === 0 && fresh.hidden.landed && fresh.hidden.firstAtTarget && fresh.hidden.top === 0.3,
+	JSON.stringify(fresh.hidden),
+);
+check("jump before ready is the first frame", fresh.early.landed && fresh.early.firstAtTarget && fresh.early.top === 0.3, JSON.stringify(fresh.early));
+check("destroy while a jump waits", fresh.destroy.join() === "true,false,", JSON.stringify(fresh.destroy));
+
 check("no errors", errors.length === 0, errors.join(" | "));
 await browser.close();
