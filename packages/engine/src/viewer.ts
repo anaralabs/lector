@@ -681,7 +681,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		const pointer = (phase: "down" | "move" | "up" | "cancel") => (e: PointerEvent) => {
 			const kind = (e.pointerType || "mouse") as PointerKind;
 			if (kind === "touch") {
-				if (phase === "down") touchCount++;
+				if (phase === "down") touchCount = e.isPrimary ? 1 : touchCount + 1;
 				if (phase === "up" || phase === "cancel") touchCount = Math.max(0, touchCount - 1);
 			}
 			if (phase === "down") {
@@ -693,7 +693,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				}
 			}
 			const p = local(e);
-			send({ type: "pointer", phase, id: e.pointerId, x: p.x, y: p.y, buttons: e.buttons, kind, clicks: press.clicks, shift: e.shiftKey });
+			send({ type: "pointer", phase, id: e.pointerId, x: p.x, y: p.y, buttons: e.buttons, kind, clicks: press.clicks, shift: e.shiftKey, primary: e.isPrimary });
 		};
 		on(canvas, "pointerdown", pointer("down"));
 		on(canvas, "pointermove", pointer("move"));

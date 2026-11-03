@@ -95,6 +95,8 @@ export type InputMsg =
 			kind: PointerKind;
 			clicks: number;
 			shift: boolean;
+			/** the browser's first active touch: no other finger is down */
+			primary?: boolean;
 	  }
 	| { type: "key"; key: string; mod: boolean; shift: boolean }
 	| { type: "leave" };
@@ -862,6 +864,8 @@ export class ViewerCore {
 	}
 
 	private touch(msg: Extract<InputMsg, { type: "pointer" }>) {
+		// iOS Safari can drop the pointerup of a fast pinch; a primary down proves no other finger is still on the screen.
+		if (msg.phase === "down" && msg.primary) this.touches.clear();
 		const prev = this.touches.get(msg.id);
 		if (msg.phase === "down") {
 			this.velocity = { x: 0, y: 0 };
