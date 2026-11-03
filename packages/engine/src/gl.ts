@@ -193,13 +193,14 @@ export class Compositor {
 		this.h = h;
 	}
 
-	upload(pixels: Uint8Array, w: number, h: number): WebGLTexture | null {
+	upload(pixels: Uint8Array | ImageBitmap, w: number, h: number): WebGLTexture | null {
 		const gl = this.gl;
 		const tex = gl.createTexture();
 		if (!tex) return null; // context lost
 		gl.bindTexture(gl.TEXTURE_2D, tex);
 		gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
-		gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+		if (pixels instanceof Uint8Array) gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+		else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

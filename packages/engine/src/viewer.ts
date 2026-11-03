@@ -25,6 +25,7 @@ import { rasterWorkerCount } from "./raster-pool";
 import { probeVerdict, RANGE_BLOCK, readLinearization } from "./range";
 import { findStartxref, pagePathObjects, parseXref } from "./xref";
 import { getEngineSupport } from "./support";
+import { documentKey } from "./tile-cache";
 import type { Rect, TextPoint } from "./text";
 import { TextLayer, type TextLayerLine } from "./text-layer";
 
@@ -61,6 +62,15 @@ export interface ViewerOptions extends Partial<CoreOptions> {
 	rangeLoading?: boolean;
 	/** with `rangeLoading`: download the whole file after the first paint, then stop range requests (default true) */
 	autoFetch?: boolean;
+	/**
+	 * Keep slow pages' base bitmaps in IndexedDB, so the document opens instantly
+	 * next time (default false). `key` identifies the document (e.g. id plus
+	 * version); without it, byte sources are keyed by a hash of their content and
+	 * URL sources with range loading are not cached. Bitmaps of every document
+	 * share `budgetMB` (default 64, 24 on touch devices), least recently used out
+	 * first. Leave it off for documents that must not persist on the device.
+	 */
+	tileCache?: boolean | { key?: string; budgetMB?: number };
 	/** password for an encrypted document (else an `error` event with code `password`; see `unlock`) */
 	password?: string;
 	/**
@@ -418,6 +428,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		autoFetch = true,
 		textLayer: wantTextLayer = true,
 		interceptFind = false,
+		tileCache = false,
 		...coreOptions
 	} = options;
 	const startedAt = epochNow();
@@ -743,6 +754,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 						readyMs: readyAt - startedAt,
 						firstTileMs: (e.timing?.firstTileAt ?? paintedAt) - startedAt,
 						firstPaintMs: paintedAt - startedAt,
+						tileCacheHits: e.timing?.cacheHits ?? 0,
 						rangeLoading: docSource?.kind === "url",
 					};
 					if (onEvent) {
@@ -829,6 +841,15 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			if (core) core.command(cmd);
 			else postToCore({ t: "command", cmd });
 		};
+		if (tileCache) {
+			const { key, budgetMB = touchDevice ? 24 : 64 } = tileCache === true ? {} : tileCache;
+			// a downloaded URL's blob exists only once `opening` resolves
+			void opening
+				.then(() => key ?? (blob ? documentKey(blob) : null))
+				.then((k) => {
+					if (k && !destroyed) command({ type: "tile-cache", key: k, budgetMB });
+				}, () => {});
+		}
 		let nextFlight = 1;
 		const flight = (make: (id: number) => Command) =>
 			new Promise<boolean>((resolve) => {

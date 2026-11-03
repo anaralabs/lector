@@ -8,6 +8,7 @@ import { anchoredY, buildLayout, estimateSizes } from "./layout";
 import { uploadRank } from "./upload-rank";
 import type { DocumentInfo, ErrorCode, ErrorPhase, Link, LoadFailureDetail, OpenTiming, OutlineItem, PageSize, SizeEntry } from "./protocol";
 import { RasterPool, type SizesResult, type TextResult, type TileResult } from "./raster-pool";
+import { TileCache } from "./tile-cache";
 import { boundedDistance, foldQuery, insertRanked, matchPage, type RawMatch, type SearchOptions, splitLimit } from "./search";
 import { PageText, type Rect, type SelectionTextOptions, type TextPoint, comparePoints } from "./text";
 
@@ -240,7 +241,9 @@ export type Command =
 	| { type: "select-all"; scope?: "page" | "document" | "auto" }
 	/** retry opening an encrypted document with this password */
 	| { type: "unlock"; password: string }
-	| { type: "options"; options: Partial<CoreOptions> };
+	| { type: "options"; options: Partial<CoreOptions> }
+	/** keep base page bitmaps in a persistent cache under this document key (see the viewer's `tileCache` option) */
+	| { type: "tile-cache"; key: string; budgetMB: number };
 
 /**
  * Frame statistics over the last ~500ms. A frame is "wanted" when something
@@ -303,7 +306,7 @@ export type CoreEvent =
 	/** estimated page sizes resolved (range loading); the camera kept the content in view where it was */
 	| { type: "layout"; pages: PageSize[]; layout: Rect[]; complete: boolean }
 	/** the first page bitmap reached the screen (once per document) */
-	| { type: "painted"; page: number; timing?: { firstTileAt: number; paintedAt: number } }
+	| { type: "painted"; page: number; timing?: { firstTileAt: number; paintedAt: number; cacheHits: number } }
 	/** `fitWidth`: fit-width mode (kept for compatibility); `fit`: the sticky fit mode, if any */
 	| { type: "view"; zoom: number; page: number; pageCount: number; fitWidth: boolean; fit: "width" | "page" | null }
 	| { type: "camera"; camera: Camera; moving: boolean }
@@ -355,8 +358,11 @@ export interface LoadTimings extends Partial<OpenTiming> {
 	/** spawning the first raster worker until its script ran */
 	workerBootMs: number;
 	readyMs: number;
+	/** the first tile bitmap was ready: rendered by PDFium, or read from the `tileCache` */
 	firstTileMs: number;
 	firstPaintMs: number;
+	/** tiles served from the `tileCache` by the first paint (0 without one) */
+	tileCacheHits: number;
 	rangeLoading: boolean;
 }
 
@@ -380,6 +386,8 @@ interface Tile {
 	lastWanted: number;
 	/** the worker failed to render it: not requested again */
 	failed?: boolean;
+	/** being read from the persistent cache */
+	loading?: boolean;
 }
 
 interface PageRect {
@@ -391,6 +399,10 @@ interface PageRect {
 
 const TILE = 512;
 const BASE_MAX = 1024;
+/** base bitmaps that took longer than this (ms) go to the persistent cache */
+const CACHE_MIN_MS = 20;
+/** cache writes wait until no frame has run for this long (ms) */
+const CACHE_IDLE_MS = 400;
 /** a page whose base bitmap is predicted slower than this gets a quick low-res preview first */
 const PREVIEW_MS = 50;
 /** preview scale = base scale / PREVIEW_DIV (1/16 of the pixels) */
@@ -501,7 +513,8 @@ export class ViewerCore {
 
 	private tiles = new Map<string, Tile>();
 	private tilesByPage = new Map<number, Set<Tile>>();
-	private arrived: { tile: Tile; pixels: Uint8Array }[] = [];
+	private arrived: { tile: Tile; pixels: Uint8Array | ImageBitmap }[] = [];
+	private cache: TileCache | null = null;
 	private targetScale = 1;
 	private lastZoomChange = -1e9;
 	private settleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -579,6 +592,7 @@ export class ViewerCore {
 	/** shortest recent continuous frame interval: the display's refresh interval */
 	private vsync = 1000 / 60;
 	private firstTileAt = 0;
+	private cacheHits = 0;
 	private sharpWait: { cause: "zoom" | "jump"; since: number } | null = null;
 	private lastView: { zoom: number; page: number; fit: Fit } = { zoom: 0, page: -1, fit: false };
 
@@ -611,8 +625,8 @@ export class ViewerCore {
 		this.pending = null;
 		this.dragging = false;
 		this.velocity = { x: 0, y: 0 };
-		for (const timer of [this.settleTimer, this.idleTimer, this.press?.timer]) if (timer) clearTimeout(timer);
-		this.settleTimer = this.idleTimer = null;
+		for (const timer of [this.settleTimer, this.idleTimer, this.cacheTimer, this.press?.timer]) if (timer) clearTimeout(timer);
+		this.settleTimer = this.idleTimer = this.cacheTimer = null;
 		this.press = null;
 		this.pool.dispose();
 		for (const tile of this.tiles.values()) if (tile.tex) this.gl.free(tile.tex, tile.w, tile.h);
@@ -1609,6 +1623,9 @@ export class ViewerCore {
 			case "select-all":
 				void this.selectAll(cmd.scope ?? "auto");
 				return;
+			case "tile-cache":
+				this.cache ??= new TileCache(cmd.key, cmd.budgetMB * 1024 * 1024, this.opts.textureBudgetMB <= 128 ? 2 : 4);
+				return;
 			case "options": {
 				const copyChanged = "copyOptions" in cmd.options && JSON.stringify(cmd.options.copyOptions) !== JSON.stringify(this.opts.copyOptions);
 				this.opts = { ...this.opts, ...cmd.options };
@@ -2069,8 +2086,7 @@ export class ViewerCore {
 		if (pin) this.pinned.add(key);
 		const existing = this.tiles.get(key);
 		if (existing) existing.lastWanted = this.frameId;
-		if (existing && (existing.tex || existing.arrived || existing.failed)) return;
-		keep.add(key);
+		if (existing && (existing.tex || existing.arrived || existing.failed || existing.loading)) return;
 		let tile = existing;
 		if (!tile) {
 			tile = { key, page, scale, x, y, w, h, tex: null, arrived: false, lastUsed: 0, lastWanted: this.frameId };
@@ -2079,7 +2095,31 @@ export class ViewerCore {
 			if (!set) this.tilesByPage.set(page, (set = new Set()));
 			set.add(tile);
 		}
+		// Not kept for the pool while it loads from the cache: a queued raster job for it is dropped.
+		if (scale === this.baseScale(page) && this.cache?.has(page, scale, w, h)) {
+			this.loadCached(tile);
+			return;
+		}
+		keep.add(key);
 		this.requestTile(tile, priority);
+	}
+
+	private loadCached(tile: Tile) {
+		tile.loading = true;
+		void this.cache!.get(tile.page, tile.scale, tile.w, tile.h).then((bitmap) => {
+			tile.loading = false;
+			if (this.disposed || this.tiles.get(tile.key) !== tile || tile.tex || tile.arrived || !bitmap || bitmap.width !== tile.w || bitmap.height !== tile.h) {
+				bitmap?.close();
+				// a miss renders it as usual on the next plan
+				this.requestFrame();
+				return;
+			}
+			this.firstTileAt ||= epochNow();
+			this.cacheHits++;
+			tile.arrived = true;
+			this.arrived.push({ tile, pixels: bitmap });
+			this.requestFrame();
+		});
 	}
 
 	private requestTile(tile: Tile, priority: number) {
@@ -2094,9 +2134,12 @@ export class ViewerCore {
 			this.tileMs.push(r.ms);
 			this.firstTileAt ||= epochNow();
 			if (this.tileLog.length < 5000) this.tileLog.push({ page, base: scale <= this.baseScale(page), ms: r.ms, waitMs: performance.now() - asked });
+			const pixels = new Uint8Array(r.buf);
+			// Slow pages are worth keeping for the next open; cheap ones render faster than they decode.
+			if (this.cache && r.ms >= CACHE_MIN_MS && scale === this.baseScale(page)) this.cache.put(page, scale, pixels, w, h);
 			if (this.tiles.get(key) !== tile || tile.tex || tile.arrived) return;
 			tile.arrived = true;
-			this.arrived.push({ tile, pixels: new Uint8Array(r.buf) });
+			this.arrived.push({ tile, pixels });
 			this.requestFrame();
 		}, Math.min(1, frac));
 	}
@@ -2154,7 +2197,7 @@ export class ViewerCore {
 			if (keep.has(this.tileKey(p, s, 0, 0))) return;
 			// A heavy page about to be blank shows a coarse pass while its base renders; scans gain nothing (decode-bound).
 			const base = this.tiles.get(this.tileKey(p, s, 0, 0));
-			if ((pin || shown.has(p)) && !base?.tex && !base?.arrived) {
+			if ((pin || shown.has(p)) && !base?.tex && !base?.arrived && !base?.loading) {
 				const cost = this.pool.predict(p);
 				const ps = s / PREVIEW_DIV;
 				if (cost.ms > PREVIEW_MS && cost.overhead < cost.ms * 0.3) this.ensureTile(p, ps, 0, 0, Math.max(1, Math.round(size.w * ps)), Math.max(1, Math.round(size.h * ps)), priority - 0.5, keep, pin);
@@ -2217,7 +2260,7 @@ export class ViewerCore {
 		this.pool.pump();
 		// Placeholder tiles that will never be rendered are forgotten.
 		for (const tile of this.tiles.values()) {
-			if (!tile.tex && !tile.arrived && !tile.failed && !keep.has(tile.key) && !this.pool.has(tile.key)) this.dropTile(tile);
+			if (!tile.tex && !tile.arrived && !tile.failed && !tile.loading && !keep.has(tile.key) && !this.pool.has(tile.key)) this.dropTile(tile);
 		}
 		return visible;
 	}
@@ -2236,8 +2279,9 @@ export class ViewerCore {
 		// Off-screen pixels nothing plans any more are dropped; on-screen ones still serve as fallbacks (old zoom levels).
 		const stale = (tile: Tile) => tile.lastWanted !== this.frameId && (!visible.includes(tile.page) || tile.scale === this.targetScale);
 		if (this.arrived.some((a) => stale(a.tile))) {
-			this.arrived = this.arrived.filter(({ tile }) => {
+			this.arrived = this.arrived.filter(({ tile, pixels }) => {
 				if (!stale(tile)) return true;
+				if (!(pixels instanceof Uint8Array)) pixels.close();
 				tile.arrived = false;
 				if (this.tiles.get(tile.key) === tile && !tile.tex) this.dropTile(tile);
 				return false;
@@ -2249,15 +2293,19 @@ export class ViewerCore {
 		}
 		while (this.arrived.length > 0 && performance.now() - t0 < UPLOAD_BUDGET_MS) {
 			const next = this.arrived[0]!;
-			if (bytes > 0 && bytes + next.pixels.byteLength > this.uploadBudget) break;
+			if (bytes > 0 && bytes + next.tile.w * next.tile.h * 4 > this.uploadBudget) break;
 			this.arrived.shift();
 			const { tile, pixels } = next;
 			tile.arrived = false;
-			if (this.tiles.get(tile.key) !== tile || tile.tex) continue;
+			if (this.tiles.get(tile.key) !== tile || tile.tex) {
+				if (!(pixels instanceof Uint8Array)) pixels.close();
+				continue;
+			}
 			tile.tex = this.gl.upload(pixels, tile.w, tile.h);
+			if (!(pixels instanceof Uint8Array)) pixels.close();
 			// Lost mid-frame: fetch it again after the restore.
 			if (!tile.tex) break;
-			bytes += pixels.byteLength;
+			bytes += tile.w * tile.h * 4;
 		}
 		this.uploadedLast = bytes;
 		if (bytes > this.uploadPeak) this.uploadPeak = bytes;
@@ -2366,6 +2414,7 @@ export class ViewerCore {
 		this.reportStats(now);
 
 		this.animating = moving || this.arrived.length > 0 || this.dirty;
+		if (this.cache?.queued) this.cacheWhenIdle();
 		if (this.animating) this.requestFrame();
 		this.inFrame = false;
 		this.frameEnd = performance.now();
@@ -2485,7 +2534,7 @@ export class ViewerCore {
 					t.lastUsed = this.frameId;
 					if (!this.painted) {
 						this.painted = true;
-						this.emit({ type: "painted", page: p, timing: { firstTileAt: this.firstTileAt || epochNow(), paintedAt: epochNow() } });
+						this.emit({ type: "painted", page: p, timing: { firstTileAt: this.firstTileAt || epochNow(), paintedAt: epochNow(), cacheHits: this.cacheHits } });
 					}
 				}
 			};
@@ -2634,6 +2683,24 @@ export class ViewerCore {
 
 	private lastCam: Camera = { x: 0, y: 0, zoom: 0 };
 	private idleTimer: ReturnType<typeof setTimeout> | null = null;
+	private cacheTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** Encodes queued cache bitmaps one at a time once the view has rested and the workers are idle. */
+	private cacheWhenIdle() {
+		if (this.cacheTimer || this.disposed) return;
+		this.cacheTimer = setTimeout(() => {
+			this.cacheTimer = null;
+			const cache = this.cache;
+			if (!cache?.queued || this.disposed) return;
+			if (this.animating || this.pool.pending > 0 || performance.now() - this.lastFrame < CACHE_IDLE_MS) {
+				this.cacheWhenIdle();
+				return;
+			}
+			void cache.writeNext().then(() => {
+				if (cache.queued) this.cacheWhenIdle();
+			});
+		}, CACHE_IDLE_MS);
+	}
 
 	/** Emits `moving: false` once the camera has rested; hosts re-show tooltips then. */
 	private cameraIdle() {
@@ -2658,6 +2725,7 @@ export class ViewerCore {
 		}
 		if (page === this.lastView.page && this.cam.zoom === this.lastView.zoom && this.fitMode === this.lastView.fit) return;
 		this.lastView = { page, zoom: this.cam.zoom, fit: this.fitMode };
+		if (this.cache) this.cache.focus = page;
 		this.emit({ type: "view", zoom: this.cam.zoom, page, pageCount: this.pages.length, fitWidth: this.fitMode === "width", fit: this.fitMode || null });
 	}
 
