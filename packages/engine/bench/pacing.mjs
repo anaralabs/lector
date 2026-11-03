@@ -82,29 +82,45 @@ async function open(query, trace) {
 	return { page, close };
 }
 
+async function scenario(s, index) {
+	const { page, close } = await open(s.query, index === 0 && s.name === "scroll" ? traceOut : undefined);
+	const windows = await page.evaluate(
+		async ({ frames, step }) => {
+			const el = document.getElementById("viewer");
+			const fn = new Function("i", "el", "wheel", step);
+			const wheel = (dx, dy, ctrl, x = 640, y = 430) =>
+				el.dispatchEvent(new WheelEvent("wheel", { deltaX: dx, deltaY: dy, ctrlKey: ctrl, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+			window.__events.length = 0;
+			for (let i = 0; i < frames; i++) {
+				fn(i, el, wheel);
+				await new Promise((r) => requestAnimationFrame(r));
+			}
+			await new Promise((r) => setTimeout(r, 1200));
+			return window.__events.map((e) => e.stats);
+		},
+		{ frames: s.frames, step: s.step },
+	);
+	if (index === 0 && s.name === "scroll") scenario.load = await page.evaluate(() => window.__all.find((e) => e.type === "load")?.timings);
+	scenario.errors.push(...(await close()));
+	return windows;
+}
+scenario.errors = [];
+
 async function run(index) {
 	const result = { scenarios: {}, errors: [] };
 	for (const s of scenarios) {
-		const { page, close } = await open(s.query, index === 0 && s.name === "scroll" ? traceOut : undefined);
-		const windows = await page.evaluate(
-			async ({ frames, step }) => {
-				const el = document.getElementById("viewer");
-				const fn = new Function("i", "el", "wheel", step);
-				const wheel = (dx, dy, ctrl, x = 640, y = 430) =>
-					el.dispatchEvent(new WheelEvent("wheel", { deltaX: dx, deltaY: dy, ctrlKey: ctrl, clientX: x, clientY: y, bubbles: true, cancelable: true }));
-				window.__events.length = 0;
-				for (let i = 0; i < frames; i++) {
-					fn(i, el, wheel);
-					await new Promise((r) => requestAnimationFrame(r));
-				}
-				await new Promise((r) => setTimeout(r, 1200));
-				return window.__events.map((e) => e.stats);
-			},
-			{ frames: s.frames, step: s.step },
-		);
-		if (index === 0 && s.name === "scroll") result.load = await page.evaluate(() => window.__all.find((e) => e.type === "load")?.timings);
-		result.errors.push(...(await close()));
+		let windows;
+		for (let attempt = 0; !windows; attempt++) {
+			try {
+				windows = await scenario(s, index);
+			} catch (err) {
+				// The browser can be killed from outside (sandbox limits); retry the scenario once.
+				if (attempt > 0) throw err;
+				console.error(`${s.name}: ${String(err).split("\n")[0]}; retrying`);
+			}
+		}
 		const busy = windows.filter((w) => w.frames > 0);
+
 		const sum = (k) => busy.reduce((a, w) => a + (w[k] ?? 0), 0);
 		result.scenarios[s.name] = {
 			frames: sum("frames"),
@@ -120,6 +136,8 @@ async function run(index) {
 			textureMB: Math.max(0, ...busy.map((w) => w.textureMB)),
 		};
 	}
+	if (scenario.load) result.load = scenario.load;
+	result.errors.push(...scenario.errors.splice(0));
 	// Jumps across the document and zoom steps; each waits for the view to sharpen.
 	const { page, close } = await open("");
 	const sharp = await page.evaluate(async () => {
