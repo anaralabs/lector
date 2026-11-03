@@ -10,6 +10,8 @@ test("visible base bitmaps first, then planned sharp tiles, then look-ahead", ()
 	assert.equal(uploadRank(tile(2, 2), [2, 3], frame, 0.5, 2), 1);
 	assert.equal(uploadRank(tile(9, 2), [2, 3], frame, 0.5, 2), 2);
 	assert.equal(uploadRank(tile(2, 1), [2, 3], frame, 0.5, 2), 2);
+	assert.equal(uploadRank(tile(2, 0.125), [2, 3], frame, 0.5, 2), 0);
+	assert.equal(uploadRank(tile(9, 0.125), [2, 3], frame, 0.5, 2), 2);
 });
 
 test("unplanned fallbacks never compete with tiles in view", () => {
