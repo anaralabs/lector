@@ -95,6 +95,8 @@ export type InputMsg =
 			kind: PointerKind;
 			clicks: number;
 			shift: boolean;
+			/** the browser's first active touch: no other finger is down */
+			primary?: boolean;
 	  }
 	| { type: "key"; key: string; mod: boolean; shift: boolean }
 	| { type: "leave" };
@@ -268,6 +270,8 @@ export type CoreEvent =
 	| { type: "search-progress"; id: number; results: SearchResults }
 	/** Cmd/Ctrl+F while the viewer has focus, with `interceptFind` on: open the host's search */
 	| { type: "find" }
+	/** the browser restored a lost WebGL context (after a `gpu`/`render` error); tiles are redrawing */
+	| { type: "restored" }
 	/**
 	 * An animated (or instant) reveal/goto finished. `landed: false` when input or
 	 * another jump interrupted it. `coverage`: share of the landing view already
@@ -495,6 +499,7 @@ export class ViewerCore {
 		if (this.disposed) return;
 		for (const tile of this.tiles.values()) tile.tex = null;
 		this.requestFrame();
+		this.emit({ type: "restored" });
 	}
 
 	// ---------------------------------------------------------------- setup
@@ -859,6 +864,8 @@ export class ViewerCore {
 	}
 
 	private touch(msg: Extract<InputMsg, { type: "pointer" }>) {
+		// iOS Safari can drop the pointerup of a fast pinch; a primary down proves no other finger is still on the screen.
+		if (msg.phase === "down" && msg.primary) this.touches.clear();
 		const prev = this.touches.get(msg.id);
 		if (msg.phase === "down") {
 			this.velocity = { x: 0, y: 0 };

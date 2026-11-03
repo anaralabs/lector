@@ -600,15 +600,37 @@ function readInfo(password: string | undefined): DocumentInfo {
  * Compiles the wasm while it downloads (instantiateStreaming), falling back to
  * a buffered compile when the server sends another Content-Type.
  */
+const WASM_FETCH_RETRY_MS = [500, 1500];
+
+class RetryableHttpError extends Error {}
+
+/**
+ * Download and compile pdfium.wasm, retrying the whole attempt when the network
+ * drops (headers or body: a TypeError) or the server 5xxs. A 4xx, a compile
+ * error or running out of memory fails at once.
+ */
+async function instantiatePdfium(wasmUrl: string, imports: WebAssembly.Imports): Promise<WebAssembly.WebAssemblyInstantiatedSource> {
+	for (let attempt = 0; ; attempt++) {
+		const wait = WASM_FETCH_RETRY_MS[attempt];
+		try {
+			const res = await fetch(wasmUrl, { credentials: "same-origin" });
+			if (!res.ok) throw res.status >= 500 ? new RetryableHttpError(`HTTP ${res.status}`) : new Error(`HTTP ${res.status}`);
+			const streaming = typeof WebAssembly.instantiateStreaming === "function" && res.headers.get("Content-Type")?.split(";")[0].trim() === "application/wasm";
+			return streaming ? await WebAssembly.instantiateStreaming(res, imports) : await WebAssembly.instantiate(await res.arrayBuffer(), imports);
+		} catch (err) {
+			const retryable = err instanceof TypeError || err instanceof RetryableHttpError;
+			if (!retryable || wait === undefined) throw err;
+			await new Promise((r) => setTimeout(r, wait));
+		}
+	}
+}
+
 function loadPdfium(wasmUrl: string): Promise<Pdfium> {
 	return new Promise<Pdfium>((resolve, reject) => {
 		init({
 			instantiateWasm(imports: WebAssembly.Imports, receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void) {
 				(async () => {
-					const res = await fetch(wasmUrl, { credentials: "same-origin" });
-					if (!res.ok) throw new Error(`HTTP ${res.status}`);
-					const streaming = typeof WebAssembly.instantiateStreaming === "function" && res.headers.get("Content-Type")?.split(";")[0].trim() === "application/wasm";
-					const { instance, module } = streaming ? await WebAssembly.instantiateStreaming(res, imports) : await WebAssembly.instantiate(await res.arrayBuffer(), imports);
+					const { instance, module } = await instantiatePdfium(wasmUrl, imports);
 					receive(instance, module);
 				})().catch(reject);
 				return {};

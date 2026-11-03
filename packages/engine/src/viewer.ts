@@ -192,13 +192,22 @@ async function fetchPdf(url: string, init: RequestInit = {}) {
 	return res;
 }
 
+/** The body can fail mid-download after the headers arrived; that is still a fetch failure. */
+async function readBlob(res: Response, url: string): Promise<Blob> {
+	try {
+		return await res.blob();
+	} catch (err) {
+		throw new EngineError(`Failed to fetch PDF "${url}": ${String((err as Error)?.message ?? err)}`, "fetch", "document-load", url);
+	}
+}
+
 /**
  * Probe for range support with a 1KB request. A 206 with a total length means
  * range loading works; a 200 means the server sent the whole file, which is
  * then used as is (nothing is downloaded twice).
  */
 async function openUrl(url: string, range: boolean): Promise<{ blob: Blob } | { length: number }> {
-	if (!range) return { blob: await (await fetchPdf(url)).blob() };
+	if (!range) return { blob: await readBlob(await fetchPdf(url), url) };
 	const res = await fetchPdf(url, { headers: { Range: "bytes=0-1023" } });
 	const total = Number(/\/(\d+)\s*$/.exec(res.headers.get("Content-Range") ?? "")?.[1]);
 	const encoded = (res.headers.get("Content-Encoding") ?? "identity") !== "identity";
@@ -206,8 +215,8 @@ async function openUrl(url: string, range: boolean): Promise<{ blob: Blob } | { 
 		void res.body?.cancel();
 		return { length: total };
 	}
-	if (res.status === 206) return { blob: await (await fetchPdf(url)).blob() };
-	return { blob: await res.blob() };
+	if (res.status === 206) return { blob: await readBlob(await fetchPdf(url), url) };
+	return { blob: await readBlob(res, url) };
 }
 
 /** presses closer than this (ms, css px) count as a double/triple click */
@@ -327,13 +336,20 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		let fullFetch: Promise<Blob> | null = null;
 		const fetchAll = () => {
 			if (blob) return Promise.resolve(blob);
-			fullFetch ??= fetchPdf((docSource as { url: string }).url)
-				.then((res) => res.blob())
-				.then((b) => {
-					blob = b;
-					for (const w of rasterWorkers) w.postMessage({ t: "source", blob: b });
-					return b;
-				});
+			const url = (docSource as { url: string }).url;
+			fullFetch ??= fetchPdf(url)
+				.then((res) => readBlob(res, url))
+				.then(
+					(b) => {
+						blob = b;
+						for (const w of rasterWorkers) w.postMessage({ t: "source", blob: b });
+						return b;
+					},
+					(err) => {
+						fullFetch = null;
+						throw err;
+					},
+				);
 			return fullFetch;
 		};
 
@@ -665,7 +681,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		const pointer = (phase: "down" | "move" | "up" | "cancel") => (e: PointerEvent) => {
 			const kind = (e.pointerType || "mouse") as PointerKind;
 			if (kind === "touch") {
-				if (phase === "down") touchCount++;
+				if (phase === "down") touchCount = e.isPrimary ? 1 : touchCount + 1;
 				if (phase === "up" || phase === "cancel") touchCount = Math.max(0, touchCount - 1);
 			}
 			if (phase === "down") {
@@ -677,7 +693,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				}
 			}
 			const p = local(e);
-			send({ type: "pointer", phase, id: e.pointerId, x: p.x, y: p.y, buttons: e.buttons, kind, clicks: press.clicks, shift: e.shiftKey });
+			send({ type: "pointer", phase, id: e.pointerId, x: p.x, y: p.y, buttons: e.buttons, kind, clicks: press.clicks, shift: e.shiftKey, primary: e.isPrimary });
 		};
 		on(canvas, "pointerdown", pointer("down"));
 		on(canvas, "pointermove", pointer("move"));
