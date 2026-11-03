@@ -49,7 +49,9 @@ export type ToRaster =
 			h: number;
 	  }
 	| { t: "text"; id: number; page: number }
-	| { t: "outline"; id: number; page: -1 };
+	| { t: "outline"; id: number; page: -1 }
+	/** stop the running tile job `id` (it answers `cancelled`; a job that already finished answers as usual) */
+	| { t: "cancel"; id: number };
 
 /** Document metadata (Info dictionary), like pdf.js `getMetadata().info` and lector's `onDocumentLoad`. */
 export interface DocumentInfo {
@@ -130,4 +132,5 @@ export type FromRaster =
 			ms: number;
 			heap: number;
 	  }
-	| { t: "outline"; id: number; items: OutlineItem[] };
+	| { t: "outline"; id: number; items: OutlineItem[] }
+	| { t: "cancelled"; id: number; heap: number };
