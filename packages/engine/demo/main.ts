@@ -4,12 +4,14 @@ import wasmUrl, { workerUrls } from "../src/vite-wasm";
 // extensions that re-wrap workers, and cross-origin asset hosts).
 const createWorker = (url: URL, name: string) =>
 	new Worker(URL.createObjectURL(new Blob([`import(${JSON.stringify(url.href)})`], { type: "text/javascript" })), { name });
-import { type CoreEvent, createViewer, type Viewer } from "../src";
+import { type CoreEvent, createViewer, preloadPdfium, type Viewer } from "../src";
 
 // Benches read the core (window.__core, or self.__core in the compositor worker).
 (globalThis as { __lectorEngineDebug?: boolean }).__lectorEngineDebug = true;
 
 const params = new URLSearchParams(location.search);
+// ?preload=1: compile pdfium.wasm before the viewer opens, as a host does at idle.
+if (params.get("preload") === "1") await preloadPdfium(wasmUrl);
 const src = params.get("file") ?? "/cadbots.pdf";
 const offscreen = params.get("offscreen") !== "0";
 const workers = params.has("workers") ? Number(params.get("workers")) : undefined;

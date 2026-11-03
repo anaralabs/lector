@@ -609,7 +609,15 @@ class RetryableHttpError extends Error {}
  * drops (headers or body: a TypeError) or the server 5xxs. A 4xx, a compile
  * error or running out of memory fails at once.
  */
-async function instantiatePdfium(wasmUrl: string, imports: WebAssembly.Imports): Promise<WebAssembly.WebAssemblyInstantiatedSource> {
+async function instantiatePdfium(wasmUrl: string, imports: WebAssembly.Imports, compiled?: WebAssembly.Module): Promise<WebAssembly.WebAssemblyInstantiatedSource> {
+	if (compiled) {
+		try {
+			return { instance: await WebAssembly.instantiate(compiled, imports), module: compiled };
+		} catch (err) {
+			// out of memory will not improve by compiling again
+			if (err instanceof RangeError) throw err;
+		}
+	}
 	for (let attempt = 0; ; attempt++) {
 		const wait = WASM_FETCH_RETRY_MS[attempt];
 		try {
@@ -625,12 +633,12 @@ async function instantiatePdfium(wasmUrl: string, imports: WebAssembly.Imports):
 	}
 }
 
-function loadPdfium(wasmUrl: string): Promise<Pdfium> {
+function loadPdfium(wasmUrl: string, compiled?: WebAssembly.Module): Promise<Pdfium> {
 	return new Promise<Pdfium>((resolve, reject) => {
 		init({
 			instantiateWasm(imports: WebAssembly.Imports, receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void) {
 				(async () => {
-					const { instance, module } = await instantiatePdfium(wasmUrl, imports);
+					const { instance, module } = await instantiatePdfium(wasmUrl, imports, compiled);
 					receive(instance, module);
 				})().catch(reject);
 				return {};
@@ -654,7 +662,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 		}
 	};
 	try {
-		P = await loadPdfium(msg.wasmUrl);
+		P = await loadPdfium(msg.wasmUrl, msg.module);
 		P.PDFiumExt_Init();
 	} catch (err) {
 		send({ t: "error", message: `lector-engine: pdfium.wasm failed to load from ${msg.wasmUrl}: ${String((err as Error)?.message ?? err)}`, code: "wasm", phase: "engine-load" });

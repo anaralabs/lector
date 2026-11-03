@@ -225,6 +225,36 @@ const MULTI_CLICK_PX = 6;
 
 const NAV_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", "Home", "End", " ", "Escape"]);
 
+const compiled = new Map<string, Promise<WebAssembly.Module | undefined>>();
+
+/**
+ * Compiles pdfium.wasm once per page and URL; every raster worker of every
+ * viewer instantiates that module instead of downloading and compiling its own.
+ * Call it early (e.g. on hover) to take the compile off the open path.
+ */
+export function preloadPdfium(wasmUrl: string): Promise<WebAssembly.Module | undefined> {
+	const url = new URL(wasmUrl, location.href).href;
+	let module = compiled.get(url);
+	if (!module) {
+		const fetchIt = () => fetch(url, { credentials: "same-origin" }).then((res) => {
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			return res;
+		});
+		module = (typeof WebAssembly.compileStreaming === "function"
+			? fetchIt().then((res) =>
+					(res.headers.get("Content-Type") ?? "").split(";")[0]!.trim() === "application/wasm" ? WebAssembly.compileStreaming(res) : res.arrayBuffer().then((b) => WebAssembly.compile(b)),
+				)
+			: fetchIt().then((res) => res.arrayBuffer()).then((b) => WebAssembly.compile(b))
+		).catch(() => {
+			// Workers fall back to loading it themselves; a later viewer may retry.
+			compiled.delete(url);
+			return undefined;
+		});
+		compiled.set(url, module);
+	}
+	return module;
+}
+
 export async function createViewer(container: HTMLElement, source: string | ArrayBuffer | Uint8Array, options: ViewerOptions): Promise<Viewer> {
 	const support = getEngineSupport();
 	if (!support.supported) {
@@ -397,13 +427,22 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			for (const w of rasterWorkers) w.terminate();
 			for (const port of corePorts) port.close();
 		});
+		// Only a module someone already compiled (preloadPdfium) is shared; compiling it here would land on the open path's main thread.
+		const pdfium = compiled.get(wasmUrl) ?? Promise.resolve(undefined);
 		for (let i = 0; i < n; i++) {
 			const { worker, booted } = spawn("raster", `lector-raster-${i}`);
 			rasterWorkers.push(worker);
 			const channel = new MessageChannel();
 			corePorts.push(channel.port2);
-			booted.then(() => {
-				if (!destroyed) worker.postMessage({ t: "init", source: docSource, port: channel.port1, wasmUrl, password, sizes: i === 0 }, [channel.port1]);
+			Promise.all([booted, pdfium]).then(([, module]) => {
+				if (destroyed) return;
+				const init = { t: "init", source: docSource, port: channel.port1, wasmUrl, password, sizes: i === 0 } as const;
+				try {
+					worker.postMessage(module ? { ...init, module } : init, [channel.port1]);
+				} catch {
+					// a browser that cannot clone compiled modules to workers
+					worker.postMessage(init, [channel.port1]);
+				}
 			});
 		}
 

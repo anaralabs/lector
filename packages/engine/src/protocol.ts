@@ -31,7 +31,7 @@ export type DocSource = { kind: "blob"; blob: Blob } | { kind: "url"; url: strin
 
 export type ToRaster =
 	/** sizes: false for all but one worker (page sizes are read lazily there) */
-	| { t: "init"; source: DocSource; port: MessagePort; wasmUrl: string; password?: string; sizes?: boolean }
+	| { t: "init"; source: DocSource; port: MessagePort; wasmUrl: string; module?: WebAssembly.Module; password?: string; sizes?: boolean }
 	/** sent to the worker itself (not the port): the full file arrived, read from it from now on */
 	| { t: "source"; blob: Blob }
 	/** retry opening the document with a password (after a `password` error) */
