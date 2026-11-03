@@ -219,6 +219,9 @@ async function openUrl(url: string, range: boolean): Promise<{ blob: Blob } | { 
 	return { blob: await readBlob(res, url) };
 }
 
+/** a worker script that failed to load is fetched once more after this */
+const WORKER_RETRY_MS = 400;
+
 /** presses closer than this (ms, css px) count as a double/triple click */
 const MULTI_CLICK_MS = 500;
 const MULTI_CLICK_PX = 6;
@@ -331,37 +334,58 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	}
 
 	function build(): Viewer {
-		const spawn = (kind: "raster" | "core", name: string) => {
+		const spawn = (kind: "raster" | "core", name: string, onmessage?: (ev: MessageEvent) => void) => {
 			const url = workerUrls?.[kind];
 			// Literal `new Worker(new URL(...))` so bundlers emit the worker chunks.
-			const worker = url
-				? createWorker
-					? createWorker(new URL(url, location.href), name)
-					: new Worker(url, { type: "module", name })
-				: kind === "raster"
-					? new Worker(new URL("./raster-worker.ts", import.meta.url), { type: "module", name })
-					: new Worker(new URL("./core-worker.ts", import.meta.url), { type: "module", name });
-			const booted = new Promise<void>((resolve) => {
+			const create = () =>
+				url
+					? createWorker
+						? createWorker(new URL(url, location.href), name)
+						: new Worker(url, { type: "module", name })
+					: kind === "raster"
+						? new Worker(new URL("./raster-worker.ts", import.meta.url), { type: "module", name })
+						: new Worker(new URL("./core-worker.ts", import.meta.url), { type: "module", name });
+			let worker: Worker;
+			let isBooted = false;
+			let retried = false;
+			let resolveBooted: (w: Worker) => void = () => {};
+			const booted = new Promise<Worker>((resolve) => {
+				resolveBooted = resolve;
+			});
+			const start = () => {
+				const w = create();
+				worker = w;
+				if (onmessage) w.onmessage = onmessage;
 				const onBoot = (ev: MessageEvent) => {
 					if ((ev.data as { t?: string } | null)?.t !== "boot") return;
-					worker.removeEventListener("message", onBoot);
-					resolve();
+					w.removeEventListener("message", onBoot);
+					isBooted = true;
+					resolveBooted(w);
 				};
-				worker.addEventListener("message", onBoot);
-			});
-			// A worker script that fails to load never boots; say so instead of hanging.
-			// A worker that fails to load, or throws outside a request, is terminal:
-			// requests to it would never answer. Report it, then tear everything down.
-			worker.addEventListener("error", (ev) => {
-				if (destroyed) return;
-				const message = `lector-engine: ${name} worker failed${ev.message ? `: ${ev.message}` : " to load"}`;
-				const phase = opened ? "render" : "engine-load";
-				// Tear down first (settling every promise), then tell the host. Async
-				// (after setup), so handleEvent exists.
-				teardown(new EngineError(message, "worker", phase, typeof source === "string" ? source : undefined));
-				handleEvent({ type: "error", message, code: "worker", phase });
-			});
-			return { worker, booted };
+				w.addEventListener("message", onBoot);
+				// A worker that fails to load, or throws outside a request, is terminal:
+				// requests to it would never answer. Report it, then tear everything down.
+				w.addEventListener("error", (ev) => {
+					if (destroyed || w !== worker) return;
+					// The script never arrived (network, CDN): load it once more before giving up.
+					if (!isBooted && !retried) {
+						retried = true;
+						w.terminate();
+						setTimeout(() => {
+							if (!destroyed) start();
+						}, WORKER_RETRY_MS);
+						return;
+					}
+					const message = `lector-engine: ${name} worker failed${ev.message ? `: ${ev.message}` : " to load"}`;
+					const phase = opened ? "render" : "engine-load";
+					// Tear down first (settling every promise), then tell the host. Async
+					// (after setup), so handleEvent exists.
+					teardown(new EngineError(message, "worker", phase, typeof source === "string" ? source : undefined));
+					handleEvent({ type: "error", message, code: "worker", phase });
+				});
+			};
+			start();
+			return { current: () => worker, booted };
 		};
 		let fullFetch: Promise<Blob> | null = null;
 		const fetchAll = () => {
@@ -372,7 +396,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				.then(
 					(b) => {
 						blob = b;
-						for (const w of rasterWorkers) w.postMessage({ t: "source", blob: b });
+						for (const w of rasterWorkers) w().postMessage({ t: "source", blob: b });
 						return b;
 					},
 					(err) => {
@@ -421,22 +445,23 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		if (motionQuery) coreOptions.reducedMotion = motionQuery.matches;
 		if (touchDevice) coreOptions.textureBudgetMB ??= 128;
 		const n = workerCount ?? (touchDevice ? 2 : Math.min(4, Math.max(2, Math.floor((navigator.hardwareConcurrency || 4) / 2))));
-		const rasterWorkers: Worker[] = [];
+		const rasterWorkers: (() => Worker)[] = [];
 		const corePorts: MessagePort[] = [];
 		cleanups.push(() => {
-			for (const w of rasterWorkers) w.terminate();
+			for (const w of rasterWorkers) w().terminate();
 			for (const port of corePorts) port.close();
 		});
 		// Only a module someone already compiled (preloadPdfium) is shared; compiling it here would land on the open path's main thread.
 		const pdfium = compiled.get(wasmUrl) ?? Promise.resolve(undefined);
 		for (let i = 0; i < n; i++) {
-			const { worker, booted } = spawn("raster", `lector-raster-${i}`);
-			rasterWorkers.push(worker);
+			const { current, booted } = spawn("raster", `lector-raster-${i}`);
+			rasterWorkers.push(current);
 			const channel = new MessageChannel();
 			corePorts.push(channel.port2);
-			Promise.all([booted, pdfium]).then(([, module]) => {
+			Promise.all([booted, pdfium]).then(([worker, module]) => {
 				if (destroyed) return;
-				const init = { t: "init", source: docSource, port: channel.port1, wasmUrl, password, sizes: i === 0 } as const;
+				// A full file that arrived before this worker (e.g. during a respawn) replaces range requests.
+				const init = { t: "init", source: blob ? ({ kind: "blob", blob } as const) : docSource, port: channel.port1, wasmUrl, password, sizes: i === 0 } as const;
 				try {
 					worker.postMessage(module ? { ...init, module } : init, [channel.port1]);
 				} catch {
@@ -538,27 +563,24 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		// Probed, not just feature-tested: Safari 16.4-16.x can transfer a canvas
 		// but has no WebGL on OffscreenCanvas, so it composites on the main thread.
 		const useOffscreen = (wantOffscreen ?? true) && support.offscreen;
-		let coreWorker: Worker | null = null;
 		let postToCore: (msg: unknown) => void = () => {};
 		let core: ViewerCore | null = null;
 		const debug = !!(globalThis as { __lectorEngineDebug?: boolean }).__lectorEngineDebug;
 		if (useOffscreen) {
 			const offscreen = canvas.transferControlToOffscreen();
-			const spawned = spawn("core", "lector-compositor");
-			coreWorker = spawned.worker;
-			const worker = coreWorker;
+			const spawned = spawn("core", "lector-compositor", (ev: MessageEvent<CoreEvent | { t: "boot" }>) => {
+				if ("type" in ev.data) handleEvent(ev.data);
+			});
 			cleanups.push(() => {
 				// The worker disposes its core (GPU resources, ports, timers) and closes itself.
+				const worker = spawned.current();
 				worker.postMessage({ t: "dispose" });
 				setTimeout(() => worker.terminate(), 1000);
 			});
-			coreWorker.onmessage = (ev: MessageEvent<CoreEvent | { t: "boot" }>) => {
-				if ("type" in ev.data) handleEvent(ev.data);
-			};
 			// Input posted before boot queues inside the worker until init arrives.
 			const pendingInput: unknown[] = [];
 			postToCore = (msg) => pendingInput.push(msg);
-			spawned.booted.then(() => {
+			spawned.booted.then((worker) => {
 				if (destroyed) return;
 				worker.postMessage({ t: "init", canvas: offscreen, ports: corePorts, options: coreOptions, debug }, [offscreen, ...corePorts]);
 				for (const msg of pendingInput) worker.postMessage(msg);
