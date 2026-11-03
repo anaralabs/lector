@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { open } from "node:fs/promises";
 import http2 from "node:http2";
+import { brotliCompressSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
 
@@ -55,6 +56,11 @@ function pumpPipe() {
 }
 
 const CHUNK = 16 * 1024;
+const compressed = new Map();
+const brotli = (file) => {
+	if (!compressed.has(file)) compressed.set(file, brotliCompressSync(readFileSync(file)));
+	return compressed.get(file);
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function resolvePath(url) {
@@ -105,8 +111,25 @@ const server = http2.createSecureServer({ key: readFileSync(join(certDir, "key.p
 		res.end();
 		return;
 	}
-	const size = statSync(file).size;
 	const isPdf = file.endsWith(".pdf");
+	// Like a CDN: scripts and wasm go out brotli-compressed (PDFs never are).
+	if (!isPdf && /\bbr\b/.test(req.headers["accept-encoding"] ?? "") && /\.(wasm|js|mjs)$/.test(file)) {
+		const body = brotli(file);
+		res.setHeader("Content-Type", types[extname(file)] ?? "application/octet-stream");
+		res.setHeader("Content-Encoding", "br");
+		res.setHeader("Cache-Control", "public, max-age=3600");
+		res.setHeader("Content-Length", String(body.length));
+		requests.push({ id: nextId++, t: Date.now(), pdf: false, path: url.split("?")[0], method: req.method, range: null, bytes: body.length, status: 200 });
+		if (cfg.rtt) await sleep(cfg.rtt);
+		for (let pos = 0; pos < body.length; pos += CHUNK) {
+			const chunk = body.subarray(pos, pos + CHUNK);
+			await take(chunk.length);
+			if (!res.write(chunk)) await new Promise((r) => res.once("drain", r));
+		}
+		res.end();
+		return;
+	}
+	const size = statSync(file).size;
 	res.setHeader("Content-Type", types[extname(file)] ?? "application/octet-stream");
 	res.setHeader("Cache-Control", "public, max-age=3600");
 	res.setHeader("ETag", `"${size}-${statSync(file).mtimeMs}"`);
@@ -125,7 +148,7 @@ const server = http2.createSecureServer({ key: readFileSync(join(certDir, "key.p
 	}
 	res.setHeader("Content-Length", String(end - start));
 	const id = nextId++;
-	if (isPdf) requests.push({ id, t: Date.now(), method: req.method, range: req.headers.range ?? null, bytes: end - start, status: res.statusCode });
+	requests.push({ id, t: Date.now(), pdf: isPdf, path: url.split("?")[0], method: req.method, range: req.headers.range ?? null, bytes: end - start, status: res.statusCode });
 	if (cfg.rtt) await sleep(cfg.rtt);
 	if (req.method === "HEAD") {
 		res.end();

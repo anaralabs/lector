@@ -3,6 +3,7 @@
 // Needs bench/serve.mjs running on the built demo (see README "Development").
 //   node bench/open-at.mjs <base=https://127.0.0.1:5300> <query> [runs=3] [label]
 // e.g. node bench/open-at.mjs https://127.0.0.1:5300 "file=/scan-big.pdf&page=32&top=396&range=1" 3 after
+// Phases per run: cold (new browser context), engine warm + PDF cold (new PDF URL), warm (same PDF URL again).
 // Env: MBIT, RTT (server throttle for the run), SHOTS=dir (screenshots at first paint and once sizes settle),
 // SETTLE=1 (also wait for every page size and report how far the view moved meanwhile).
 import { mkdirSync } from "node:fs";
@@ -19,26 +20,29 @@ if (shots) mkdirSync(shots, { recursive: true });
 
 const api = (path) => fetch(`${base}${path}`).then((r) => r.json().catch(() => null));
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-const browser = await chromium.launch({ channel: "chrome", headless: true, args: ["--enable-gpu", "--use-angle=metal", "--ignore-certificate-errors"] });
+// CHANNEL= (empty) uses Playwright's Chromium; ANGLE=swiftshader on machines without a GPU.
+const channel = process.env.CHANNEL ?? "chrome";
+const angle = process.env.ANGLE ?? (process.platform === "darwin" ? "metal" : "swiftshader");
+const browser = await chromium.launch({ ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : channel ? { channel } : {}), headless: true, args: ["--enable-gpu", `--use-angle=${angle}`, "--enable-unsafe-swiftshader", "--ignore-certificate-errors"] });
 const med = (a) => {
 	const s = a.filter((x) => Number.isFinite(x)).sort((x, y) => x - y);
 	return s.length ? s[Math.floor(s.length / 2)] : Number.NaN;
 };
 
-async function measure(page, tag) {
+async function measure(page, tag, q = query) {
 	await api(`/__config?mbit=${mbit}&rtt=${rtt}`);
 	await fetch(`${base}/__reset`);
 	const errors = [];
 	const onError = (e) => errors.push(String(e).slice(0, 200));
 	page.on("pageerror", onError);
-	await page.goto(`${base}/?${query}`);
+	await page.goto(`${base}/?${q}`);
 	await page.waitForFunction(() => window.__marks?.painted !== undefined || window.__errors?.length, null, { timeout: 900000 });
 	const at = await page.evaluate(() => ({ marks: { ...window.__marks }, origin: performance.timeOrigin, track: { ...window.__track }, err: window.__errors?.map((e) => e.message) }));
 	if (shots) await page.screenshot({ path: `${shots}/${label}-${tag}-painted.png` });
 	const { log, requests } = await api("/__log");
 	const paintedEpoch = at.origin + at.marks.painted;
 	const before = log.filter(([t]) => t <= paintedEpoch).reduce((s, [, n]) => s + n, 0);
-	const reqBefore = requests.filter((r) => r.t <= paintedEpoch).length;
+	const reqBefore = requests.filter((r) => r.pdf && r.t <= paintedEpoch).length;
 	let settle = null;
 	if (process.env.SETTLE === "1") {
 		await page.waitForFunction(() => window.__marks?.ready !== undefined && (window.__marks["ready-estimated"] === undefined || window.__marks["layout-complete"] !== undefined), null, { timeout: 900000 });
@@ -52,12 +56,16 @@ async function measure(page, tag) {
 }
 
 const cold = [];
+const engine = [];
 const warm = [];
+// engine warm: wasm and scripts cached, the PDF a URL this browser has not seen (a host that preloaded the engine)
+const fresh = (i) => query.replace(/file=([^&]+)/, (_, f) => `file=${f}${encodeURIComponent(`?v=${i}`)}`);
 for (let i = 0; i < runs; i++) {
 	const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 2, ignoreHTTPSErrors: true });
 	const page = await ctx.newPage();
 	cold.push(await measure(page, `cold${i}`));
-	warm.push(await measure(page, `warm${i}`));
+	engine.push(await measure(page, `engine${i}`, fresh(i)));
+	warm.push(await measure(page, `warm${i}`, fresh(i)));
 	await ctx.close();
 }
 await api("/__config?mbit=0&rtt=0");
@@ -69,6 +77,7 @@ const row = (name, a) => {
 };
 console.log(`${label} ${query} @${mbit}Mbit/s rtt ${rtt}ms (median of ${runs})`);
 console.log(`  ${row("cold", cold)}`);
-console.log(`  ${row("warm", warm)}`);
-console.log(`JSON ${JSON.stringify({ label, query, mbit, rtt, cold, warm })}`);
+console.log(`  ${row("engine warm, pdf cold", engine)}`);
+console.log(`  ${row("warm (pdf seen)", warm)}`);
+console.log(`JSON ${JSON.stringify({ label, query, mbit, rtt, cold, engine, warm })}`);
 await browser.close();
