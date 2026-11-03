@@ -30,7 +30,28 @@ w.__errors = [];
 // Every non-stats event, for feature checks (bounded).
 w.__all = [];
 
+// First time (ms since navigation) of each event, for the open-at bench.
+const marks: Record<string, number> = {};
+(window as unknown as { __marks: typeof marks }).__marks = marks;
+
+// ?track=N: where the camera sits relative to page N's top on every camera event (a layout jump shows up as a spread).
+const tracked = params.has("track") ? Number(params.get("track")) : -1;
+let trackLayout: { y: number }[] = [];
+const track = { first: Number.NaN, min: Infinity, max: -Infinity, samples: 0 };
+(window as unknown as { __track: typeof track }).__track = track;
+
 const onEvent = (e: CoreEvent) => {
+	if (e.type === "ready" || e.type === "layout") trackLayout = e.layout;
+	if (tracked >= 0 && e.type === "camera" && trackLayout[tracked] && w.__viewer) {
+		const rel = w.__viewer.camera.y - trackLayout[tracked]!.y;
+		if (Number.isNaN(track.first)) track.first = rel;
+		track.min = Math.min(track.min, rel);
+		track.max = Math.max(track.max, rel);
+		track.samples++;
+	}
+	marks[e.type] ??= performance.now();
+	if (e.type === "layout" && e.complete) marks["layout-complete"] ??= performance.now();
+	if (e.type === "ready" && (e as { complete?: boolean }).complete === false) marks["ready-estimated"] = marks.ready!;
 	if (e.type !== "stats" && e.type !== "camera") {
 		w.__all.push(e);
 		if (w.__all.length > 500) w.__all.splice(0, 250);
@@ -74,6 +95,9 @@ async function open(source: string | ArrayBuffer) {
 	const autoFetch = params.get("autoFetch") !== "0";
 	const initial = {
 		...(params.has("page") ? { initialPage: Number(params.get("page")) } : {}),
+		...(params.has("top") ? { initialTop: Number(params.get("top")) } : {}),
+		...(params.has("topFraction") ? { initialTarget: { page: Number(params.get("page") ?? 0), topFraction: Number(params.get("topFraction")) } } : {}),
+		...(params.has("fraction") ? { initialTarget: { fraction: Number(params.get("fraction")) } } : {}),
 		...(params.has("offset") ? { initialOffset: Number(params.get("offset")) } : {}),
 		...(params.has("zoom") ? { initialZoom: params.get("zoom")!.startsWith("fit") ? (params.get("zoom") as "fit-page") : Number(params.get("zoom")) } : {}),
 	};

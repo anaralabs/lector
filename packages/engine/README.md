@@ -95,9 +95,9 @@ Serve `pdfium.wasm` as `Content-Type: application/wasm`, compressed (brotli: 4.1
 
 Pages are **0-based** everywhere. Page-space geometry is in PDF points with a top-left origin; screen geometry is in CSS px relative to the viewer container.
 
-### `createViewer(container, source, options): Promise<Viewer>`
+###`createViewer(container, source, options): Promise<Viewer>`
 
-`source` is a URL, `ArrayBuffer` or `Uint8Array`. The promise resolves once the workers have started; the document opens asynchronously (await `viewer.loaded` or listen for `ready`). It rejects with an `EngineError` when the browser is unsupported (`code: "unsupported"`), the fetch fails (`"fetch"`), or the main-thread WebGL2 context cannot be created (`"gpu"`).
+`source` is a URL, `ArrayBuffer` or `Uint8Array`. The workers start (and compile pdfium) while the file downloads; the promise resolves once the file (or, with `rangeLoading`, its first and last 64KB) has arrived, and the document opens asynchronously (await `viewer.loaded` or listen for `ready`). It rejects with an `EngineError` when the browser is unsupported (`code: "unsupported"`), the fetch fails (`"fetch"`), or the main-thread WebGL2 context cannot be created (`"gpu"`).
 
 `ViewerOptions` (creation-only, plus every `CoreOptions` below):
 
@@ -112,8 +112,8 @@ Pages are **0-based** everywhere. Page-space geometry is in PDF points with a to
 | `password` | | password for an encrypted PDF |
 | `textLayer` | `true` | hidden DOM text for screen readers and native find |
 | `interceptFind` | `false` | Cmd/Ctrl+F emits a `find` event instead of opening the browser's find bar |
-| `rangeLoading` | `false` | load a URL with HTTP range requests (see [Large files](#large-files-and-memory)) |
-| `autoFetch` | `true` | with `rangeLoading`: download the rest after the first paint |
+| `rangeLoading` | `false` | load a URL with HTTP range requests and draw the page in view before the file has downloaded (see [Large files](#large-files-and-memory)) |
+| `autoFetch` | `true` | with `rangeLoading`: download the rest after the first paint, at low priority |
 
 `CoreOptions` (also live through `viewer.setOptions`; read the resolved values from `viewer.options` or the exported `defaultOptions`):
 
@@ -129,6 +129,7 @@ Pages are **0-based** everywhere. Page-space geometry is in PDF points with a to
 | `initialPage`, `initialTop` | `0`, `0` | first page (0-based) and points below its top, applied before the first paint |
 | `initialOffset` | `null` | css px from the document top at the initial zoom (lector's `initialOffset`; pair with `scrollState().top`) |
 | `initialCamera` | `null` | exact restore of a saved `camera` (wins over the others) |
+| `initialTarget` | `null` | where to open, applied before the first paint (wins over `initialPage`/`initialTop`/`initialOffset`): `{ page, top? }` (points below the page top), `{ page, topFraction }` (fraction of that page's height), `{ fraction }` (like `scrollToFraction`)or `{ page, rect, align?, units? }` (like `reveal`, for a citation; `units: "fraction"` for a rect in 0–1 of the page). With `rangeLoading`, that page is fetched and drawn first |
 | `minZoom` / `maxZoom` | `0.1` / `24` | |
 | `dark`, `paper`, `ink` | `false`, near-black, near-white | dark mode: page white maps to `paper`, ink to `ink` |
 | `reducedMotion` | from `prefers-reduced-motion` | flights jump instantly |
@@ -215,7 +216,8 @@ interface SearchHit {
 
 | event | |
 | --- | --- |
-| `ready { pages, layout, info }` | the document opened: page sizes, layout in doc points, `DocumentInfo` (title, author, …, `pdfVersion`, `encrypted`, `hasForm`) |
+| `ready { pages, layout, info, complete }` | the document opened: page sizes, layout in doc points, `DocumentInfo` (title, author, …, `pdfVersion`, `encrypted`, `hasForm`). `complete: false` with `rangeLoading`: some sizes are estimates |
+| `layout { pages, layout, complete }` | estimated sizes resolved (range loading); the camera moved with them, so the content on screen did not |
 | `painted { page }` | first bitmap on screen |
 | `view { zoom, page, pageCount, fitWidth, fit }` | `fit`: `"width" \| "page" \| null`; `fitWidth` is kept for compatibility |
 | `camera { camera, moving }` | every camera change; `moving: false` once it rests (persist scroll here) |
@@ -260,11 +262,14 @@ The hidden text layer holds one transparent, unselectable, click-through span pe
 
 Raster workers never hold a copy of the document. Each one opens it with `FPDF_LoadCustomDocument` and reads 64KB blocks on demand from one `Blob` shared by all workers (`FileReaderSync`, LRU cache capped at 24MB per worker). Before this change, every worker had the whole file in its WASM heap. A URL is downloaded as a `Blob`, which browsers may keep on disk.
 
-`rangeLoading: true` reads 256KB blocks with synchronous range requests from the workers, after a 1KB probe. It falls back to a full download when the server ignores `Range` or compresses the response. After the first paint, the whole file downloads in the background (`autoFetch`), and the workers switch to it. Range loading is **opt-in** for three reasons:
+`rangeLoading: true` opens the document from HTTP range requests and draws the page in view before the rest of the file has downloaded:
 
-- The layout needs every page's size up front, and each size parses that page's dictionary. In files whose page dictionaries are spread out (no object streams), that costs about one range request per page, which is slower than a plain download: a 67MB, 1040-page file took 27s to `ready` at 50 Mbit/s, against 13s for a full download. Files with object streams or compact page trees benefit a lot: 53MB, 1040 pages, 3.3s against 11.8s.
-- The server needs `Range` support without content encoding, and cross-origin servers must expose `Content-Range`.
-- Requests are synchronous inside the workers, so a slow block stalls that worker.
+- The main thread reads the first 64KB (which also probes for range support) and the last 64KB (trailer and cross-reference table) while the workers boot, and hands both to every worker. For a linearized file opening on its first page, the first page's section (`/E`) is read in the same step.
+- Workers read 64KB blocks with synchronous range requests as PDFium asks for bytes. Missing blocks next to each other go out as one request, and reads that keep moving forward fetch further ahead each time (up to 1MB). A block one worker downloads is passed to the others, and a page's jobs stay on the worker that loaded it, so each byte crosses the network once.
+- Only the sizes of the pages the view opens on are read up front (`initialTarget`/`initialPage` and their neighbours, plus page 1). The other pages are laid out at the nearest known size, are never rasterised as estimates, and get their real sizes in the background, pages in view first. When an estimate resolves, the camera moves with the layout so the content on screen stays still (`layout` event). `scrollToFraction` (and `initialTarget: { fraction }`) made before every size is known is re-applied as sizes arrive, until the reader moves.
+- After the first paint, the whole file downloads in the background at low priority (`autoFetch`), and the workers switch to it.
+
+It falls back to a full download when the server ignores `Range` (the 200 response is used as is) or compresses the response. A cross-origin server that does not expose `Content-Range` costs one extra `HEAD` for the length (`Content-Length` is always readable). Range loading stays **opt-in** because requests are synchronous inside the workers (a slow block stalls that worker), and because in files whose page dictionaries are spread out (no object streams) resolving every size costs about one request per page: the first paint does not wait for that, but `layout` keeps changing in the background until it is done or the full download lands.
 
 ### Forms
 
@@ -298,19 +303,21 @@ The worker compositor needs WebGL2 on an `OffscreenCanvas`. Safari 16.4–16.x h
 ## Development
 
 ```sh
-pnpm dev               # demo at http://127.0.0.1:5199 (?offscreen=0, ?dark=1, ?file=…, ?page=, ?zoom=fit-page, ?range=1, ?password=, ?interceptFind=1, ?textLayer=0)
+pnpm dev               # demo at http://127.0.0.1:5199 (?offscreen=0, ?dark=1, ?file=…, ?page=, ?top=, ?topFraction=, ?fraction=, ?zoom=fit-page, ?range=1, ?password=, ?interceptFind=1, ?textLayer=0)
 pnpm build             # dist/ via tsup + scripts/postbuild.mjs
 pnpm typecheck
-pnpm test:unit         # node --test (block cache)
+pnpm test:unit         # node --test (block cache, range decisions, estimated layout)
 pnpm test:package      # pack; check exports, license notices, and boot the self-hosted workers in Chrome
 node bench/features.mjs   # search / outline / selection / dark mode against the demo
 node bench/compat.mjs     # emulated old browsers: compositor fallback and clean rejection
 node bench/clicks.mjs     # double/triple click in Chrome, Firefox, WebKit (npx playwright-core install firefox webkit)
 node bench/frames.mjs     # frame timing (HEADED=1 for a vsync'd window)
 node bench/memory.mjs [/big.pdf] ["&range=1"] [Mbit/s]   # ready/painted time and memory
+node bench/serve.mjs demo/dist   # HTTP/2 + ranges + server-side throttling, for open-at.mjs
+MBIT=10 RTT=40 SETTLE=1 node bench/open-at.mjs https://127.0.0.1:5300 "file=/scan-big.pdf&page=32&topFraction=0.5&range=1&track=32"   # first paint, bytes before it, view movement
 ```
 
-Fixtures other than `cadbots.pdf` are generated, not committed: `node bench/fixtures/make-{scan,password,form,rtl,links,big}.mjs`. They need `pdf-lib` (and `mupdf` for the password fixture). Point `PDF_LIB` / `MUPDF` at those packages. `features.mjs` skips checks whose fixture is missing.
+Fixtures other than `cadbots.pdf` are generated, not committed: `node bench/fixtures/make-{scan,password,form,rtl,links,big,scan-big}.mjs`. They need `pdf-lib` (and `mupdf` for the password fixture). Point `PDF_LIB` / `MUPDF` at those packages. `features.mjs` skips checks whose fixture is missing.
 
 The demo sets `globalThis.__lectorEngineDebug = true`, which exposes the core as `window.__core` (main-thread compositor) or `self.__core` (compositor worker) for the benches. Hosts should not set it.
 

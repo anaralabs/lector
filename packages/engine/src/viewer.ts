@@ -18,7 +18,8 @@ import {
 } from "./core";
 import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
-import type { DocSource, DocumentInfo, OutlineItem, PageSize } from "./protocol";
+import type { DocSource, DocumentInfo, OutlineItem, PageSize, SizeHint, ToRaster } from "./protocol";
+import { probeVerdict, RANGE_BLOCK, readLinearization } from "./range";
 import { getEngineSupport } from "./support";
 import type { Rect, TextPoint } from "./text";
 import { TextLayer, type TextLayerLine } from "./text-layer";
@@ -201,23 +202,64 @@ async function readBlob(res: Response, url: string): Promise<Blob> {
 	}
 }
 
-/**
- * Probe for range support with a 1KB request. A 206 with a total length means
- * range loading works; a 200 means the server sent the whole file, which is
- * then used as is (nothing is downloaded twice).
- */
-async function openUrl(url: string, range: boolean): Promise<{ blob: Blob } | { length: number }> {
-	if (!range) return { blob: await readBlob(await fetchPdf(url), url) };
-	const res = await fetchPdf(url, { headers: { Range: "bytes=0-1023" } });
-	const total = Number(/\/(\d+)\s*$/.exec(res.headers.get("Content-Range") ?? "")?.[1]);
-	const encoded = (res.headers.get("Content-Encoding") ?? "identity") !== "identity";
-	if (res.status === 206 && total > 0 && !encoded) {
-		void res.body?.cancel();
-		return { length: total };
+/** bytes read from each end of the file before the workers start: header and linearization dict, trailer and xref */
+const HEAD_BYTES = 64 * 1024;
+const TAIL_BYTES = 64 * 1024;
+
+type Opened = { blob: Blob } | { length: number; seeds: [number, Uint8Array][] };
+
+async function rangeBytes(url: string, start: number, end: number): Promise<Uint8Array | null> {
+	try {
+		const res = await fetch(url, { credentials: "same-origin", headers: { Range: `bytes=${start}-${end - 1}` } });
+		if (res.status !== 206) return null;
+		const bytes = new Uint8Array(await res.arrayBuffer());
+		return bytes.length === end - start ? bytes : null;
+	} catch {
+		return null;
 	}
-	if (res.status === 206) return { blob: await readBlob(await fetchPdf(url), url) };
-	return { blob: await readBlob(res, url) };
 }
+
+/**
+ * Probes for range support while reading the file's first 64KB. A 206 with a
+ * total length means range loading works; then the last 64KB (trailer, xref)
+ * and, for a linearized file opening on its first page, that page's section
+ * are read too, and every worker starts with them. A 200 means the server
+ * sent the whole file, which is used as is (nothing is downloaded twice).
+ * Servers that hide `Content-Range` from CORS get a HEAD for the length.
+ */
+async function openUrl(url: string, range: boolean, firstPage: boolean): Promise<Opened> {
+	const download = async () => ({ blob: await readBlob(await fetchPdf(url), url) });
+	if (!range) return download();
+	// A server that refuses the ranged request (e.g. a CORS preflight for `Range`) still serves the plain one.
+	const res = await fetchPdf(url, { headers: { Range: `bytes=0-${HEAD_BYTES - 1}` } }).catch(() => null);
+	if (!res) return download();
+	const verdict = probeVerdict({ status: res.status, contentRange: res.headers.get("Content-Range"), contentEncoding: res.headers.get("Content-Encoding") });
+	if (verdict.kind === "full-body") return { blob: await readBlob(res, url) };
+	let length = verdict.kind === "range" ? verdict.length : 0;
+	if (verdict.kind === "need-length") {
+		const head = await fetch(url, { method: "HEAD", credentials: "same-origin" }).catch(() => null);
+		length = Number(head?.ok ? head.headers.get("Content-Length") : 0) || 0;
+	}
+	const headBytes = length > 0 ? await res.arrayBuffer().then((b) => new Uint8Array(b)).catch(() => null) : null;
+	if (!headBytes || headBytes.length !== Math.min(HEAD_BYTES, length)) {
+		void res.body?.cancel().catch(() => {});
+		return download();
+	}
+	const seeds: [number, Uint8Array][] = [[0, headBytes]];
+	const lin = readLinearization(headBytes, length);
+	const extra: Promise<void>[] = [];
+	const tailStart = Math.floor(Math.max(0, length - TAIL_BYTES) / RANGE_BLOCK) * RANGE_BLOCK;
+	if (tailStart >= headBytes.length) extra.push(rangeBytes(url, tailStart, length).then((b) => void (b && seeds.push([tailStart, b]))));
+	if (lin && firstPage && lin.firstPageEnd > headBytes.length) {
+		const end = Math.min(length, Math.ceil(lin.firstPageEnd / RANGE_BLOCK) * RANGE_BLOCK);
+		extra.push(rangeBytes(url, headBytes.length, end).then((b) => void (b && seeds.push([headBytes.length, b]))));
+	}
+	await Promise.all(extra);
+	return { length, seeds };
+}
+
+/** the other raster workers wait at most this long for the first one to open the document */
+const STAGGER_MAX_MS = 3000;
 
 /** a worker script that failed to load is fetched once more after this */
 const WORKER_RETRY_MS = 400;
@@ -286,17 +328,29 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	const wasmUrl = new URL(wasmUrlOption, location.href).href;
 	// One Blob shared by every raster worker (posting a Blob does not copy it);
 	// workers read blocks from it on demand. Range loading starts from the URL.
+	// The workers start (and compile pdfium) while the file downloads.
 	let blob: Blob | null = null;
-	let docSource: DocSource;
+	let docSource: DocSource | null = null;
+	const target = coreOptions.initialTarget;
+	const targetPage = target && "page" in target ? target.page : (coreOptions.initialPage ?? 0);
+	const targetFraction = target && "fraction" in target ? target.fraction : undefined;
+	const sizeHint: SizeHint = { all: false, pages: [targetPage], fraction: targetFraction };
+	let opening: Promise<void>;
 	if (typeof source === "string") {
 		const absolute = new URL(source, location.href).href;
-		const opened = await openUrl(absolute, rangeLoading);
-		if ("blob" in opened) blob = opened.blob;
-		docSource = blob ? { kind: "blob", blob } : { kind: "url", url: absolute, length: (opened as { length: number }).length, credentials: new URL(absolute).origin === location.origin };
+		const firstPage = targetFraction === undefined && !coreOptions.initialOffset && !coreOptions.initialCamera && !targetPage;
+		opening = openUrl(absolute, rangeLoading, firstPage).then((opened) => {
+			if ("blob" in opened) blob = opened.blob;
+			docSource = blob
+				? { kind: "blob", blob }
+				: { kind: "url", url: absolute, length: (opened as { length: number }).length, credentials: new URL(absolute).origin === location.origin, seeds: (opened as { seeds: [number, Uint8Array][] }).seeds };
+		});
 	} else {
 		blob = new Blob([(source instanceof Uint8Array ? source : new Uint8Array(source)) as Uint8Array<ArrayBuffer>], { type: "application/pdf" });
 		docSource = { kind: "blob", blob };
+		opening = Promise.resolve();
 	}
+	opening.catch(() => {});
 	/**
 	 * Runs a host callback. A throwing callback must not break the engine (the
 	 * core emits from inside its frame loop and teardown paths), so the error is
@@ -325,13 +379,22 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			}
 		}
 	};
+	let viewer: Viewer;
 	try {
-		return build();
+		viewer = build();
 	} catch (err) {
 		destroyed = true;
 		release();
 		throw err;
 	}
+	try {
+		await opening;
+	} catch (err) {
+		destroyed = true;
+		release();
+		throw err;
+	}
+	return viewer;
 
 	function build(): Viewer {
 		const spawn = (kind: "raster" | "core", name: string, onmessage?: (ev: MessageEvent) => void) => {
@@ -391,12 +454,14 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		const fetchAll = () => {
 			if (blob) return Promise.resolve(blob);
 			const url = (docSource as { url: string }).url;
-			fullFetch ??= fetchPdf(url)
+			// Low priority: it must not slow down range requests for what is on screen.
+			fullFetch ??= fetchPdf(url, { priority: "low" } as RequestInit)
 				.then((res) => readBlob(res, url))
 				.then(
 					(b) => {
 						blob = b;
 						for (const w of rasterWorkers) w().postMessage({ t: "source", blob: b });
+						command({ type: "remote", on: false });
 						return b;
 					},
 					(err) => {
@@ -453,22 +518,34 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		});
 		// Only a module someone already compiled (preloadPdfium) is shared; compiling it here would land on the open path's main thread.
 		const pdfium = compiled.get(wasmUrl) ?? Promise.resolve(undefined);
+		let resolveFirstOpened: () => void = () => {};
+		// With range loading the other workers start once the first has parsed the file, from the blocks it shared.
+		const firstOpened = new Promise<void>((resolve) => {
+			resolveFirstOpened = resolve;
+		});
+		// A block one worker downloaded goes to the others, so each byte crosses the network once.
+		const relay = (ev: MessageEvent<ToRaster | { t: "opened" }>) => {
+			if (ev.data?.t === "opened") resolveFirstOpened();
+			if (ev.data?.t !== "block") return;
+			for (const w of rasterWorkers) if (w() !== ev.target) w().postMessage(ev.data);
+		};
 		for (let i = 0; i < n; i++) {
-			const { current, booted } = spawn("raster", `lector-raster-${i}`);
+			const { current, booted } = spawn("raster", `lector-raster-${i}`, relay);
 			rasterWorkers.push(current);
 			const channel = new MessageChannel();
 			corePorts.push(channel.port2);
-			Promise.all([booted, pdfium]).then(([worker, module]) => {
+			Promise.all([booted, pdfium, opening.then(() => (i > 0 && !blob ? Promise.race([firstOpened, new Promise((r) => setTimeout(r, STAGGER_MAX_MS))]) : undefined))]).then(([worker, module]) => {
 				if (destroyed) return;
 				// A full file that arrived before this worker (e.g. during a respawn) replaces range requests.
-				const init = { t: "init", source: blob ? ({ kind: "blob", blob } as const) : docSource, port: channel.port1, wasmUrl, password, sizes: i === 0 } as const;
+				const sizes: SizeHint | undefined = i > 0 ? undefined : blob ? { all: true } : sizeHint;
+				const init: ToRaster = { t: "init", source: blob ? { kind: "blob", blob } : docSource!, port: channel.port1, wasmUrl, password, sizes };
 				try {
 					worker.postMessage(module ? { ...init, module } : init, [channel.port1]);
 				} catch {
 					// a browser that cannot clone compiled modules to workers
 					worker.postMessage(init, [channel.port1]);
 				}
-			});
+			}, () => {});
 		}
 
 		let selectedText = "";
@@ -542,6 +619,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				resolveLoaded({ pages: e.pages, info: e.info });
 				textLayer?.setLayout(e.layout);
 				for (const resolve of unlocks.splice(0)) resolve(true);
+			} else if (e.type === "layout") {
+				layout = e.layout;
+				textLayer?.setLayout(e.layout);
 			} else if (e.type === "error" && e.code === "password" && e.phase === "document-load") {
 				for (const resolve of unlocks.splice(0)) resolve(false);
 			} else if (e.type === "error" && (e.phase === "document-load" || e.phase === "engine-load") && !opened) {
@@ -673,6 +753,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			textLayer = layer;
 			cleanups.push(() => layer.destroy());
 		}
+		opening.then(() => {
+			if (!blob && !destroyed) command({ type: "remote", on: true });
+		}, () => {});
 		container.appendChild(overlay);
 		cleanups.push(() => overlay.remove());
 

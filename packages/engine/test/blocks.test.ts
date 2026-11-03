@@ -3,11 +3,24 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BlockCache } from "../src/blocks.ts";
 
+const K = 64 * 1024;
 const file = Uint8Array.from({ length: 1024 * 1024 }, (_, i) => (i * 7 + (i >> 8)) & 0xff);
 const read = (cache: BlockCache, pos: number, n: number) => {
 	const out = new Uint8Array(n);
 	assert.ok(cache.read(pos, n, out, 0));
 	return out;
+};
+/** A range source that records each request as [start, end). */
+const ranged = (size = K) => {
+	const calls: [number, number][] = [];
+	const cache = new BlockCache(file.length, {
+		size: () => size,
+		fetch: (start, end) => {
+			calls.push([start, end]);
+			return file.slice(start, end);
+		},
+	});
+	return { cache, calls };
 };
 
 test("range fallback: blocks after the size change come from the right offsets", () => {
@@ -31,24 +44,96 @@ test("range fallback: blocks after the size change come from the right offsets",
 	assert.deepEqual(read(cache, 262144 + 50, 100), file.subarray(262194, 262294));
 });
 
-test("reads across blocks and evicts least recently used", () => {
+test("a read across missing blocks is one request; cached blocks split it", () => {
+	const { cache, calls } = ranged();
+	assert.deepEqual(read(cache, K - 10, 20), file.subarray(K - 10, K + 10));
+	assert.deepEqual(calls, [[0, 2 * K]]);
+	calls.length = 0;
+	// Blocks 2..5 needed, block 3 already cached from a seed: two requests around it.
+	cache.seed(3 * K, file.slice(3 * K, 4 * K));
+	assert.deepEqual(read(cache, 2 * K + 5, 3 * K), file.subarray(2 * K + 5, 5 * K + 5));
+	assert.deepEqual(calls, [
+		[2 * K, 3 * K],
+		[4 * K, 6 * K],
+	]);
+});
+
+test("sequential misses read further ahead each time, up to maxRun", () => {
+	const { cache, calls } = ranged();
+	for (let pos = 0; pos < 12 * K; pos += K) read(cache, pos, 100);
+	// 1 block, then 2, 4, 8 as the reads keep going forward.
+	assert.deepEqual(
+		calls.map(([s, e]) => [s / K, (e - s) / K]),
+		[
+			[0, 1],
+			[1, 2],
+			[3, 4],
+			[7, 8],
+		],
+	);
+	// A jump elsewhere starts small again.
+	calls.length = 0;
+	read(cache, 15 * K + 10, 10);
+	assert.deepEqual(calls, [[15 * K, 16 * K]]);
+});
+
+test("seeded bytes are used without a request; partial blocks are not seeded", () => {
+	const { cache, calls } = ranged();
+	cache.seed(0, file.slice(0, K + 100));
+	const tailStart = file.length - 3 * K;
+	cache.seed(tailStart, file.slice(tailStart));
+	assert.deepEqual(read(cache, 10, 100), file.subarray(10, 110));
+	assert.deepEqual(read(cache, file.length - 50, 50), file.subarray(file.length - 50));
+	assert.equal(calls.length, 0);
+	read(cache, K + 10, 10);
+	assert.deepEqual(calls, [[K, 2 * K]]);
+});
+
+test("the last block is short; reads past the end fail", () => {
+	const len = 3 * K + 123;
+	const calls: [number, number][] = [];
+	const cache = new BlockCache(len, {
+		size: () => K,
+		fetch: (s, e) => {
+			calls.push([s, e]);
+			return file.slice(s, e);
+		},
+	});
+	assert.deepEqual(read(cache, len - 23, 23), file.subarray(len - 23, len));
+	assert.deepEqual(calls, [[3 * K, len]]);
+	assert.ok(!cache.read(len - 1, 2, new Uint8Array(2), 0));
+});
+
+test("evicts least recently used past the cap", () => {
 	let fetches = 0;
 	const cache = new BlockCache(
 		file.length,
 		{
-			size: () => 64 * 1024,
+			size: () => K,
 			fetch: (start, end) => {
 				fetches++;
 				return file.slice(start, end);
 			},
 		},
-		128 * 1024,
+		{ max: 2 * K },
 	);
-	assert.deepEqual(read(cache, 65536 - 10, 20), file.subarray(65526, 65546));
-	assert.equal(fetches, 2);
+	read(cache, 0, 1);
+	read(cache, 5 * K, 1);
 	read(cache, 0, 1);
 	assert.equal(fetches, 2);
-	read(cache, 200000, 1);
-	assert.equal(cache.bytes, 128 * 1024);
-	assert.ok(!cache.read(file.length - 1, 2, new Uint8Array(2), 0));
+	read(cache, 9 * K, 1);
+	assert.equal(cache.bytes, 2 * K);
+	// block 5 was least recently used
+	read(cache, 0, 1);
+	assert.equal(fetches, 3);
+	read(cache, 5 * K, 1);
+	assert.equal(fetches, 4);
+});
+
+test("fetched blocks are reported for sharing, seeded ones are not", () => {
+	const shared: number[] = [];
+	const cache = new BlockCache(file.length, { size: () => K, fetch: (s, e) => file.slice(s, e) }, { onFetched: (s) => shared.push(s) });
+	cache.seed(0, file.slice(0, K));
+	read(cache, 0, 2 * K);
+	assert.deepEqual(shared, [K]);
 });

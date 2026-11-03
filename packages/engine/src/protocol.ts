@@ -27,13 +27,31 @@ export type ErrorPhase = "engine-load" | "document-load" | "render" | "text" | "
  * - url: HTTP range requests (sync XHR) until the main thread posts the whole
  *   file as a Blob (`source` message)
  */
-export type DocSource = { kind: "blob"; blob: Blob } | { kind: "url"; url: string; length: number; credentials: boolean };
+export type DocSource =
+	| { kind: "blob"; blob: Blob }
+	| {
+			kind: "url";
+			url: string;
+			length: number;
+			credentials: boolean;
+			/** bytes the main thread already fetched (file head and tail), as [offset, bytes] */
+			seeds?: [number, Uint8Array][];
+	  };
+
+/**
+ * Which page sizes a worker reads before it reports `opened`: every page
+ * (`all`), or only these pages (the rest are read later through `sizes` jobs).
+ * `fraction`: also the pages around that fraction of the document.
+ */
+export type SizeHint = { all: true } | { all: false; pages: number[]; fraction?: number };
 
 export type ToRaster =
-	/** sizes: false for all but one worker (page sizes are read lazily there) */
-	| { t: "init"; source: DocSource; port: MessagePort; wasmUrl: string; module?: WebAssembly.Module; password?: string; sizes?: boolean }
+	/** sizes: omitted for all but one worker (sizes are read as pages are used there) */
+	| { t: "init"; source: DocSource; port: MessagePort; wasmUrl: string; module?: WebAssembly.Module; password?: string; sizes?: SizeHint }
 	/** sent to the worker itself (not the port): the full file arrived, read from it from now on */
 	| { t: "source"; blob: Blob }
+	/** sent to the worker itself: a block another worker fetched */
+	| { t: "block"; start: number; data: Uint8Array }
 	/** retry opening the document with a password (after a `password` error) */
 	| { t: "unlock"; password: string }
 	| {
@@ -49,7 +67,9 @@ export type ToRaster =
 			h: number;
 	  }
 	| { t: "text"; id: number; page: number }
-	| { t: "outline"; id: number; page: -1 };
+	| { t: "outline"; id: number; page: -1 }
+	/** read these pages' sizes, stopping early after a few ms (the answer lists the ones read) */
+	| { t: "sizes"; id: number; page: number; pages: number[] };
 
 /** Document metadata (Info dictionary), like pdf.js `getMetadata().info` and lector's `onDocumentLoad`. */
 export interface DocumentInfo {
@@ -84,8 +104,13 @@ export interface OutlineItem {
 	children: OutlineItem[];
 }
 
+/** [page, w, h] */
+export type SizeEntry = [number, number, number];
+
 export type FromRaster =
-	| { t: "opened"; pages: PageSize[]; info: DocumentInfo }
+	/** sizes: the pages read so far (all of them for `{ all: true }`) */
+	| { t: "opened"; pageCount: number; sizes: SizeEntry[]; info: DocumentInfo }
+	| { t: "sizes"; id: number; sizes: SizeEntry[]; heap: number }
 	| { t: "error"; message: string; code: ErrorCode; phase: ErrorPhase; id?: number }
 	/** heap: the worker's WASM heap plus its block cache, in bytes */
 	| { t: "tile"; id: number; buf: ArrayBuffer; w: number; h: number; ms: number; heap: number }
@@ -102,6 +127,8 @@ export type FromRaster =
 			images: Float32Array;
 			/** images classified as scan paper (tone-mapped in dark mode, so not in `images`) */
 			scans: number;
+			/** the page's size, which the core may only have estimated so far */
+			size: PageSize;
 			ms: number;
 			heap: number;
 	  }
