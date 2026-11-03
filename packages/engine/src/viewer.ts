@@ -7,7 +7,9 @@ import {
 	type Camera,
 	type CoreOptions,
 	defaultOptions,
+	epochNow,
 	type InputMsg,
+	type LoadTimings,
 	type PointerKind,
 	type PulseKind,
 	type Request,
@@ -18,7 +20,8 @@ import {
 } from "./core";
 import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
-import type { DocSource, DocumentInfo, OutlineItem, PageSize, SizeHint, ToRaster } from "./protocol";
+import type { DocSource, DocumentInfo, OpenTiming, OutlineItem, PageSize, SizeHint, ToRaster } from "./protocol";
+import { rasterWorkerCount } from "./raster-pool";
 import { probeVerdict, RANGE_BLOCK, readLinearization } from "./range";
 import { findStartxref, pagePathObjects, parseXref } from "./xref";
 import { getEngineSupport } from "./support";
@@ -28,7 +31,7 @@ import { TextLayer, type TextLayerLine } from "./text-layer";
 export interface ViewerOptions extends Partial<CoreOptions> {
 	/** URL of the package's `pdfium.wasm` (`@anaralabs/lector-engine/pdfium.wasm`) */
 	wasmUrl: string;
-	/** number of PDFium raster workers (default: half the cores, 2-4) */
+	/** number of PDFium raster workers (default: half the cores, 2-4; 2 on touch devices or with 4GB or less) */
 	workers?: number;
 	/** run the compositor in a worker with an OffscreenCanvas (default: when WebGL2 works on one) */
 	offscreen?: boolean;
@@ -98,7 +101,8 @@ export interface Viewer {
 	fitPage(): void;
 	/**
 	 * Resolves true once the camera lands, false if input or another jump
-	 * interrupted it. `top`: page points below the page top; `offset`: css px
+	 * interrupted it. Callable before `ready` or while hidden: it lands once
+	 * the view has a size. `top`: page points below the page top; `offset`: css px
 	 * kept between the viewport top and that point (default `pageGap`).
 	 */
 	goToPage(page: number, top?: number, options?: { animate?: boolean; offset?: number }): Promise<boolean>;
@@ -416,6 +420,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		interceptFind = false,
 		...coreOptions
 	} = options;
+	const startedAt = epochNow();
 	// Workers may run from blob: URLs (host loaders), where relative URLs don't resolve.
 	const wasmUrl = new URL(wasmUrlOption, location.href).href;
 	// One Blob shared by every raster worker (posting a Blob does not copy it);
@@ -423,6 +428,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	// The workers start (and compile pdfium) while the file downloads.
 	let blob: Blob | null = null;
 	let docSource: DocSource | null = null;
+	let fetchMs = 0;
+	let fetchBytes = 0;
 	const target = coreOptions.initialTarget;
 	const targetPage = target && "page" in target ? target.page : (coreOptions.initialPage ?? 0);
 	const targetFraction = target && "fraction" in target ? target.fraction : undefined;
@@ -436,6 +443,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		const pathTarget = targetFraction !== undefined ? (count: number) => targetFraction * count : targetPage;
 		opening = openUrl(absolute, rangeLoading, firstPage, pathTarget, network.signal).then((opened) => {
 			if ("blob" in opened) blob = opened.blob;
+			fetchMs = epochNow() - startedAt;
+			fetchBytes = blob?.size ?? (opened as { seeds: [number, Uint8Array][] }).seeds.reduce((sum, [, b]) => sum + b.length, 0);
 			docSource = blob
 				? { kind: "blob", blob }
 				: { kind: "url", url: absolute, length: (opened as { length: number }).length, credentials: new URL(absolute).origin === location.origin, seeds: (opened as { seeds: [number, Uint8Array][] }).seeds };
@@ -604,7 +613,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		const motionQuery = coreOptions.reducedMotion === undefined && typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
 		if (motionQuery) coreOptions.reducedMotion = motionQuery.matches;
 		if (touchDevice) coreOptions.textureBudgetMB ??= 128;
-		const n = workerCount ?? (touchDevice ? 2 : Math.min(4, Math.max(2, Math.floor((navigator.hardwareConcurrency || 4) / 2))));
+		const n = workerCount ?? rasterWorkerCount({ cores: navigator.hardwareConcurrency, memoryGB: (navigator as { deviceMemory?: number }).deviceMemory, touch: touchDevice });
 		const rasterWorkers: (() => Worker)[] = [];
 		const corePorts: MessagePort[] = [];
 		cleanups.push(() => {
@@ -626,8 +635,18 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			if (ev.data?.t !== "block") return;
 			for (const w of rasterWorkers) if (w() !== ev.target) w().postMessage(ev.data);
 		};
+		const buildAt = epochNow();
+		let wasmWaitMs = 0;
+		let workerBootMs = 0;
+		void pdfium.then(() => {
+			wasmWaitMs = epochNow() - buildAt;
+		});
 		for (let i = 0; i < n; i++) {
 			const { current, booted } = spawn("raster", `lector-raster-${i}`, relay);
+			if (i === 0)
+				void booted.then(() => {
+					workerBootMs = epochNow() - buildAt;
+				});
 			rasterWorkers.push(current);
 			const channel = new MessageChannel();
 			corePorts.push(channel.port2);
@@ -647,6 +666,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 
 		let selectedText = "";
 		let opened = false;
+		let readyAt = 0;
+		let openTiming: OpenTiming | undefined;
+		let loadTimings: LoadTimings | null = null;
 		let resolveLoaded: (v: { pages: PageSize[]; info: DocumentInfo }) => void = () => {};
 		let rejectLoaded: (err: EngineError) => void = () => {};
 		const loaded = new Promise<{ pages: PageSize[]; info: DocumentInfo }>((resolve, reject) => {
@@ -710,7 +732,27 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			} else if (e.type === "painted") {
 				// Range loading: the first page is up; now fetch the rest in the background.
 				if (autoFetch && !blob) void fetchAll().catch(() => {});
+				if (!loadTimings && readyAt) {
+					const paintedAt = e.timing?.paintedAt ?? epochNow();
+					loadTimings = {
+						fetchMs,
+						fetchBytes,
+						wasmWaitMs,
+						workerBootMs,
+						...openTiming,
+						readyMs: readyAt - startedAt,
+						firstTileMs: (e.timing?.firstTileAt ?? paintedAt) - startedAt,
+						firstPaintMs: paintedAt - startedAt,
+						rangeLoading: docSource?.kind === "url",
+					};
+					if (onEvent) {
+						const load: CoreEvent = { type: "load", timings: loadTimings };
+						queueMicrotask(() => host(() => onEvent(load)));
+					}
+				}
 			} else if (e.type === "ready") {
+				readyAt ||= epochNow();
+				openTiming = e.timing;
 				opened = true;
 				layout = e.layout;
 				resolveLoaded({ pages: e.pages, info: e.info });

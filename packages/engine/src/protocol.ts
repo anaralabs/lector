@@ -69,7 +69,9 @@ export type ToRaster =
 	| { t: "text"; id: number; page: number }
 	| { t: "outline"; id: number; page: -1 }
 	/** read these pages' sizes, stopping early after a few ms (the answer lists the ones read) */
-	| { t: "sizes"; id: number; page: number; pages: number[] };
+	| { t: "sizes"; id: number; page: number; pages: number[] }
+	/** stop the running tile job `id` (it answers `cancelled`; a job that already finished answers as usual) */
+	| { t: "cancel"; id: number };
 
 /** Document metadata (Info dictionary), like pdf.js `getMetadata().info` and lector's `onDocumentLoad`. */
 export interface DocumentInfo {
@@ -104,14 +106,39 @@ export interface OutlineItem {
 	children: OutlineItem[];
 }
 
+/** the first raster worker's open path (worker-local durations) */
+export interface OpenTiming {
+	/** instantiating pdfium.wasm, including the download and compile when no preloaded module was shared */
+	wasmMs: number;
+	/** a preloaded module was shared with the worker */
+	wasmShared: boolean;
+	/** PDFium opening the document and reading the page sizes */
+	openMs: number;
+}
+
+/** The shape of a document PDFium could not open, for diagnosis without its content. */
+export interface LoadFailureDetail {
+	/** FPDF_GetLastError */
+	pdfium: "success" | "unknown" | "file" | "format" | "password" | "security" | "page";
+	/** what the first KB looks like: `html` is usually an error page served instead of the PDF */
+	header: "pdf" | "html" | "empty" | "other";
+	/** a /Linearized dictionary in the first KB */
+	linearized: boolean;
+	/** an /Encrypt entry in the last KB (the trailer) */
+	encrypted: boolean;
+	/** no %%EOF in the last KB: likely a cut-off download */
+	truncated: boolean;
+	sizeKB: number;
+}
+
 /** [page, w, h] */
 export type SizeEntry = [number, number, number];
 
 export type FromRaster =
 	/** sizes: the pages read so far (all of them for `{ all: true }`) */
-	| { t: "opened"; pageCount: number; sizes: SizeEntry[]; info: DocumentInfo }
+	| ({ t: "opened"; pageCount: number; sizes: SizeEntry[]; info: DocumentInfo } & Partial<OpenTiming>)
 	| { t: "sizes"; id: number; sizes: SizeEntry[]; heap: number }
-	| { t: "error"; message: string; code: ErrorCode; phase: ErrorPhase; id?: number }
+	| { t: "error"; message: string; code: ErrorCode; phase: ErrorPhase; id?: number; detail?: LoadFailureDetail }
 	/** heap: the worker's WASM heap plus its block cache, in bytes */
 	| { t: "tile"; id: number; buf: ArrayBuffer; w: number; h: number; ms: number; heap: number }
 	| {
@@ -132,4 +159,5 @@ export type FromRaster =
 			ms: number;
 			heap: number;
 	  }
-	| { t: "outline"; id: number; items: OutlineItem[] };
+	| { t: "outline"; id: number; items: OutlineItem[] }
+	| { t: "cancelled"; id: number; heap: number };

@@ -4,7 +4,7 @@
 
 import { BlockCache } from "./blocks";
 import { init, type Pdfium } from "./pdfium/pdfium.js";
-import type { DocSource, DocumentInfo, ErrorCode, FromRaster, Link, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
+import type { DocSource, DocumentInfo, ErrorCode, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
 import { blockVerdict, RANGE_BLOCK } from "./range";
 
 const FPDF_ANNOT = 0x01;
@@ -92,34 +92,86 @@ function send(msg: FromRaster, transfer: Transferable[] = []) {
 	port.postMessage(msg, transfer);
 }
 
-function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
+const FPDF_RENDER_TOBECONTINUED = 1;
+/** a render yields this often (ms) so a cancel can reach it */
+const SLICE_MS = 12;
+let sliceEnd = 0;
+/** IFSDK_PAUSE { int version; FPDF_BOOL (*NeedToPauseNow)(IFSDK_PAUSE*); void* user; } */
+let pause = 0;
+/** the tile job being rendered, and whether a cancel arrived for it */
+let rendering = 0;
+let cancelled = false;
+const yielder = new MessageChannel();
+let resumeRender: (() => void) | null = null;
+yielder.port1.onmessage = () => resumeRender?.();
+const yieldToEvents = () =>
+	new Promise<void>((resolve) => {
+		resumeRender = resolve;
+		yielder.port2.postMessage(0);
+	});
+
+function pauseStruct() {
+	if (!pause) {
+		const fn = (P.pdfium as unknown as { addFunction: (f: (...a: number[]) => number, sig: string) => number }).addFunction(() => (performance.now() > sliceEnd ? 1 : 0), "ii");
+		pause = P.pdfium.wasmExports.malloc(12);
+		const view = new Uint32Array(heap().buffer, pause, 3);
+		view[0] = 1;
+		view[1] = fn;
+		view[2] = 0;
+	}
+	return pause;
+}
+
+async function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 	const t0 = performance.now();
-	const page = loadPage(msg.page);
 	const size = sizeOf(msg.page);
 	const { w, h } = msg;
-	const bmp = P.FPDFBitmap_Create(w, h, 1);
-	P.FPDFBitmap_FillRect(bmp, 0, 0, w, h, 0xffffffff);
 	const pw = Math.round(size.w * msg.scale);
 	const ph = Math.round(size.h * msg.scale);
-	P.FPDF_RenderPageBitmap(bmp, page, -msg.x, -msg.y, pw, ph, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
-	// Form fields: drawn by the form fill environment, which also generates
-	// appearances for widgets that have none (NeedAppearances, filled values).
-	if (form) P.FPDF_FFLDraw(form, bmp, page, -msg.x, -msg.y, pw, ph, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
-	const ptr = P.FPDFBitmap_GetBuffer(bmp);
-	const stride = P.FPDFBitmap_GetStride(bmp);
-	const mem = heap();
-	let buf: ArrayBuffer;
-	if (stride === w * 4) {
-		buf = mem.slice(ptr, ptr + w * h * 4).buffer;
-	} else {
-		const out = new Uint8Array(w * h * 4);
-		for (let row = 0; row < h; row++) {
-			out.set(mem.subarray(ptr + row * stride, ptr + row * stride + w * 4), row * w * 4);
+	const page = loadPage(msg.page);
+	const held = pinned.has(msg.page);
+	pinned.add(msg.page);
+	const bmp = P.FPDFBitmap_Create(w, h, 1);
+	rendering = msg.id;
+	cancelled = false;
+	try {
+		P.FPDFBitmap_FillRect(bmp, 0, 0, w, h, 0xffffffff);
+		sliceEnd = performance.now() + SLICE_MS;
+		let status = P.FPDF_RenderPageBitmap_Start(bmp, page, -msg.x, -msg.y, pw, ph, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER, pauseStruct());
+		while (status === FPDF_RENDER_TOBECONTINUED) {
+			await yieldToEvents();
+			if (cancelled) break;
+			sliceEnd = performance.now() + SLICE_MS;
+			status = P.FPDF_RenderPage_Continue(page, pause);
 		}
-		buf = out.buffer;
+		P.FPDF_RenderPage_Close(page);
+		if (cancelled) {
+			send({ t: "cancelled", id: msg.id, heap: heapBytes() });
+			return;
+		}
+		// Form fields: drawn by the form fill environment, which also generates
+		// appearances for widgets that have none (NeedAppearances, filled values).
+		if (form) P.FPDF_FFLDraw(form, bmp, page, -msg.x, -msg.y, pw, ph, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
+		const ptr = P.FPDFBitmap_GetBuffer(bmp);
+		const stride = P.FPDFBitmap_GetStride(bmp);
+		const mem = heap();
+		let buf: ArrayBuffer;
+		if (stride === w * 4) {
+			buf = mem.slice(ptr, ptr + w * h * 4).buffer;
+		} else {
+			const out = new Uint8Array(w * h * 4);
+			for (let row = 0; row < h; row++) {
+				out.set(mem.subarray(ptr + row * stride, ptr + row * stride + w * 4), row * w * 4);
+			}
+			buf = out.buffer;
+		}
+		send({ t: "tile", id: msg.id, buf, w, h, ms: performance.now() - t0, heap: heapBytes() }, [buf]);
+	} finally {
+		rendering = 0;
+		P.FPDFBitmap_Destroy(bmp);
+		if (!held) pinned.delete(msg.page);
+		trimPages();
 	}
-	P.FPDFBitmap_Destroy(bmp);
-	send({ t: "tile", id: msg.id, buf, w, h, ms: performance.now() - t0, heap: heapBytes() }, [buf]);
 }
 
 type Xf = (x: number, y: number) => [number, number];
@@ -491,6 +543,28 @@ function readImages(page: number, index: number, xf: Xf): { images: Float32Array
 
 /** FPDF_GetLastError -> ErrorCode */
 const LOAD_ERRORS: Record<number, ErrorCode> = { 2: "file", 3: "parse", 4: "password", 5: "security" };
+const PDFIUM_ERRORS: LoadFailureDetail["pdfium"][] = ["success", "unknown", "file", "format", "password", "security", "page"];
+
+const latin1 = (bytes: Uint8Array) => String.fromCharCode(...bytes);
+
+/** Reads only the first and last KB, and keeps only their shape. */
+function loadFailureDetail(err: number): LoadFailureDetail {
+	const detail: LoadFailureDetail = { pdfium: PDFIUM_ERRORS[err] ?? "unknown", header: "empty", linearized: false, encrypted: false, truncated: false, sizeKB: Math.round(fileLen / 1024) };
+	if (!fileLen || !cache) return detail;
+	try {
+		const n = Math.min(1024, fileLen);
+		const head = new Uint8Array(n);
+		const tail = new Uint8Array(n);
+		if (!cache.read(0, n, head, 0) || !cache.read(fileLen - n, n, tail, 0)) return detail;
+		const h = latin1(head);
+		const t = latin1(tail);
+		detail.header = h.includes("%PDF-") ? "pdf" : /^\s*</.test(h) ? "html" : "other";
+		detail.linearized = h.includes("/Linearized");
+		detail.encrypted = t.includes("/Encrypt");
+		detail.truncated = !t.includes("%%EOF");
+	} catch {}
+	return detail;
+}
 
 // ---------------------------------------------------------------- byte source
 // PDFium pulls bytes through FPDF_LoadCustomDocument's synchronous GetBlock
@@ -549,6 +623,7 @@ function getBlock(_param: number, position: number, buf: number, size: number): 
 }
 
 function loadDocument(password: string | undefined) {
+	const t0 = performance.now();
 	if (!fileAccess) {
 		// FPDF_FILEACCESS { unsigned long m_FileLen; GetBlock* m_GetBlock; void* m_Param; }
 		const fn = (P.pdfium as unknown as { addFunction: (f: (...a: number[]) => number, sig: string) => number }).addFunction(getBlock, "iiiii");
@@ -568,7 +643,7 @@ function loadDocument(password: string | undefined) {
 					? "Incorrect password: PDFium could not decrypt the document."
 					: "The document is password-protected."
 				: `PDFium could not open the document (${code === "unknown" ? `error ${err}` : code})`;
-		send({ t: "error", message, code, phase: "document-load" });
+		send({ t: "error", message, code, phase: "document-load", detail: loadFailureDetail(err) });
 		return;
 	}
 	if (P.FPDF_GetFormType(doc) !== FORMTYPE_NONE) {
@@ -584,7 +659,7 @@ function loadDocument(password: string | undefined) {
 		const { w, h } = sizeOf(i);
 		sizes.push([i, w, h]);
 	}
-	send({ t: "opened", pageCount, sizes, info: readInfo(password) });
+	send({ t: "opened", pageCount, sizes, info: readInfo(password), wasmMs, wasmShared, openMs: performance.now() - t0 });
 	// The main thread starts the other workers now, so they parse from the blocks this one shared.
 	self.postMessage({ t: "opened" });
 }
@@ -652,7 +727,9 @@ class RetryableHttpError extends Error {}
 async function instantiatePdfium(wasmUrl: string, imports: WebAssembly.Imports, compiled?: WebAssembly.Module): Promise<WebAssembly.WebAssemblyInstantiatedSource> {
 	if (compiled) {
 		try {
-			return { instance: await WebAssembly.instantiate(compiled, imports), module: compiled };
+			const instance = await WebAssembly.instantiate(compiled, imports);
+			sharedModuleUsed = true;
+			return { instance, module: compiled };
 		} catch (err) {
 			// out of memory will not improve by compiling again
 			if (err instanceof RangeError) throw err;
@@ -673,6 +750,10 @@ async function instantiatePdfium(wasmUrl: string, imports: WebAssembly.Imports, 
 	}
 }
 
+let wasmMs: number | undefined;
+let wasmShared = false;
+let sharedModuleUsed = false;
+
 function loadPdfium(wasmUrl: string, compiled?: WebAssembly.Module): Promise<Pdfium> {
 	return new Promise<Pdfium>((resolve, reject) => {
 		init({
@@ -689,26 +770,46 @@ function loadPdfium(wasmUrl: string, compiled?: WebAssembly.Module): Promise<Pdf
 
 async function open(msg: Extract<ToRaster, { t: "init" }>) {
 	port = msg.port;
+	// Jobs run one at a time; a tile render awaits between slices, so later messages queue behind it (a cancel does not).
+	const queue: ToRaster[] = [];
+	let running = false;
+	const run = async () => {
+		if (running) return;
+		running = true;
+		for (let m = queue.shift(); m; m = queue.shift()) {
+			try {
+				if (m.t === "tile") await renderTile(m);
+				else if (m.t === "text") extractText(m);
+				else if (m.t === "outline") send({ t: "outline", id: m.id, items: readOutline(0, 0) });
+				else if (m.t === "sizes") readSizes(m);
+				else if (m.t === "unlock" && P && !doc && fileAccess) loadDocument(m.password);
+			} catch (err) {
+				const id = "id" in m ? m.id : undefined;
+				send({ t: "error", message: String((err as Error)?.stack ?? err), code: "unknown", phase: m.t === "tile" ? "render" : "text", id });
+			}
+		}
+		running = false;
+	};
 	port.onmessage = (ev: MessageEvent<ToRaster>) => {
 		const m = ev.data;
-		try {
-			if (m.t === "tile") renderTile(m);
-			else if (m.t === "text") extractText(m);
-			else if (m.t === "outline") send({ t: "outline", id: m.id, items: readOutline(0, 0) });
-			else if (m.t === "sizes") readSizes(m);
-			else if (m.t === "unlock" && !doc) {
-				// Before pdfium is ready the password waits for the first open.
-				if (P && fileAccess) loadDocument(m.password);
-				else pendingPassword = m.password;
-			}
-		} catch (err) {
-			const id = "id" in m ? m.id : undefined;
-			send({ t: "error", message: String((err as Error)?.stack ?? err), code: "unknown", phase: m.t === "tile" ? "render" : "text", id });
+		if (m.t === "cancel") {
+			if (m.id === rendering) cancelled = true;
+			return;
 		}
+		// Before pdfium is ready the password waits for the first open.
+		if (m.t === "unlock" && !P) {
+			pendingPassword = m.password;
+			return;
+		}
+		queue.push(m);
+		void run();
 	};
 	try {
+		const t0 = performance.now();
 		P = await loadPdfium(msg.wasmUrl, msg.module);
 		P.PDFiumExt_Init();
+		wasmMs = performance.now() - t0;
+		wasmShared = sharedModuleUsed;
 	} catch (err) {
 		send({ t: "error", message: `lector-engine: pdfium.wasm failed to load from ${msg.wasmUrl}: ${String((err as Error)?.message ?? err)}`, code: "wasm", phase: "engine-load" });
 		return;

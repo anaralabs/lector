@@ -1,48 +1,107 @@
 // Schedules tile and text jobs across independent PDFium workers.
 // The core re-plans every frame: jobs that are no longer wanted are dropped
-// before dispatch, and the most urgent jobs go out first.
+// before dispatch, and the most urgent jobs go out first. Each job goes to the
+// worker expected to finish it soonest: a worker that already has the page
+// loaded skips the parse and image decode, which dominate scanned pages.
 
-import type { DocumentInfo, ErrorCode, ErrorPhase, FromRaster, SizeEntry, ToRaster } from "./protocol";
+import type { DocumentInfo, ErrorCode, ErrorPhase, FromRaster, LoadFailureDetail, OpenTiming, SizeEntry, ToRaster } from "./protocol";
 
 export type TileResult = Extract<FromRaster, { t: "tile" }>;
 export type TextResult = Extract<FromRaster, { t: "text" }>;
 export type SizesResult = Extract<FromRaster, { t: "sizes" }>;
 
+type JobMsg = Extract<ToRaster, { t: "tile" } | { t: "text" } | { t: "outline" }>;
+
 interface Job {
 	key: string;
 	priority: number;
-	msg: ToRaster & { id: number };
+	msg: JobMsg;
 	page: number;
 	onDone: (res: FromRaster) => void;
+	/** share of the page's content the job covers (1: whole page, 0: text) */
+	frac: number;
+	/** predicted ms on the worker it was sent to, and when it was sent */
+	est: number;
+	started: number;
+	warm: boolean;
 }
 
 interface Lane {
 	port: MessagePort;
 	ready: boolean;
 	busy: Job | null;
-	recentPages: number[];
+	/** mirrors the worker's page LRU (most recent first) */
+	pages: number[];
+	/** a cancel is on its way for the busy job */
+	cancelling: boolean;
 	/** last reported WASM heap + block cache bytes */
 	heap: number;
 }
+
+/**
+ * ms = content × frac (+ overhead on a worker that has not loaded the page: parse,
+ * image decode). Rendering walks the content a tile covers, so cost follows the
+ * share of the page, not the pixel count. Overhead is only trusted once a warm
+ * render of the page tells the two apart; until then it counts as zero.
+ */
+interface PageCost {
+	content: number;
+	overhead: number;
+	warm: number;
+	/** the first cold render, kept until a warm one splits it */
+	cold?: { ms: number; frac: number };
+}
+/** pages a worker keeps loaded (raster-worker's PAGE_CACHE) */
+const WORKER_PAGES = 8;
+/** jobs below this priority are on screen (or a flight's destination) */
+export const URGENT = 20;
+const DEFAULT_CONTENT = 30;
+const TEXT_MS = 4;
+const MIN_FRAC = 0.002;
+const EMA = 0.3;
+/** jobs considered per dispatch round */
+const LOOKAHEAD = 64;
+/** what loading a page costs a worker that does not have it while the file is still remote (a range round trip or more) */
+const REMOTE_PAGE_MS = 400;
+
+/**
+ * Raster workers for this device: half the cores (2-4) on desktops, 2 where
+ * memory is short (each worker holds its own PDFium heap: more workers did not
+ * beat 4 on heavy scans and cost ~40% more memory), 2 on phones and tablets
+ * (1 when the browser reports 2GB or less).
+ */
+export function rasterWorkerCount({ cores, memoryGB, touch }: { cores?: number; memoryGB?: number; touch: boolean }) {
+	if (touch) return memoryGB !== undefined && memoryGB <= 2 ? 1 : 2;
+	const n = Math.min(4, Math.max(2, Math.floor((cores || 4) / 2)));
+	return memoryGB !== undefined && memoryGB <= 4 ? 2 : n;
+}
+
+const median = (xs: number[]) => {
+	const s = [...xs].sort((a, b) => a - b);
+	return s.length ? s[Math.floor(s.length / 2)]! : undefined;
+};
 
 export class RasterPool {
 	private lanes: Lane[];
 	private queue = new Map<string, Job>();
 	private inflight = new Map<number, Job>();
+	private costs = new Map<number, PageCost>();
+	private prior: PageCost = { content: DEFAULT_CONTENT, overhead: 0, warm: 0 };
 	private nextId = 1;
-	onOpened: (pageCount: number, sizes: SizeEntry[], info: DocumentInfo) => void = () => {};
+	/** in-flight tile jobs the last plan no longer wanted (cancelled when visible work waits) */
+	private unwanted = new Set<number>();
+	onOpened: (pageCount: number, sizes: SizeEntry[], info: DocumentInfo, timing?: OpenTiming) => void = () => {};
 	/**
-	 * While workers read the document over the network, a page's jobs stay on
-	 * the worker that already loaded it: another worker would download and
-	 * parse that page again.
+	 * While workers read the document over the network, a page another worker
+	 * already loaded costs a download to load again: its jobs stay there.
 	 */
 	affinity = false;
-	private owner = new Map<number, Lane>();
 	onIdle: () => void = () => {};
-	onError: (message: string, code: ErrorCode, phase: ErrorPhase) => void = (m) => console.error(m);
+	onError: (message: string, code: ErrorCode, phase: ErrorPhase, detail?: LoadFailureDetail) => void = (m) => console.error(m);
+	now: () => number = () => performance.now();
 
 	constructor(ports: MessagePort[]) {
-		this.lanes = ports.map((port) => ({ port, ready: false, busy: null, recentPages: [], heap: 0 }));
+		this.lanes = ports.map((port) => ({ port, ready: false, busy: null, pages: [], cancelling: false, heap: 0 }));
 		this.lanes.forEach((lane, i) => {
 			lane.port.onmessage = (ev: MessageEvent<FromRaster>) => this.receive(lane, i, ev.data);
 		});
@@ -67,6 +126,22 @@ export class RasterPool {
 		return false;
 	}
 
+	/** Predicted ms to render the whole of `page` on a worker that has not loaded it, and the part of that spent loading it. */
+	predict(page: number) {
+		const c = this.known(page);
+		return { ms: c.overhead + c.content, overhead: c.overhead };
+	}
+
+	private known(page: number) {
+		const c = this.costs.get(page);
+		return c && c.warm ? c : { ...this.prior, content: c?.cold?.ms ?? this.prior.content };
+	}
+
+	/** benches: queued jobs by priority */
+	debugQueue() {
+		return [...this.queue.values()].sort((a, b) => a.priority - b.priority).map((j) => `${j.key}@${j.priority.toFixed(2)}`);
+	}
+
 	/** Add or re-prioritise a job. Lower priority runs first. */
 	request(
 		key: string,
@@ -77,20 +152,27 @@ export class RasterPool {
 			| Omit<Extract<ToRaster, { t: "outline" }>, "id">
 			| Omit<Extract<ToRaster, { t: "sizes" }>, "id">,
 		onDone: (res: FromRaster) => void,
+		frac = msg.t === "tile" ? 1 : 0,
 	) {
 		const queued = this.queue.get(key);
 		if (queued) {
 			queued.priority = priority;
 			return;
 		}
-		for (const job of this.inflight.values()) if (job.key === key) return;
+		for (const job of this.inflight.values()) {
+			if (job.key !== key) continue;
+			this.unwanted.delete(job.msg.id);
+			return;
+		}
 		const id = this.nextId++;
-		this.queue.set(key, { key, priority, msg: { ...msg, id } as Job["msg"], page: msg.page, onDone });
+		this.queue.set(key, { key, priority, msg: { ...msg, id } as JobMsg, page: msg.page, onDone, frac, est: 0, started: 0, warm: false });
 	}
 
-	/** Drop queued tile jobs whose key is not in `keep` (in-flight jobs finish; text jobs are cheap and always kept). */
+	/** Drop queued tile jobs whose key is not in `keep` (text jobs are cheap and always kept); unwanted running tiles may be cancelled. */
 	retain(keep: Set<string>) {
 		for (const job of this.queue.values()) if (job.msg.t === "tile" && !job.key.startsWith("thumb:") && !keep.has(job.key)) this.queue.delete(job.key);
+		this.unwanted.clear();
+		for (const job of this.inflight.values()) if (job.msg.t === "tile" && !job.key.startsWith("thumb:") && !keep.has(job.key)) this.unwanted.add(job.msg.id);
 	}
 
 	/** Stops listening to the workers and drops every job (their callbacks never run). */
@@ -102,7 +184,6 @@ export class RasterPool {
 		this.lanes = [];
 		this.queue.clear();
 		this.inflight.clear();
-		this.owner.clear();
 	}
 
 	/** Retry opening the document with a password in every worker that has not opened it. */
@@ -110,62 +191,124 @@ export class RasterPool {
 		for (const lane of this.lanes) if (!lane.ready) lane.port.postMessage({ t: "unlock", password } satisfies ToRaster);
 	}
 
+	private cost(job: Job, warm: boolean) {
+		const c = this.known(job.page);
+		const work = job.msg.t === "tile" ? c.content * job.frac : TEXT_MS;
+		if (warm) return work;
+		// Range loading: loading a page another worker has means downloading it again.
+		const elsewhere = this.affinity && job.page >= 0 && this.lanes.some((l) => l.pages.includes(job.page));
+		return work + c.overhead + (elsewhere ? REMOTE_PAGE_MS : 0);
+	}
+
+	/** ms until a busy lane frees up; a job past its estimate is assumed to take as long again */
+	private remaining(lane: Lane, now: number) {
+		const job = lane.busy;
+		if (!job) return 0;
+		const elapsed = now - job.started;
+		return job.est > elapsed ? job.est - elapsed : Math.max(1, elapsed);
+	}
+
 	pump() {
 		if (this.queue.size === 0) return;
+		const now = this.now();
 		const jobs = [...this.queue.values()].sort((a, b) => a.priority - b.priority);
+		const free = this.lanes.map((l) => (!l.ready ? Infinity : this.remaining(l, now)));
+		const pages = this.lanes.map((l) => new Set(l.pages));
+		const taken = new Set<Lane>();
+		let urgentWaiting = 0;
+		for (let j = 0; j < jobs.length && j < LOOKAHEAD; j++) {
+			const job = jobs[j]!;
+			let best = -1;
+			let bestAt = Infinity;
+			for (let i = 0; i < this.lanes.length; i++) {
+				if (free[i] === Infinity) continue;
+				const at = free[i]! + this.cost(job, pages[i]!.has(job.page));
+				if (at < bestAt) {
+					bestAt = at;
+					best = i;
+				}
+			}
+			if (best < 0) break;
+			const lane = this.lanes[best]!;
+			free[best] = bestAt;
+			pages[best]!.add(job.page);
+			if (lane.busy || taken.has(lane)) {
+				if (job.priority < URGENT) urgentWaiting++;
+				continue;
+			}
+			taken.add(lane);
+			this.dispatch(lane, job, now);
+		}
+		if (urgentWaiting) this.cancelUnwanted(urgentWaiting);
+	}
+
+	private dispatch(lane: Lane, job: Job, now: number) {
+		job.warm = lane.pages.includes(job.page);
+		job.est = this.cost(job, job.warm);
+		job.started = now;
+		this.queue.delete(job.key);
+		lane.busy = job;
+		this.inflight.set(job.msg.id, job);
+		lane.pages = [job.page, ...lane.pages.filter((p) => p !== job.page)].slice(0, WORKER_PAGES);
+		lane.port.postMessage(job.msg);
+	}
+
+	/** Visible work is waiting behind tiles nobody wants any more: stop up to `n` of those. */
+	private cancelUnwanted(n: number) {
 		for (const lane of this.lanes) {
-			if (!lane.ready || lane.busy || jobs.length === 0) continue;
-			const pick = this.affinity ? this.pickOwned(lane, jobs) : this.pickNear(lane, jobs);
-			if (pick < 0) continue;
-			const [job] = jobs.splice(pick, 1);
-			if (!job) continue;
-			this.queue.delete(job.key);
-			lane.busy = job;
-			this.inflight.set(job.msg.id, job);
-			lane.recentPages = [job.page, ...lane.recentPages.filter((p) => p !== job.page)].slice(0, 6);
-			if (this.affinity && job.page >= 0 && !this.owner.has(job.page)) this.owner.set(job.page, lane);
-			lane.port.postMessage(job.msg);
+			if (n === 0) return;
+			const job = lane.busy;
+			if (!job || lane.cancelling || !this.unwanted.has(job.msg.id)) continue;
+			lane.cancelling = true;
+			lane.port.postMessage({ t: "cancel", id: job.msg.id } satisfies ToRaster);
+			n--;
 		}
 	}
 
-	/** Prefer a near-top job for a page this worker has already parsed. */
-	private pickNear(lane: Lane, jobs: Job[]) {
-		const window = Math.min(jobs.length, 4);
-		for (let i = 0; i < window; i++) if (lane.recentPages.includes(jobs[i]!.page)) return i;
-		return 0;
+	private learn(job: Job, ms: number) {
+		if (job.msg.t !== "tile") return;
+		const frac = Math.max(MIN_FRAC, job.frac);
+		const c = this.costs.get(job.page) ?? { content: 0, overhead: 0, warm: 0 };
+		if (job.warm) {
+			c.content = c.warm ? c.content + (ms / frac - c.content) * EMA : ms / frac;
+			c.warm++;
+			if (c.cold) {
+				c.overhead = Math.max(0, c.cold.ms - c.content * c.cold.frac);
+				c.cold = undefined;
+			}
+		} else if (c.warm) c.overhead += (Math.max(0, ms - c.content * frac) - c.overhead) * EMA;
+		else c.cold ??= { ms, frac };
+		this.costs.set(job.page, c);
+		// Pages of one document cost alike: unseen pages start from the typical page.
+		const known = [...this.costs.values()].filter((k) => k.warm);
+		if (known.length) this.prior = { content: median(known.map((k) => k.content))!, overhead: median(known.map((k) => k.overhead))!, warm: 0 };
 	}
 
-	/** The most urgent job for a page this worker owns or nobody does yet; other workers' pages wait for them. */
-	private pickOwned(lane: Lane, jobs: Job[]) {
-		for (let i = 0; i < jobs.length; i++) {
-			const owner = jobs[i]!.page >= 0 ? this.owner.get(jobs[i]!.page) : undefined;
-			if (!owner || owner === lane || !this.lanes.includes(owner) || !owner.ready) return i;
-		}
-		return -1;
-	}
+
 
 	/** The whole file is local now: any worker can take any page. */
 	releaseAffinity() {
 		this.affinity = false;
-		this.owner.clear();
 		this.pump();
 	}
 
 	private receive(lane: Lane, index: number, msg: FromRaster) {
 		if (msg.t === "opened") {
 			lane.ready = true;
-			if (index === 0) this.onOpened(msg.pageCount, msg.sizes, msg.info);
+			const { wasmMs, wasmShared = false, openMs } = msg;
+			if (index === 0) this.onOpened(msg.pageCount, msg.sizes, msg.info, wasmMs !== undefined && openMs !== undefined ? { wasmMs, wasmShared, openMs } : undefined);
 			this.pump();
 			return;
 		}
 		if (msg.t === "error") {
 			// Every worker opens the same bytes: report load failures once.
 			const load = msg.phase === "document-load" || msg.phase === "engine-load";
-			if (!load || index === 0) this.onError(msg.message, msg.code, msg.phase);
+			if (!load || index === 0) this.onError(msg.message, msg.code, msg.phase, msg.detail);
 			const job = lane.busy;
 			if (job) {
 				this.inflight.delete(job.msg.id);
 				lane.busy = null;
+				lane.cancelling = false;
 			}
 			this.pump();
 			// The job's owner learns it failed (text waiters, tiles that must not retry forever).
@@ -175,9 +318,15 @@ export class RasterPool {
 		if ("heap" in msg) lane.heap = msg.heap;
 		const job = this.inflight.get(msg.id);
 		this.inflight.delete(msg.id);
-		lane.busy = null;
+		this.unwanted.delete(msg.id);
+		if (lane.busy?.msg.id === msg.id) {
+			lane.busy = null;
+			lane.cancelling = false;
+		}
+		if (job && msg.t === "tile") this.learn(job, msg.ms);
 		this.pump();
-		job?.onDone(msg);
+		// A cancelled tile is forgotten: the next plan requests it again if it is still wanted.
+		if (msg.t !== "cancelled") job?.onDone(msg);
 		if (this.pending === 0) this.onIdle();
 	}
 }

@@ -5,7 +5,8 @@
 import { markColor } from "./colors";
 import { Compositor } from "./gl";
 import { anchoredY, buildLayout, estimateSizes } from "./layout";
-import type { DocumentInfo, ErrorCode, ErrorPhase, Link, OutlineItem, PageSize, SizeEntry } from "./protocol";
+import { uploadRank } from "./upload-rank";
+import type { DocumentInfo, ErrorCode, ErrorPhase, Link, LoadFailureDetail, OpenTiming, OutlineItem, PageSize, SizeEntry } from "./protocol";
 import { RasterPool, type SizesResult, type TextResult, type TileResult } from "./raster-pool";
 import { boundedDistance, foldQuery, insertRanked, matchPage, type RawMatch, type SearchOptions, splitLimit } from "./search";
 import { PageText, type Rect, type SelectionTextOptions, type TextPoint, comparePoints } from "./text";
@@ -97,6 +98,14 @@ export type InitialTarget =
 	| { page: number; rect: Rect; align?: RevealAlign; units?: "points" | "fraction" };
 
 export type PointerKind = "mouse" | "touch" | "pen";
+
+/**
+ * Why a flight did not land: `input` (wheel, gesture, pointer down or key on the
+ * viewer), `command` (the host sent zoom/fit/scroll), `jump` (a newer
+ * goto/reveal), `no-target` (the destination does not exist: no such page,
+ * or a non-finite rect).
+ */
+export type FlightCause = "input" | "command" | "jump" | "no-target";
 
 export type InputMsg =
 	| { type: "resize"; w: number; h: number; dpr: number }
@@ -233,10 +242,27 @@ export type Command =
 	| { type: "unlock"; password: string }
 	| { type: "options"; options: Partial<CoreOptions> };
 
+/**
+ * Frame statistics over the last ~500ms. A frame is "wanted" when something
+ * asked for it: continuous motion (the previous frame asked for the next one)
+ * or an input, tile or command after idle. Frame times are measured from the
+ * moment a frame was wanted, so idle time between interactions never counts.
+ */
 export interface Stats {
+	/** frames per second during continuous motion (0 when idle) */
 	fps: number;
+	/** 95th percentile interval between consecutive frames of continuous motion */
 	p95FrameMs: number;
+	/** slowest frame in the window, from wanted to drawn (uncapped) */
 	worstFrameMs: number;
+	/** frames drawn in the window */
+	frames: number;
+	/** frames drawn more than 33ms after they were wanted (one dropped vsync at 60Hz) */
+	framesOver33: number;
+	framesOver50: number;
+	framesOver100: number;
+	/** tile pixels uploaded to the GPU in the busiest frame of the window */
+	uploadPeakBytes: number;
 	avgCpuMs: number;
 	tiles: number;
 	textureMB: number;
@@ -273,11 +299,11 @@ export type CoreEvent =
 	 * the document opened: page sizes (points), their layout in doc space, and its metadata.
 	 * `complete: false` (range loading): some sizes are estimates; `layout` events follow as they resolve.
 	 */
-	| { type: "ready"; pages: PageSize[]; layout: Rect[]; info: DocumentInfo; complete: boolean }
+	| { type: "ready"; pages: PageSize[]; layout: Rect[]; info: DocumentInfo; complete: boolean; timing?: OpenTiming }
 	/** estimated page sizes resolved (range loading); the camera kept the content in view where it was */
 	| { type: "layout"; pages: PageSize[]; layout: Rect[]; complete: boolean }
 	/** the first page bitmap reached the screen (once per document) */
-	| { type: "painted"; page: number }
+	| { type: "painted"; page: number; timing?: { firstTileAt: number; paintedAt: number } }
 	/** `fitWidth`: fit-width mode (kept for compatibility); `fit`: the sticky fit mode, if any */
 	| { type: "view"; zoom: number; page: number; pageCount: number; fitWidth: boolean; fit: "width" | "page" | null }
 	| { type: "camera"; camera: Camera; moving: boolean }
@@ -297,14 +323,45 @@ export type CoreEvent =
 	/** the browser restored a lost WebGL context (after a `gpu`/`render` error); tiles are redrawing */
 	| { type: "restored" }
 	/**
-	 * An animated (or instant) reveal/goto finished. `landed: false` when input or
-	 * another jump interrupted it. `coverage`: share of the landing view already
-	 * covered by sharp tiles; `waitMs`: how long the flight waited for bitmaps.
+	 * An animated (or instant) reveal/goto finished. `landed: false` comes with a
+	 * `cause` (see FlightCause). `coverage`: share of the landing view already
+	 * covered by sharp tiles; `waitMs`: how long the flight waited for bitmaps
+	 * (or for the view to get a size: a goto/reveal before `ready` or while the
+	 * container is hidden waits, then lands instantly).
 	 */
-	| { type: "flight"; id: number; landed: boolean; coverage: number; waitMs: number; durationMs: number }
+	| { type: "flight"; id: number; landed: boolean; cause?: FlightCause; coverage: number; waitMs: number; durationMs: number }
 	| { type: "stats"; stats: Stats }
+	/**
+	 * The view became sharp after a zoom or a jump: every visible page is drawn
+	 * at the target scale. `ms` counts from the last zoom step, or from the
+	 * moment a jump landed.
+	 */
+	| { type: "sharp"; cause: "zoom" | "jump"; ms: number }
+	/** emitted by the viewer once, right after the first `painted` */
+	| { type: "load"; timings: LoadTimings }
 	/** `code`/`phase` say what failed and when (see ErrorCode, ErrorPhase) */
-	| { type: "error"; message: string; code: ErrorCode; phase: ErrorPhase };
+	| { type: "error"; message: string; code: ErrorCode; phase: ErrorPhase; detail?: LoadFailureDetail };
+
+/** epoch ms (timeOrigin + now), comparable across the main thread and workers */
+export const epochNow = () => performance.timeOrigin + performance.now();
+
+/** Where the time to first paint went. Durations in ms; `readyMs` and later count from `createViewer`. */
+export interface LoadTimings extends Partial<OpenTiming> {
+	/** downloading the document before opening (the 1KB probe with range loading; 0 for in-memory sources) */
+	fetchMs: number;
+	fetchBytes: number;
+	/** waiting for the shared pdfium.wasm compile (`preloadPdfium`) */
+	wasmWaitMs: number;
+	/** spawning the first raster worker until its script ran */
+	workerBootMs: number;
+	readyMs: number;
+	firstTileMs: number;
+	firstPaintMs: number;
+	rangeLoading: boolean;
+}
+
+/** frames later than this were suspended (hidden tab), not slow */
+const SUSPENDED_MS = 2000;
 
 interface Tile {
 	key: string;
@@ -334,8 +391,17 @@ interface PageRect {
 
 const TILE = 512;
 const BASE_MAX = 1024;
+/** a page whose base bitmap is predicted slower than this gets a quick low-res preview first */
+const PREVIEW_MS = 50;
+/** preview scale = base scale / PREVIEW_DIV (1/16 of the pixels) */
+const PREVIEW_DIV = 4;
 const ZOOM_SETTLE_MS = 180;
 const UPLOAD_BUDGET_MS = 2.5;
+/** per-frame texture upload budget (bytes): halves after a late frame, grows while frames are on time */
+const UPLOAD_MIN = TILE * TILE * 4;
+const UPLOAD_MAX = 64 * 1024 * 1024;
+/** at most this much texture memory is freed per frame below the hard budget */
+const EVICT_STEP = 16 * 1024 * 1024;
 const CLICK_SLOP = 4;
 const AUTOSCROLL_EDGE = 48;
 const LONG_PRESS_MS = 450;
@@ -356,6 +422,8 @@ const RIPPLE_MS = 1000;
 const FLASH_MS = 1200;
 
 const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
+const PAGE_EDGE: Color = [0, 0, 0, 0.12];
+const WHITE: Color = [1, 1, 1, 1];
 
 /** pdf-fullpage-pulse keyframes (opacity relative to the peak), eased between keys */
 const FLASH_KEYS: [number, number][] = [
@@ -395,6 +463,13 @@ interface Flight {
 	retarget: () => { cam: Camera; fit: Fit } | null;
 }
 
+/** A goto/reveal asked for while the view cannot place a camera (not open yet, or 0 px wide/tall). */
+interface PendingJump {
+	id: number;
+	requested: number;
+	retarget: Flight["retarget"];
+}
+
 export class ViewerCore {
 	private gl: Compositor;
 	private pool: RasterPool;
@@ -406,6 +481,8 @@ export class ViewerCore {
 	private dpr = 1;
 	private cam = { x: 0, y: 0, zoom: 1 };
 	private camReady = false;
+	/** the last width with a measurable view: a hidden viewer keeps its camera for that size */
+	private measuredW = 0;
 	/** fit-width/fit-page is sticky across resizes until the user zooms by hand */
 	private fitMode: Fit = false;
 
@@ -458,6 +535,7 @@ export class ViewerCore {
 	private pulses = new Map<string, { kind: PulseKind; start: number; dur: number }>();
 
 	private flight: Flight | null = null;
+	private pending: PendingJump | null = null;
 	/** tiles a flight needs at its destination: eviction never drops these */
 	private pinned = new Set<string>();
 
@@ -483,7 +561,25 @@ export class ViewerCore {
 	private frameTimes: number[] = [];
 	private cpuTimes: number[] = [];
 	private tileMs: number[] = [];
+	/** benches only (`debugProbe`): every finished tile job since the last probe */
+	private tileLog: { page: number; base: boolean; ms: number; waitMs: number }[] = [];
 	private lastStats = 0;
+	private inFrame = false;
+	private frameEnd = 0;
+	/** when the scheduled frame was first wanted; the previous frame's start for continuous motion */
+	private wantedAt = 0;
+	private windowFrames = 0;
+	private worstFrame = 0;
+	private over33 = 0;
+	private over50 = 0;
+	private over100 = 0;
+	private uploadPeak = 0;
+	private uploadBudget = 8 * 1024 * 1024;
+	private uploadedLast = 0;
+	/** shortest recent continuous frame interval: the display's refresh interval */
+	private vsync = 1000 / 60;
+	private firstTileAt = 0;
+	private sharpWait: { cause: "zoom" | "jump"; since: number } | null = null;
 	private lastView: { zoom: number; page: number; fit: Fit } = { zoom: 0, page: -1, fit: false };
 
 	constructor(
@@ -496,8 +592,8 @@ export class ViewerCore {
 		this.opts = { ...defaultOptions, ...options };
 		this.gl = new Compositor(canvas);
 		this.pool = new RasterPool(ports);
-		this.pool.onOpened = (pageCount, sizes, info) => this.opened(pageCount, sizes, info);
-		this.pool.onError = (message, code, phase) => this.emit({ type: "error", message, code, phase });
+		this.pool.onOpened = (pageCount, sizes, info, timing) => this.opened(pageCount, sizes, info, timing);
+		this.pool.onError = (message, code, phase, detail) => this.emit({ type: "error", message, code, phase, ...(detail && { detail }) });
 		this.gl.onLost = () => this.emit({ type: "error", message: "lector-engine: the WebGL context was lost; waiting for the browser to restore it", code: "gpu", phase: "render" });
 		this.gl.onRestored = () => this.contextRestored();
 	}
@@ -512,6 +608,7 @@ export class ViewerCore {
 		if (this.disposed) return;
 		this.disposed = true;
 		this.flight = null;
+		this.pending = null;
 		this.dragging = false;
 		this.velocity = { x: 0, y: 0 };
 		for (const timer of [this.settleTimer, this.idleTimer, this.press?.timer]) if (timer) clearTimeout(timer);
@@ -538,7 +635,7 @@ export class ViewerCore {
 
 	// ---------------------------------------------------------------- setup
 
-	private opened(pageCount: number, entries: SizeEntry[], info: DocumentInfo) {
+	private opened(pageCount: number, entries: SizeEntry[], info: DocumentInfo, timing?: OpenTiming) {
 		const known: (PageSize | null)[] = new Array(pageCount).fill(null);
 		for (const [i, w, h] of entries) if (i >= 0 && i < pageCount) known[i] = { w, h };
 		const { sizes, estimated } = estimateSizes(known);
@@ -546,7 +643,7 @@ export class ViewerCore {
 		this.estimated = estimated;
 		this.unknown = estimated.filter(Boolean).length;
 		this.relayout();
-		this.emit({ type: "ready", pages: this.pages.map((p) => ({ ...p })), layout: this.layout.map((r) => ({ ...r })), info, complete: this.unknown === 0 });
+		this.emit({ type: "ready", pages: this.pages.map((p) => ({ ...p })), layout: this.layout.map((r) => ({ ...r })), info, complete: this.unknown === 0, timing });
 		this.initCamera();
 		this.requestFrame();
 	}
@@ -661,8 +758,13 @@ export class ViewerCore {
 		this.requestSizes(out, priority);
 	}
 
+	/** The camera can be aimed: the document is laid out and the view has a size. */
+	private canAim() {
+		return this.camReady && this.vw > 0 && this.vh > 0;
+	}
+
 	private initCamera() {
-		if (this.camReady || this.vw === 0 || this.pages.length === 0) return;
+		if (this.camReady || this.vw === 0 || this.vh === 0 || this.pages.length === 0) return;
 		this.camReady = true;
 		const o = this.opts;
 		const initial = o.initialZoom;
@@ -697,6 +799,7 @@ export class ViewerCore {
 			else this.cam.y = r.y + o.initialTop - this.opts.pageGap;
 		}
 		this.clampCamera();
+		this.landPending();
 	}
 
 	/** Camera that centres `page` at `zoom`. */
@@ -747,7 +850,7 @@ export class ViewerCore {
 	/** Camera that shows `rect` on `page` (see the `reveal` command). */
 	private revealTarget(page: number, rect: Rect, align: RevealAlign = "auto", ifNeeded = false, offset = 0): { cam: Camera; fit: Fit } | null {
 		const r = this.layout[page];
-		if (!r || this.vw === 0) return null;
+		if (!r) return null;
 		if (![rect.x, rect.y, rect.w, rect.h, offset].every(Number.isFinite)) return null;
 		const m = REVEAL_MARGIN;
 		const cur = this.cam;
@@ -793,11 +896,15 @@ export class ViewerCore {
 
 	/** Move the camera to the target, animated unless asked otherwise or reduced motion is on. */
 	private fly(id: number, animate: boolean, retarget: Flight["retarget"]) {
-		this.cancelFlight();
+		this.cancelFlight("jump");
 		this.velocity = { x: 0, y: 0 };
-		const target = this.camReady ? retarget() : null;
+		if (!this.canAim()) {
+			this.pending = { id, requested: performance.now(), retarget };
+			return;
+		}
+		const target = retarget();
 		if (!target) {
-			if (id) this.emit({ type: "flight", id, landed: false, coverage: 0, waitMs: 0, durationMs: 0 });
+			if (id) this.emit({ type: "flight", id, landed: false, cause: "no-target", coverage: 0, waitMs: 0, durationMs: 0 });
 			return;
 		}
 		const to = target.cam;
@@ -808,12 +915,7 @@ export class ViewerCore {
 		const zoomSteps = Math.abs(Math.log2(to.zoom / from.zoom));
 		let dist = Math.hypot(b.x - a.x, b.y - a.y) * to.zoom;
 		if (!animate || this.opts.reducedMotion || (dist < 1 && zoomSteps < 0.01)) {
-			const zoomed = to.zoom !== this.cam.zoom;
-			this.cam = { ...to };
-			this.fitMode = target.fit;
-			if (zoomed) this.zoomChanged();
-			this.requestFrame();
-			if (id) this.emit({ type: "flight", id, landed: true, coverage: this.coverage(this.pagesIn(this.viewRect())), waitMs: 0, durationMs: 0 });
+			this.land(id, target, 0);
 			return;
 		}
 		// Long jumps cut to one viewport short of the target and ease in from
@@ -835,9 +937,49 @@ export class ViewerCore {
 		this.requestFrame();
 	}
 
-	/** Stop a flight where it is (user input or another jump). */
-	private cancelFlight() {
+	/** Put the camera on `target` now. */
+	private land(id: number, target: { cam: Camera; fit: Fit }, waitMs: number) {
 		this.pendingFraction = null;
+		const zoomed = target.cam.zoom !== this.cam.zoom;
+		this.cam = { ...target.cam };
+		this.fitMode = target.fit;
+		if (zoomed) this.zoomChanged();
+		this.sharpWait = { cause: "jump", since: performance.now() };
+		this.requestFrame();
+		if (id) this.emit({ type: "flight", id, landed: true, coverage: this.coverage(this.pagesIn(this.viewRect())), waitMs, durationMs: 0 });
+	}
+
+	/** Lands instantly: the reader never saw where a waiting jump started. */
+	private landPending() {
+		const p = this.pending;
+		if (!p || !this.canAim()) return;
+		this.pending = null;
+		const target = p.retarget();
+		if (target) this.land(p.id, target, performance.now() - p.requested);
+		else if (p.id) this.emit({ type: "flight", id: p.id, landed: false, cause: "no-target", coverage: 0, waitMs: 0, durationMs: 0 });
+	}
+
+	/** The view lost its size mid-flight: finish the move unseen and re-aim once it is back. */
+	private parkFlight() {
+		const f = this.flight;
+		if (!f) return;
+		this.flight = null;
+		this.pinned.clear();
+		const zoomed = f.to.zoom !== this.cam.zoom;
+		this.cam = { ...f.to };
+		this.fitMode = f.fit;
+		if (zoomed) this.zoomChanged();
+		this.pending = { id: f.id, requested: f.requested, retarget: f.retarget };
+	}
+
+	/** Stop a flight where it is (user input or another jump); a waiting jump is dropped. */
+	private cancelFlight(cause: FlightCause) {
+		this.pendingFraction = null;
+		const p = this.pending;
+		if (p) {
+			this.pending = null;
+			if (p.id) this.emit({ type: "flight", id: p.id, landed: false, cause, coverage: 0, waitMs: 0, durationMs: 0 });
+		}
 		const f = this.flight;
 		if (!f) return;
 		this.flight = null;
@@ -846,7 +988,7 @@ export class ViewerCore {
 			this.fitMode = false;
 			this.zoomChanged();
 		}
-		if (f.id) this.emit({ type: "flight", id: f.id, landed: false, coverage: 0, waitMs: 0, durationMs: 0 });
+		if (f.id) this.emit({ type: "flight", id: f.id, landed: false, cause, coverage: 0, waitMs: 0, durationMs: 0 });
 		this.requestFrame();
 	}
 
@@ -855,7 +997,7 @@ export class ViewerCore {
 		const f = this.flight;
 		if (!f) return false;
 		if (f.start < 0) {
-			const ready = f.pages.every((p) => this.tiles.get(this.tileKey(p, this.baseScale(p), 0, 0))?.tex);
+			const ready = f.pages.every((p) => this.hasPageBitmap(p));
 			if (!ready && performance.now() - f.requested < FLIGHT_WAIT_MS) return true;
 			f.start = now;
 		}
@@ -865,6 +1007,7 @@ export class ViewerCore {
 			this.fitMode = f.fit;
 			this.flight = null;
 			this.pinned.clear();
+			this.sharpWait = { cause: "jump", since: performance.now() };
 			if (f.id) {
 				const waitMs = Math.max(0, f.start - f.requested);
 				this.emit({ type: "flight", id: f.id, landed: true, coverage: this.coverage(this.pagesIn(this.viewRect())), waitMs, durationMs: f.dur });
@@ -931,6 +1074,7 @@ export class ViewerCore {
 
 	private zoomChanged() {
 		this.lastZoomChange = performance.now();
+		this.sharpWait = { cause: "zoom", since: this.lastZoomChange };
 		if (this.settleTimer) clearTimeout(this.settleTimer);
 		if (this.disposed) return;
 		this.settleTimer = setTimeout(() => this.requestFrame(), ZOOM_SETTLE_MS + 10);
@@ -953,7 +1097,7 @@ export class ViewerCore {
 			case "resize": {
 				const changed = msg.w !== this.vw || msg.h !== this.vh || msg.dpr !== this.dpr;
 				// Keep the doc point at the top-centre of the view fixed.
-				const anchorX = this.cam.x + this.vw / 2 / this.cam.zoom;
+				const anchorX = this.cam.x + this.measuredW / 2 / this.cam.zoom;
 				const anchorY = this.cam.y;
 				this.vw = msg.w;
 				this.vh = msg.h;
@@ -961,7 +1105,9 @@ export class ViewerCore {
 				this.gl.resize(Math.round(msg.w * msg.dpr), Math.round(msg.h * msg.dpr));
 				const wasReady = this.camReady;
 				this.initCamera();
-				if (changed && wasReady) {
+				// A hidden view keeps its camera for the last size it had.
+				if (!this.canAim()) this.parkFlight();
+				else if (changed && wasReady) {
 					if (this.fitMode) {
 						const z = this.clampZoom(this.fitZoom(this.fitMode));
 						if (z !== this.cam.zoom) {
@@ -980,6 +1126,8 @@ export class ViewerCore {
 						f.fit = next.fit;
 					}
 				}
+				if (this.vw > 0 && this.vh > 0) this.measuredW = this.vw;
+				this.landPending();
 				// Resizing clears the drawing buffer: draw synchronously so the
 				// new size never shows an empty frame.
 				this.dirty = true;
@@ -988,7 +1136,7 @@ export class ViewerCore {
 				return;
 			}
 			case "wheel": {
-				this.cancelFlight();
+				this.cancelFlight("input");
 				const unit = msg.mode === 1 ? 16 : msg.mode === 2 ? this.vh : 1;
 				if (msg.ctrl) {
 					if (this.gestureZoom !== null) return;
@@ -1002,19 +1150,19 @@ export class ViewerCore {
 				return;
 			}
 			case "gesture": {
-				this.cancelFlight();
+				this.cancelFlight("input");
 				if (msg.phase === "start") this.gestureZoom = this.cam.zoom;
 				else if (msg.phase === "change" && this.gestureZoom !== null) this.userZoom(this.gestureZoom * msg.scale, msg.x, msg.y);
 				else this.gestureZoom = null;
 				return;
 			}
 			case "pointer":
-				if (msg.phase === "down") this.cancelFlight();
+				if (msg.phase === "down") this.cancelFlight("input");
 				if (msg.kind === "touch") this.touch(msg);
 				else this.mouse(msg);
 				return;
 			case "key":
-				this.cancelFlight();
+				this.cancelFlight("input");
 				this.key(msg);
 				return;
 			case "leave":
@@ -1353,17 +1501,17 @@ export class ViewerCore {
 		switch (cmd.type) {
 			case "zoom":
 				if (!Number.isFinite(cmd.zoom)) return;
-				this.cancelFlight();
+				this.cancelFlight("command");
 				this.userZoom(cmd.zoom, cmd.x ?? this.vw / 2, cmd.y ?? this.vh / 2);
 				return;
 			case "fit-width":
-				this.cancelFlight();
+				this.cancelFlight("command");
 				this.zoomAt(this.fitZoom("width"), this.vw / 2, 0);
 				this.fitMode = "width";
 				this.requestFrame();
 				return;
 			case "fit-page": {
-				this.cancelFlight();
+				this.cancelFlight("command");
 				const page = this.currentPage();
 				const zoom = this.clampZoom(this.fitZoom("page", page));
 				const zoomed = zoom !== this.cam.zoom;
@@ -1379,7 +1527,7 @@ export class ViewerCore {
 				return;
 			case "scroll-to": {
 				if (!Number.isFinite(cmd.fraction)) return;
-				this.cancelFlight();
+				this.cancelFlight("command");
 				const viewH = this.vh / this.cam.zoom;
 				const fraction = Math.max(0, Math.min(1, cmd.fraction));
 				this.cam.y = fraction * Math.max(0, this.docH - viewH);
@@ -1451,7 +1599,7 @@ export class ViewerCore {
 				return;
 			case "scroll-by":
 				if (!Number.isFinite(cmd.dx) || !Number.isFinite(cmd.dy)) return;
-				this.cancelFlight();
+				this.cancelFlight("command");
 				this.panBy(cmd.dx, cmd.dy);
 				return;
 			case "select-all":
@@ -1902,6 +2050,12 @@ export class ViewerCore {
 		return 2 ** Math.floor(Math.log2(BASE_MAX / Math.max(p.w, p.h)));
 	}
 
+	/** a whole-page bitmap (base or its preview) is on the GPU */
+	private hasPageBitmap(page: number) {
+		const s = this.baseScale(page);
+		return !!(this.tiles.get(this.tileKey(page, s, 0, 0))?.tex || this.tiles.get(this.tileKey(page, s / PREVIEW_DIV, 0, 0))?.tex);
+	}
+
 	private tileKey(page: number, scale: number, x: number, y: number) {
 		return `${page}:${scale}:${x}:${y}`;
 	}
@@ -1926,16 +2080,21 @@ export class ViewerCore {
 
 	private requestTile(tile: Tile, priority: number) {
 		const { key, page, scale, x, y, w, h } = tile;
+		const asked = performance.now();
+		const size = this.pages[page]!;
+		const frac = (w * h) / Math.max(1, Math.round(size.w * scale) * Math.round(size.h * scale));
 		this.pool.request(key, priority, { t: "tile", page, scale, x, y, w, h }, (res) => {
 			if (res.t === "error") tile.failed = true;
 			if (res.t !== "tile") return;
 			const r = res as TileResult;
 			this.tileMs.push(r.ms);
+			this.firstTileAt ||= epochNow();
+			if (this.tileLog.length < 5000) this.tileLog.push({ page, base: scale <= this.baseScale(page), ms: r.ms, waitMs: performance.now() - asked });
 			if (this.tiles.get(key) !== tile || tile.tex || tile.arrived) return;
 			tile.arrived = true;
 			this.arrived.push({ tile, pixels: new Uint8Array(r.buf) });
 			this.requestFrame();
-		});
+		}, Math.min(1, frac));
 	}
 
 	/** Visible doc-space rect, optionally grown by a fraction of the viewport. */
@@ -1981,11 +2140,22 @@ export class ViewerCore {
 		// Pages whose size is still an estimate get their size first, and no tiles until then.
 		this.requestSizes(near, -2);
 		this.backgroundSizes(visible[0] ?? 0);
+		const shown = new Set(targetVisible);
 		const baseTile = (p: number, priority: number, pin = false) => {
 			if (this.estimated[p]) return;
 			const s = this.baseScale(p);
 			const size = this.pages[p]!;
-			this.ensureTile(p, s, 0, 0, Math.round(size.w * s), Math.round(size.h * s), priority, keep, pin);
+			const w = Math.round(size.w * s);
+			const h = Math.round(size.h * s);
+			if (keep.has(this.tileKey(p, s, 0, 0))) return;
+			// A heavy page about to be blank shows a coarse pass while its base renders; scans gain nothing (decode-bound).
+			const base = this.tiles.get(this.tileKey(p, s, 0, 0));
+			if ((pin || shown.has(p)) && !base?.tex && !base?.arrived) {
+				const cost = this.pool.predict(p);
+				const ps = s / PREVIEW_DIV;
+				if (cost.ms > PREVIEW_MS && cost.overhead < cost.ms * 0.3) this.ensureTile(p, ps, 0, 0, Math.max(1, Math.round(size.w * ps)), Math.max(1, Math.round(size.h * ps)), priority - 0.5, keep, pin);
+			}
+			this.ensureTile(p, s, 0, 0, w, h, priority, keep, pin);
 		};
 
 		// 0. flight: base bitmaps along the path and at the destination (±1 page) first
@@ -2000,10 +2170,12 @@ export class ViewerCore {
 			for (const p of targetVisible) this.requestText(p, 5);
 		}
 
-		// 1. a whole-page base bitmap for everything near the viewport: never blank
+		// 1. a whole-page base bitmap for everything near the viewport: never blank.
+		// Pages past the look-ahead come after the visible sharp tiles.
 		const first = Math.max(0, (near[0] ?? 0) - 3);
 		const last = Math.min(this.layout.length - 1, (near[near.length - 1] ?? 0) + 3);
-		for (let p = first; p <= last; p++) baseTile(p, Math.abs(this.layout[p]!.y + this.layout[p]!.h / 2 - cy) / 1e6);
+		const nearSet = new Set(near);
+		for (let p = first; p <= last; p++) baseTile(p, (nearSet.has(p) ? 0 : 25) + Math.abs(this.layout[p]!.y + this.layout[p]!.h / 2 - cy) / 1e6);
 
 		// 2. sharp tiles: visible first (by distance from centre), then look-ahead.
 		// In flight, what passes by mid-way comes after the destination.
@@ -2028,6 +2200,8 @@ export class ViewerCore {
 						const y = ty * TILE;
 						const dx = r.x + (x + TILE / 2) / s - cx;
 						const dy = r.y + (y + TILE / 2) / s - cy;
+						// A later pass must not demote a tile an earlier one asked for (the pool keeps the last priority).
+						if (base !== 10 && keep.has(this.tileKey(p, s, x, y))) continue;
 						if (base !== 10 && !roomAhead && !this.tiles.has(this.tileKey(p, s, x, y))) continue;
 						const prio = base + Math.hypot(dx, dy) * cam.zoom * 1e-4;
 						this.ensureTile(p, s, x, y, Math.min(TILE, pw - x), Math.min(TILE, ph - y), prio, keep, !!flight && base === 10);
@@ -2050,40 +2224,78 @@ export class ViewerCore {
 		if (tile.tex) this.gl.free(tile.tex, tile.w, tile.h);
 	}
 
-	private uploadArrived() {
+
+	/** Uploads arrived tiles, most visible first, within a byte budget so one frame never carries a burst. */
+	private uploadArrived(visible: number[]) {
 		const t0 = performance.now();
+		let bytes = 0;
+		// Off-screen pixels nothing plans any more are dropped; on-screen ones still serve as fallbacks (old zoom levels).
+		const stale = (tile: Tile) => tile.lastWanted !== this.frameId && (!visible.includes(tile.page) || tile.scale === this.targetScale);
+		if (this.arrived.some((a) => stale(a.tile))) {
+			this.arrived = this.arrived.filter(({ tile }) => {
+				if (!stale(tile)) return true;
+				tile.arrived = false;
+				if (this.tiles.get(tile.key) === tile && !tile.tex) this.dropTile(tile);
+				return false;
+			});
+		}
+		if (this.arrived.length > 1) {
+			const rank = (t: Tile) => uploadRank(t, visible, this.frameId, this.baseScale(t.page), this.targetScale);
+			this.arrived.sort((a, b) => rank(a.tile) - rank(b.tile));
+		}
 		while (this.arrived.length > 0 && performance.now() - t0 < UPLOAD_BUDGET_MS) {
-			const { tile, pixels } = this.arrived.shift()!;
+			const next = this.arrived[0]!;
+			if (bytes > 0 && bytes + next.pixels.byteLength > this.uploadBudget) break;
+			this.arrived.shift();
+			const { tile, pixels } = next;
 			tile.arrived = false;
 			if (this.tiles.get(tile.key) !== tile || tile.tex) continue;
 			tile.tex = this.gl.upload(pixels, tile.w, tile.h);
 			// Lost mid-frame: fetch it again after the restore.
 			if (!tile.tex) break;
+			bytes += pixels.byteLength;
+		}
+		this.uploadedLast = bytes;
+		if (bytes > this.uploadPeak) this.uploadPeak = bytes;
+	}
+
+	/**
+	 * Over the texture budget, drop least recently drawn tiles back to 85% of
+	 * it, a few MB per frame: freeing a whole batch at once is a GPU burst. Over
+	 * the hard budget everything needed goes at once.
+	 */
+	private evict(frameId: number) {
+		const budget = this.opts.textureBudgetMB * 1024 * 1024;
+		if (this.gl.textureBytes <= budget) {
+			if (this.evicting === 0) return;
+		} else if (this.evicting === 0) this.evicting = budget * 0.85;
+		const floor = Math.max(this.evicting, this.gl.textureBytes - EVICT_STEP);
+		// Tiles this frame drew or planned (look-ahead) stay: evicting a planned
+		// tile only makes the next plan request it again.
+		while (this.gl.textureBytes > floor || this.gl.textureBytes > budget) {
+			const t = this.oldestTile(frameId, false);
+			if (!t) break;
+			this.dropTile(t);
+		}
+		if (this.gl.textureBytes <= this.evicting) this.evicting = 0;
+		// Still over: give up look-ahead tiles too (never what is on screen, nor a
+		// flight's destination).
+		while (this.gl.textureBytes > budget) {
+			const t = this.oldestTile(frameId, true);
+			if (!t) break;
+			this.dropTile(t);
 		}
 	}
 
-	private evict(frameId: number) {
-		const budget = this.opts.textureBudgetMB * 1024 * 1024;
-		if (this.gl.textureBytes <= budget) return;
-		// Tiles this frame drew or planned (look-ahead) stay: evicting a planned
-		// tile only makes the next plan request it again.
-		const candidates = [...this.tiles.values()]
-			.filter((t) => t.tex && t.lastUsed !== frameId && t.lastWanted !== frameId)
-			.sort((a, b) => a.lastUsed - b.lastUsed);
-		for (const t of candidates) {
-			if (this.gl.textureBytes <= budget * 0.85) break;
-			this.dropTile(t);
+	private evicting = 0;
+
+	private oldestTile(frameId: number, ahead: boolean) {
+		let oldest: Tile | null = null;
+		for (const t of this.tiles.values()) {
+			if (!t.tex || t.lastUsed === frameId || (ahead ? this.pinned.has(t.key) : t.lastWanted === frameId)) continue;
+			if (!oldest || t.lastUsed < oldest.lastUsed) oldest = t;
 		}
-		// Still over: give up look-ahead tiles too (never what is on screen, nor a
-		// flight's destination).
-		if (this.gl.textureBytes <= budget) return;
-		const ahead = [...this.tiles.values()]
-			.filter((t) => t.tex && t.lastUsed !== frameId && !this.pinned.has(t.key))
-			.sort((a, b) => a.lastUsed - b.lastUsed);
-		for (const t of ahead) {
-			if (this.gl.textureBytes <= budget) break;
-			this.dropTile(t);
-		}
+		return oldest;
 	}
 
 	// ---------------------------------------------------------------- frame
@@ -2092,6 +2304,9 @@ export class ViewerCore {
 		this.dirty = true;
 		if (this.scheduled || this.disposed) return;
 		this.scheduled = true;
+		const t = performance.now();
+		// Input queued behind a long frame is handled the moment it ends: that frame is late, not idle.
+		this.wantedAt = this.inFrame || t - this.frameEnd < 2 ? this.lastFrame : t;
 		this.raf((t) => {
 			this.scheduled = false;
 			if (!this.disposed) this.frame(t);
@@ -2103,13 +2318,14 @@ export class ViewerCore {
 
 	private frame(now: number) {
 		// A lost context draws nothing; `contextRestored` asks for a frame.
-		if (!this.dirty || !this.camReady || this.disposed || this.gl.lost) return;
+		if (!this.dirty || !this.canAim() || this.disposed || this.gl.lost) return;
 		const cpu0 = performance.now();
 		const dt = this.lastFrame ? Math.min(64, now - this.lastFrame) : 16;
-		if (this.lastFrame && now - this.lastFrame < 50) this.frameTimes.push(now - this.lastFrame);
+		if (this.lastFrame) this.recordFrame(now);
 		this.lastFrame = now;
 		this.dirty = false;
 		this.frameId++;
+		this.inFrame = true;
 
 		let moving = this.stepFlight(now);
 		// touch momentum
@@ -2135,10 +2351,11 @@ export class ViewerCore {
 		}
 
 		const visible = this.plan(now);
-		this.uploadArrived();
-		this.draw(visible, now);
+		this.uploadArrived(visible);
+		const sharp = this.draw(visible, now);
 		if (this.marksAnimating(now)) moving = true;
 		this.evict(this.frameId);
+		this.reportSharp(sharp);
 
 		this.cpuTimes.push(performance.now() - cpu0);
 		this.reportView(visible);
@@ -2146,6 +2363,38 @@ export class ViewerCore {
 
 		this.animating = moving || this.arrived.length > 0 || this.dirty;
 		if (this.animating) this.requestFrame();
+		this.inFrame = false;
+		this.frameEnd = performance.now();
+	}
+
+	private recordFrame(now: number) {
+		const continuous = this.wantedAt === this.lastFrame;
+		const ms = now - (continuous ? this.lastFrame : Math.min(now, this.wantedAt));
+		if (ms > SUSPENDED_MS) return;
+		if (continuous) {
+			this.frameTimes.push(ms);
+			const late = ms > this.vsync * 1.5;
+			// Late frames without uploads are the display's cadence (30Hz, throttled tab), so they still move the estimate.
+			if (!late || this.uploadedLast === 0) this.vsync += (ms - this.vsync) * 0.05;
+			if (!late) this.uploadBudget = Math.min(UPLOAD_MAX, this.uploadBudget + UPLOAD_MIN);
+			else if (this.uploadedLast > 0) this.uploadBudget = Math.max(UPLOAD_MIN, this.uploadBudget / 2);
+		}
+		this.windowFrames++;
+		if (ms > this.worstFrame) this.worstFrame = ms;
+		if (ms > 33) this.over33++;
+		if (ms > 50) this.over50++;
+		if (ms > 100) this.over100++;
+	}
+
+	private reportSharp(sharp: boolean) {
+		const wait = this.sharpWait;
+		if (!wait || this.flight) return;
+		const t = performance.now();
+		if (t - wait.since > 15000) this.sharpWait = null;
+		else if (sharp && t - this.lastZoomChange >= ZOOM_SETTLE_MS) {
+			this.sharpWait = null;
+			this.emit({ type: "sharp", cause: wait.cause, ms: t - wait.since });
+		}
 	}
 
 	/** Highlight opacity from its fade-in and any flash pulse. */
@@ -2167,7 +2416,9 @@ export class ViewerCore {
 		return false;
 	}
 
+	/** Returns whether every visible page is drawn at the target scale. */
 	private draw(visible: number[], now: number) {
+		let sharp = true;
 		const gl = this.gl;
 		const S = this.cam.zoom * this.dpr;
 		const target = this.targetScale;
@@ -2188,8 +2439,14 @@ export class ViewerCore {
 			const r = this.layout[p]!;
 			const sx = (r.x - this.cam.x) * S;
 			const sy = (r.y - this.cam.y) * S;
-			gl.drawRect(sx - 1, sy - 1, r.w * S + 2, r.h * S + 2, [0, 0, 0, 0.12], "alpha");
-			gl.drawRect(sx, sy, r.w * S, r.h * S, dark ? [paper[0], paper[1], paper[2], 1] : [1, 1, 1, 1]);
+			const pw = r.w * S;
+			const ph = r.h * S;
+			// The 1px page edge as four strips: a blended quad under the whole page costs a full-page blend on fill-bound GPUs.
+			gl.drawRect(sx - 1, sy - 1, pw + 2, 1, PAGE_EDGE, "alpha");
+			gl.drawRect(sx - 1, sy + ph, pw + 2, 1, PAGE_EDGE, "alpha");
+			gl.drawRect(sx - 1, sy, 1, ph, PAGE_EDGE, "alpha");
+			gl.drawRect(sx + pw, sy, 1, ph, PAGE_EDGE, "alpha");
+			gl.drawRect(sx, sy, pw, ph, dark ? [paper[0], paper[1], paper[2], 1] : WHITE);
 
 			// Visible part of the page in page points, to skip off-screen tiles.
 			const vx0 = view.x0 - r.x;
@@ -2205,7 +2462,10 @@ export class ViewerCore {
 			// Coarse first, the target scale last so it ends up on top.
 			ready.sort((a, b) => (a.scale === target ? 1 : 0) - (b.scale === target ? 1 : 0) || a.scale - b.scale);
 			// If the target scale fully covers the view, skip the fallbacks.
-			const start = this.coveredByTarget(p, ready, target) ? ready.findIndex((t) => t.scale === target) : 0;
+			const covered = this.coveredByTarget(p, ready, target);
+			const start = covered ? ready.findIndex((t) => t.scale === target) : 0;
+			const base = this.baseScale(p);
+			if (!covered && !(target <= base && ready.some((t) => t.scale === base))) sharp = false;
 			const drawTiles = () => {
 				for (let i = Math.max(0, start); i < ready.length; i++) {
 					const t = ready[i]!;
@@ -2221,7 +2481,7 @@ export class ViewerCore {
 					t.lastUsed = this.frameId;
 					if (!this.painted) {
 						this.painted = true;
-						this.emit({ type: "painted", page: p });
+						this.emit({ type: "painted", page: p, timing: { firstTileAt: this.firstTileAt || epochNow(), paintedAt: epochNow() } });
 					}
 				}
 			};
@@ -2328,6 +2588,27 @@ export class ViewerCore {
 				gl.drawCircle(e.x * d, knob * d, HANDLE_R * d, c);
 			});
 		}
+		return sharp;
+	}
+
+	/**
+	 * Benches only: tile jobs finished since the last call, and how much of the
+	 * visible page area shows any bitmap (`drawn`) or a target-scale one (`sharp`).
+	 */
+	debugProbe() {
+		const view = this.viewRect();
+		let area = 0;
+		let drawn = 0;
+		for (const p of this.pagesIn(view)) {
+			const r = this.layout[p]!;
+			const a = Math.max(0, Math.min(view.x1, r.x + r.w) - Math.max(view.x0, r.x)) * Math.max(0, Math.min(view.y1, r.y + r.h) - Math.max(view.y0, r.y));
+			area += a;
+			if (this.hasPageBitmap(p)) drawn += a;
+			else drawn += a * this.coverage([p]);
+		}
+		const log = this.tileLog;
+		this.tileLog = [];
+		return { drawn: area ? drawn / area : 1, sharp: this.coverage(this.pagesIn(view)), pending: this.pool.pending, textureMB: this.gl.textureBytes / 1048576, workerMB: this.pool.heapBytes / 1048576, log };
 	}
 
 	private coveredByTarget(page: number, ready: Tile[], target: number) {
@@ -2379,7 +2660,7 @@ export class ViewerCore {
 	private reportStats(now: number) {
 		if (now - this.lastStats < 500) return;
 		this.lastStats = now;
-		const ft = [...this.frameTimes].sort((a, b) => a - b);
+		const ft = this.frameTimes.sort((a, b) => a - b);
 		const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 		const total = this.frameTimes.reduce((a, b) => a + b, 0);
 		this.emit({
@@ -2387,7 +2668,12 @@ export class ViewerCore {
 			stats: {
 				fps: total > 0 ? (this.frameTimes.length * 1000) / total : 0,
 				p95FrameMs: ft[Math.floor(ft.length * 0.95)] ?? 0,
-				worstFrameMs: ft[ft.length - 1] ?? 0,
+				worstFrameMs: this.worstFrame,
+				frames: this.windowFrames,
+				framesOver33: this.over33,
+				framesOver50: this.over50,
+				framesOver100: this.over100,
+				uploadPeakBytes: this.uploadPeak,
 				avgCpuMs: avg(this.cpuTimes),
 				tiles: this.tiles.size,
 				textureMB: this.gl.textureBytes / 1048576,
@@ -2401,5 +2687,6 @@ export class ViewerCore {
 		this.frameTimes = [];
 		this.cpuTimes = [];
 		this.tileMs = [];
+		this.windowFrames = this.worstFrame = this.over33 = this.over50 = this.over100 = this.uploadPeak = 0;
 	}
 }
