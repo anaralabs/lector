@@ -29,7 +29,14 @@ const med = (a) => {
 	return s.length ? s[Math.floor(s.length / 2)] : Number.NaN;
 };
 
+async function settleNetwork(page) {
+	await page.evaluate(() => window.__viewer?.destroy()).catch(() => {});
+	await page.goto("about:blank");
+	for (let i = 0; i < 100 && Number(await fetch(`${base}/__active`).then((r) => r.text())) > 0; i++) await new Promise((r) => setTimeout(r, 100));
+}
+
 async function measure(page, tag, q = query) {
+	await settleNetwork(page);
 	await api(`/__config?mbit=${mbit}&rtt=${rtt}`);
 	await fetch(`${base}/__reset`);
 	const errors = [];

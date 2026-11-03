@@ -30,6 +30,8 @@ const types = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/ja
 let log = [];
 let requests = [];
 let nextId = 1;
+/** responses still being written (a page that left must not keep the pipe busy for the next) */
+let active = 0;
 
 // One shared pipe: a byte budget refilled at `mbit`, consumed by every response.
 let budget = 0;
@@ -87,6 +89,10 @@ const server = http2.createSecureServer({ key: readFileSync(join(certDir, "key.p
 		log = [];
 		requests = [];
 		res.end("ok");
+		return;
+	}
+	if (url.startsWith("/__active")) {
+		res.end(String(active));
 		return;
 	}
 	if (url.startsWith("/__log")) {
@@ -156,6 +162,7 @@ const server = http2.createSecureServer({ key: readFileSync(join(certDir, "key.p
 	}
 	const fh = await open(file, "r");
 	let closed = false;
+	active++;
 	res.on("close", () => (closed = true));
 	try {
 		for (let pos = start; pos < end && !closed; pos += CHUNK) {
@@ -168,6 +175,7 @@ const server = http2.createSecureServer({ key: readFileSync(join(certDir, "key.p
 			if (isPdf) log.push([Date.now(), n, url.split("?")[0], id]);
 		}
 	} finally {
+		active--;
 		await fh.close();
 		if (!closed) res.end();
 	}

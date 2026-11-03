@@ -209,10 +209,10 @@ const TAIL_BYTES = 64 * 1024;
 
 type Opened = { blob: Blob } | { length: number; seeds: [number, Uint8Array][] };
 
-async function rangeBytes(url: string, start: number, end: number): Promise<Uint8Array | null> {
+async function rangeBytes(url: string, start: number, end: number, signal?: AbortSignal): Promise<Uint8Array | null> {
 	try {
 		// no-store: the HTTP cache lets one request per URL through at a time, which would serialise these
-		const res = await fetch(url, { credentials: "same-origin", cache: "no-store", headers: { Range: `bytes=${start}-${end - 1}` } });
+		const res = await fetch(url, { credentials: "same-origin", cache: "no-store", headers: { Range: `bytes=${start}-${end - 1}` }, signal });
 		if (res.status !== 206) return null;
 		const bytes = new Uint8Array(await res.arrayBuffer());
 		return bytes.length === end - start ? bytes : null;
@@ -235,6 +235,7 @@ class SeedBlocks {
 	constructor(
 		private url: string,
 		private length: number,
+		private signal?: AbortSignal,
 	) {}
 
 	add(start: number, bytes: Uint8Array) {
@@ -257,7 +258,7 @@ class SeedBlocks {
 			if (last && last[1] === s) last[1] = Math.min(this.length, s + RANGE_BLOCK);
 			else runs.push([s, Math.min(this.length, s + RANGE_BLOCK)]);
 		}
-		await Promise.all(runs.map(([s, e]) => rangeBytes(this.url, s, e).then((b) => b && this.add(s, b))));
+		await Promise.all(runs.map(([s, e]) => rangeBytes(this.url, s, e, this.signal).then((b) => b && this.add(s, b))));
 	}
 
 	bytes(start: number, end: number): Uint8Array | null {
@@ -317,17 +318,17 @@ async function prefetchPagePath(store: SeedBlocks, tailStart: number, target: nu
 	if (path) await store.ensure(path.map((o) => [o, o + OBJECT_BYTES]));
 }
 
-async function openUrl(url: string, range: boolean, firstPage: boolean, target: number | ((count: number) => number) = 0): Promise<Opened> {
-	const download = async () => ({ blob: await readBlob(await fetchPdf(url), url) });
+async function openUrl(url: string, range: boolean, firstPage: boolean, target: number | ((count: number) => number), signal: AbortSignal): Promise<Opened> {
+	const download = async () => ({ blob: await readBlob(await fetchPdf(url, { signal }), url) });
 	if (!range) return download();
 	// A server that refuses the ranged request (e.g. a CORS preflight for `Range`) still serves the plain one.
-	const res = await fetchPdf(url, { headers: { Range: `bytes=0-${HEAD_BYTES - 1}` } }).catch(() => null);
+	const res = await fetchPdf(url, { headers: { Range: `bytes=0-${HEAD_BYTES - 1}` }, signal }).catch(() => null);
 	if (!res) return download();
 	const verdict = probeVerdict({ status: res.status, contentRange: res.headers.get("Content-Range"), contentEncoding: res.headers.get("Content-Encoding") });
 	if (verdict.kind === "full-body") return { blob: await readBlob(res, url) };
 	let length = verdict.kind === "range" ? verdict.length : 0;
 	if (verdict.kind === "need-length") {
-		const head = await fetch(url, { method: "HEAD", credentials: "same-origin" }).catch(() => null);
+		const head = await fetch(url, { method: "HEAD", credentials: "same-origin", signal }).catch(() => null);
 		length = Number(head?.ok ? head.headers.get("Content-Length") : 0) || 0;
 	}
 	const headBytes = length > 0 ? await res.arrayBuffer().then((b) => new Uint8Array(b)).catch(() => null) : null;
@@ -335,7 +336,7 @@ async function openUrl(url: string, range: boolean, firstPage: boolean, target: 
 		void res.body?.cancel().catch(() => {});
 		return download();
 	}
-	const store = new SeedBlocks(url, length);
+	const store = new SeedBlocks(url, length, signal);
 	store.add(0, headBytes);
 	const lin = readLinearization(headBytes, length);
 	const tailStart = Math.floor(Math.max(0, length - TAIL_BYTES) / RANGE_BLOCK) * RANGE_BLOCK;
@@ -427,11 +428,13 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	const targetFraction = target && "fraction" in target ? target.fraction : undefined;
 	const sizeHint: SizeHint = { all: false, pages: [targetPage], fraction: targetFraction };
 	let opening: Promise<void>;
+	// Every download this viewer starts (probe, seeds, the background full file) stops with it.
+	const network = new AbortController();
 	if (typeof source === "string") {
 		const absolute = new URL(source, location.href).href;
 		const firstPage = targetFraction === undefined && !coreOptions.initialOffset && !coreOptions.initialCamera && !targetPage;
 		const pathTarget = targetFraction !== undefined ? (count: number) => targetFraction * count : targetPage;
-		opening = openUrl(absolute, rangeLoading, firstPage, pathTarget).then((opened) => {
+		opening = openUrl(absolute, rangeLoading, firstPage, pathTarget, network.signal).then((opened) => {
 			if ("blob" in opened) blob = opened.blob;
 			docSource = blob
 				? { kind: "blob", blob }
@@ -460,7 +463,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	};
 	// Everything acquired from here on is released in reverse order by `destroy`,
 	// or right away if construction fails part-way (the caller gets no viewer).
-	const cleanups: (() => void)[] = [];
+	const cleanups: (() => void)[] = [() => network.abort()];
 	let destroyed = false;
 	const release = () => {
 		for (const fn of cleanups.splice(0).reverse()) {
@@ -547,7 +550,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			if (blob) return Promise.resolve(blob);
 			const url = (docSource as { url: string }).url;
 			// Low priority: it must not slow down range requests for what is on screen.
-			fullFetch ??= fetchPdf(url, { priority: "low" } as RequestInit)
+			fullFetch ??= fetchPdf(url, { priority: "low", signal: network.signal } as RequestInit)
 				.then((res) => readBlob(res, url))
 				.then(
 					(b) => {
