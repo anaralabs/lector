@@ -20,6 +20,7 @@ import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
 import type { DocSource, DocumentInfo, OutlineItem, PageSize, SizeHint, ToRaster } from "./protocol";
 import { probeVerdict, RANGE_BLOCK, readLinearization } from "./range";
+import { findStartxref, pagePathObjects, parseXref } from "./xref";
 import { getEngineSupport } from "./support";
 import type { Rect, TextPoint } from "./text";
 import { TextLayer, type TextLayerLine } from "./text-layer";
@@ -210,7 +211,8 @@ type Opened = { blob: Blob } | { length: number; seeds: [number, Uint8Array][] }
 
 async function rangeBytes(url: string, start: number, end: number): Promise<Uint8Array | null> {
 	try {
-		const res = await fetch(url, { credentials: "same-origin", headers: { Range: `bytes=${start}-${end - 1}` } });
+		// no-store: the HTTP cache lets one request per URL through at a time, which would serialise these
+		const res = await fetch(url, { credentials: "same-origin", cache: "no-store", headers: { Range: `bytes=${start}-${end - 1}` } });
 		if (res.status !== 206) return null;
 		const bytes = new Uint8Array(await res.arrayBuffer());
 		return bytes.length === end - start ? bytes : null;
@@ -227,7 +229,95 @@ async function rangeBytes(url: string, start: number, end: number): Promise<Uint
  * sent the whole file, which is used as is (nothing is downloaded twice).
  * Servers that hide `Content-Range` from CORS get a HEAD for the length.
  */
-async function openUrl(url: string, range: boolean, firstPage: boolean): Promise<Opened> {
+/** Aligned blocks the main thread fetched, handed to every worker as seeds. */
+class SeedBlocks {
+	blocks = new Map<number, Uint8Array>();
+	constructor(
+		private url: string,
+		private length: number,
+	) {}
+
+	add(start: number, bytes: Uint8Array) {
+		for (let s = Math.ceil(start / RANGE_BLOCK) * RANGE_BLOCK; s < start + bytes.length; s += RANGE_BLOCK) {
+			const e = Math.min(this.length, s + RANGE_BLOCK);
+			if (e <= start + bytes.length) this.blocks.set(s, bytes.subarray(s - start, e - start));
+		}
+	}
+
+	/** Fetches the missing blocks covering each [start, end) in parallel, coalescing neighbours. */
+	async ensure(spans: [number, number][]) {
+		const missing = new Set<number>();
+		for (const [start, end] of spans) {
+			for (let s = Math.floor(start / RANGE_BLOCK) * RANGE_BLOCK; s < Math.min(end, this.length); s += RANGE_BLOCK) if (!this.blocks.has(s)) missing.add(s);
+		}
+		const sorted = [...missing].sort((a, b) => a - b);
+		const runs: [number, number][] = [];
+		for (const s of sorted) {
+			const last = runs[runs.length - 1];
+			if (last && last[1] === s) last[1] = Math.min(this.length, s + RANGE_BLOCK);
+			else runs.push([s, Math.min(this.length, s + RANGE_BLOCK)]);
+		}
+		await Promise.all(runs.map(([s, e]) => rangeBytes(this.url, s, e).then((b) => b && this.add(s, b))));
+	}
+
+	bytes(start: number, end: number): Uint8Array | null {
+		end = Math.min(end, this.length);
+		const out = new Uint8Array(end - start);
+		for (let s = Math.floor(start / RANGE_BLOCK) * RANGE_BLOCK; s < end; s += RANGE_BLOCK) {
+			const b = this.blocks.get(s);
+			if (!b) return null;
+			const from = Math.max(start, s);
+			const to = Math.min(end, s + b.length);
+			out.set(b.subarray(from - s, to - s), from - start);
+		}
+		return out;
+	}
+
+	seeds(): [number, Uint8Array][] {
+		return [...this.blocks];
+	}
+}
+
+/** bytes read at an object's offset: a page dictionary, or a page tree node with its /Kids */
+const OBJECT_BYTES = 4 * 1024;
+const NODE_BYTES = 64 * 1024;
+/** a cross-reference table larger than this is left to the workers */
+const MAX_XREF_BYTES = 4 * 1024 * 1024;
+
+/**
+ * PDFium reaches a page through the page tree, reading each kid before it
+ * with its own synchronous request; in a flat tree, page 300 costs 300 round
+ * trips. Read that path here instead: the xref table (in the tail) gives the
+ * offsets, and the kids are fetched in parallel.
+ */
+async function prefetchPagePath(store: SeedBlocks, tailStart: number, target: number | ((count: number) => number)) {
+	const tail = store.bytes(tailStart, Number.MAX_SAFE_INTEGER);
+	if (!tail) return;
+	const startxref = findStartxref(tail);
+	if (startxref === null || startxref >= tailStart + tail.length) return;
+	if (startxref < tailStart) {
+		if (tailStart - startxref > MAX_XREF_BYTES) return;
+		await store.ensure([[startxref, tailStart]]);
+	}
+	const from = Math.floor(Math.min(startxref, tailStart) / RANGE_BLOCK) * RANGE_BLOCK;
+	const table = store.bytes(from, Number.MAX_SAFE_INTEGER);
+	const xref = table && parseXref(table, from, startxref);
+	if (!xref) return;
+	const read = async (num: number, offset: number, size = NODE_BYTES) => {
+		await store.ensure([[offset, offset + size]]);
+		return store.bytes(offset, offset + size);
+	};
+	const path = await pagePathObjects(xref, target, {
+		read: (num, offset) => read(num, offset),
+		readMany: async (objects) => {
+			await store.ensure(objects.map(([, o]) => [o, o + OBJECT_BYTES]));
+			return objects.map(([, o]) => store.bytes(o, o + OBJECT_BYTES));
+		},
+	});
+	if (path) await store.ensure(path.map((o) => [o, o + OBJECT_BYTES]));
+}
+
+async function openUrl(url: string, range: boolean, firstPage: boolean, target: number | ((count: number) => number) = 0): Promise<Opened> {
 	const download = async () => ({ blob: await readBlob(await fetchPdf(url), url) });
 	if (!range) return download();
 	// A server that refuses the ranged request (e.g. a CORS preflight for `Range`) still serves the plain one.
@@ -245,17 +335,18 @@ async function openUrl(url: string, range: boolean, firstPage: boolean): Promise
 		void res.body?.cancel().catch(() => {});
 		return download();
 	}
-	const seeds: [number, Uint8Array][] = [[0, headBytes]];
+	const store = new SeedBlocks(url, length);
+	store.add(0, headBytes);
 	const lin = readLinearization(headBytes, length);
-	const extra: Promise<void>[] = [];
 	const tailStart = Math.floor(Math.max(0, length - TAIL_BYTES) / RANGE_BLOCK) * RANGE_BLOCK;
-	if (tailStart >= headBytes.length) extra.push(rangeBytes(url, tailStart, length).then((b) => void (b && seeds.push([tailStart, b]))));
-	if (lin && firstPage && lin.firstPageEnd > headBytes.length) {
-		const end = Math.min(length, Math.ceil(lin.firstPageEnd / RANGE_BLOCK) * RANGE_BLOCK);
-		extra.push(rangeBytes(url, headBytes.length, end).then((b) => void (b && seeds.push([headBytes.length, b]))));
-	}
-	await Promise.all(extra);
-	return { length, seeds };
+	const firstPageEnd = lin && firstPage ? Math.min(length, Math.ceil(lin.firstPageEnd / RANGE_BLOCK) * RANGE_BLOCK) : 0;
+	await store.ensure([
+		[tailStart, length],
+		[headBytes.length, firstPageEnd],
+	]);
+	// A linearized file opening on its first page has it all in the head section already.
+	if (!firstPageEnd) await prefetchPagePath(store, tailStart, target).catch(() => {});
+	return { length, seeds: store.seeds() };
 }
 
 /** the other raster workers wait at most this long for the first one to open the document */
@@ -339,7 +430,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	if (typeof source === "string") {
 		const absolute = new URL(source, location.href).href;
 		const firstPage = targetFraction === undefined && !coreOptions.initialOffset && !coreOptions.initialCamera && !targetPage;
-		opening = openUrl(absolute, rangeLoading, firstPage).then((opened) => {
+		const pathTarget = targetFraction !== undefined ? (count: number) => targetFraction * count : targetPage;
+		opening = openUrl(absolute, rangeLoading, firstPage, pathTarget).then((opened) => {
 			if ("blob" in opened) blob = opened.blob;
 			docSource = blob
 				? { kind: "blob", blob }

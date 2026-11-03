@@ -58,4 +58,4 @@ export function readLinearization(head: Uint8Array, fileLen: number): { firstPag
 }
 
 /** block size for range reads (a worker's cache and the main thread's seeds align to it) */
-export const RANGE_BLOCK = 64 * 1024;
+export const RANGE_BLOCK = 16 * 1024;

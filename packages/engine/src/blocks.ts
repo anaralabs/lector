@@ -40,7 +40,7 @@ export class BlockCache {
 		this.length = length;
 		this.source = source;
 		this.max = o.max ?? 24 * 1024 * 1024;
-		this.maxRun = o.maxRun ?? 16;
+		this.maxRun = o.maxRun ?? 64;
 		this.onFetched = o.onFetched;
 	}
 
