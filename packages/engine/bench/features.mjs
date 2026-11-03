@@ -256,6 +256,32 @@ await page.goto(fixture("cadbots.pdf", `&offset=${pos.state.top}`));
 await page.waitForFunction(() => window.__paintedMs !== undefined);
 const restored = await page.evaluate(() => window.__viewer.scrollState());
 check("initialOffset restores scroll", Math.abs(restored.top - pos.state.top) < 1, `${restored.top.toFixed(0)} vs ${pos.state.top.toFixed(0)}`);
+// Why a jump did not land: user input, a newer jump, or no target.
+await page.evaluate(() => {
+	window.__outcomes = () => window.__flights.splice(0).map((f) => (f.landed ? "landed" : f.cause)).join(",");
+	window.__outcomes();
+	window.__jump = window.__viewer.goToPage(22, 0, { animate: true });
+});
+await page.mouse.move(640, 430);
+await page.mouse.wheel(0, 120);
+const causes = await page.evaluate(async () => {
+	const v = window.__viewer;
+	const wheel = [await window.__jump, window.__outcomes()];
+	const zoomed = v.goToPage(2, 0, { animate: true });
+	v.zoomTo(1.3);
+	const zoom = [await zoomed, window.__outcomes()];
+	v.fitWidth();
+	const first = v.goToPage(20, 0, { animate: true });
+	const second = v.goToPage(10, 0, { animate: true });
+	const jump = [await first, await second, window.__outcomes()];
+	const missing = [await v.goToPage(9999, 0, { animate: true }), window.__outcomes()];
+	return { wheel, zoom, jump, missing };
+});
+check(
+	"flight cause: input, newer jump, no target",
+	causes.wheel.join() === "false,input" && causes.zoom.join() === "false,input" && causes.jump.join() === "false,true,jump,landed" && causes.missing.join() === "false,no-target",
+	JSON.stringify(causes),
+);
 const fz = await page.evaluate(async () => {
 	const hits = await window.__viewer.search("programmable matter", 30, { fuzzy: { threshold: 0.8 } });
 	const exact = hits.filter((h) => h.exact);
