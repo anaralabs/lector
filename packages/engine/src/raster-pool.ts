@@ -199,7 +199,6 @@ export class RasterPool {
 		const jobs = [...this.queue.values()].sort((a, b) => a.priority - b.priority);
 		const free = this.lanes.map((l) => (!l.ready ? Infinity : this.remaining(l, now)));
 		const pages = this.lanes.map((l) => new Set(l.pages));
-		let idle = this.lanes.filter((l) => l.ready && !l.busy).length;
 		const taken = new Set<Lane>();
 		let urgentWaiting = 0;
 		for (let j = 0; j < jobs.length && j < LOOKAHEAD; j++) {
@@ -224,7 +223,6 @@ export class RasterPool {
 			}
 			taken.add(lane);
 			this.dispatch(lane, job, now);
-			if (--idle === 0) break;
 		}
 		if (urgentWaiting) this.cancelUnwanted(urgentWaiting);
 	}

@@ -145,3 +145,16 @@ test("a vector-like page (cost follows content) keeps no overhead", () => {
 	assert.ok(pool.predict(4).overhead < 5);
 	assert.ok(pool.predict(4).ms > 70);
 });
+
+test("a waiting visible job cancels an unwanted render even when another worker just took work", () => {
+	const { pool, ports, tile } = setup(2);
+	tile("old", 3, 30);
+	pool.pump();
+	assert.equal(ports[0]!.busy?.page, 3);
+	pool.retain(new Set(["v1", "v2"]));
+	tile("v1", 1, 10);
+	tile("v2", 2, 10.1);
+	pool.pump();
+	assert.equal(ports[1]!.busy?.page, 1);
+	assert.ok(ports[0]!.sent.some((m) => m.t === "cancel"));
+});

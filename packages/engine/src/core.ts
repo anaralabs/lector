@@ -1836,7 +1836,8 @@ export class ViewerCore {
 			const h = Math.round(size.h * s);
 			if (keep.has(this.tileKey(p, s, 0, 0))) return;
 			// A heavy page about to be blank shows a coarse pass while its base renders; scans gain nothing (decode-bound).
-			if ((pin || shown.has(p)) && !this.tiles.get(this.tileKey(p, s, 0, 0))?.tex) {
+			const base = this.tiles.get(this.tileKey(p, s, 0, 0));
+			if ((pin || shown.has(p)) && !base?.tex && !base?.arrived) {
 				const cost = this.pool.predict(p);
 				const ps = s / PREVIEW_DIV;
 				if (cost.ms > PREVIEW_MS && cost.overhead < cost.ms * 0.3) this.ensureTile(p, ps, 0, 0, Math.max(1, Math.round(size.w * ps)), Math.max(1, Math.round(size.h * ps)), priority - 0.5, keep, pin);
