@@ -541,6 +541,7 @@ function getBlock(_param: number, position: number, buf: number, size: number): 
 }
 
 function loadDocument(password: string | undefined) {
+	const t0 = performance.now();
 	if (!fileAccess) {
 		// FPDF_FILEACCESS { unsigned long m_FileLen; GetBlock* m_GetBlock; void* m_Param; }
 		const fn = (P.pdfium as unknown as { addFunction: (f: (...a: number[]) => number, sig: string) => number }).addFunction(getBlock, "iiiii");
@@ -572,7 +573,7 @@ function loadDocument(password: string | undefined) {
 	pageCount = P.FPDF_GetPageCount(doc);
 	// Sizes come from the page tree without parsing page content.
 	if (allSizes) for (let i = 0; i < pageCount; i++) sizeOf(i);
-	send({ t: "opened", pages: allSizes ? pageSizes : [], info: readInfo(password) });
+	send({ t: "opened", pages: allSizes ? pageSizes : [], info: readInfo(password), wasmMs, wasmShared, openMs: performance.now() - t0 });
 }
 
 function readInfo(password: string | undefined): DocumentInfo {
@@ -612,7 +613,9 @@ class RetryableHttpError extends Error {}
 async function instantiatePdfium(wasmUrl: string, imports: WebAssembly.Imports, compiled?: WebAssembly.Module): Promise<WebAssembly.WebAssemblyInstantiatedSource> {
 	if (compiled) {
 		try {
-			return { instance: await WebAssembly.instantiate(compiled, imports), module: compiled };
+			const instance = await WebAssembly.instantiate(compiled, imports);
+			sharedModuleUsed = true;
+			return { instance, module: compiled };
 		} catch (err) {
 			// out of memory will not improve by compiling again
 			if (err instanceof RangeError) throw err;
@@ -632,6 +635,10 @@ async function instantiatePdfium(wasmUrl: string, imports: WebAssembly.Imports, 
 		}
 	}
 }
+
+let wasmMs: number | undefined;
+let wasmShared = false;
+let sharedModuleUsed = false;
 
 function loadPdfium(wasmUrl: string, compiled?: WebAssembly.Module): Promise<Pdfium> {
 	return new Promise<Pdfium>((resolve, reject) => {
@@ -662,8 +669,11 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 		}
 	};
 	try {
+		const t0 = performance.now();
 		P = await loadPdfium(msg.wasmUrl, msg.module);
 		P.PDFiumExt_Init();
+		wasmMs = performance.now() - t0;
+		wasmShared = sharedModuleUsed;
 	} catch (err) {
 		send({ t: "error", message: `lector-engine: pdfium.wasm failed to load from ${msg.wasmUrl}: ${String((err as Error)?.message ?? err)}`, code: "wasm", phase: "engine-load" });
 		return;

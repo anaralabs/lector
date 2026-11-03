@@ -84,8 +84,18 @@ export interface OutlineItem {
 	children: OutlineItem[];
 }
 
+/** the first raster worker's open path (worker-local durations) */
+export interface OpenTiming {
+	/** instantiating pdfium.wasm, including the download and compile when no preloaded module was shared */
+	wasmMs: number;
+	/** a preloaded module was shared with the worker */
+	wasmShared: boolean;
+	/** PDFium opening the document and reading the page sizes */
+	openMs: number;
+}
+
 export type FromRaster =
-	| { t: "opened"; pages: PageSize[]; info: DocumentInfo }
+	| ({ t: "opened"; pages: PageSize[]; info: DocumentInfo } & Partial<OpenTiming>)
 	| { t: "error"; message: string; code: ErrorCode; phase: ErrorPhase; id?: number }
 	/** heap: the worker's WASM heap plus its block cache, in bytes */
 	| { t: "tile"; id: number; buf: ArrayBuffer; w: number; h: number; ms: number; heap: number }

@@ -7,7 +7,9 @@ import {
 	type Camera,
 	type CoreOptions,
 	defaultOptions,
+	epochNow,
 	type InputMsg,
+	type LoadTimings,
 	type PointerKind,
 	type PulseKind,
 	type Request,
@@ -18,7 +20,7 @@ import {
 } from "./core";
 import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
-import type { DocSource, DocumentInfo, OutlineItem, PageSize } from "./protocol";
+import type { DocSource, DocumentInfo, OpenTiming, OutlineItem, PageSize } from "./protocol";
 import { getEngineSupport } from "./support";
 import type { Rect, TextPoint } from "./text";
 import { TextLayer, type TextLayerLine } from "./text-layer";
@@ -282,16 +284,21 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		interceptFind = false,
 		...coreOptions
 	} = options;
+	const startedAt = epochNow();
 	// Workers may run from blob: URLs (host loaders), where relative URLs don't resolve.
 	const wasmUrl = new URL(wasmUrlOption, location.href).href;
 	// One Blob shared by every raster worker (posting a Blob does not copy it);
 	// workers read blocks from it on demand. Range loading starts from the URL.
 	let blob: Blob | null = null;
 	let docSource: DocSource;
+	let fetchMs = 0;
+	let fetchBytes = 0;
 	if (typeof source === "string") {
 		const absolute = new URL(source, location.href).href;
 		const opened = await openUrl(absolute, rangeLoading);
 		if ("blob" in opened) blob = opened.blob;
+		fetchMs = epochNow() - startedAt;
+		fetchBytes = blob?.size ?? 0;
 		docSource = blob ? { kind: "blob", blob } : { kind: "url", url: absolute, length: (opened as { length: number }).length, credentials: new URL(absolute).origin === location.origin };
 	} else {
 		blob = new Blob([(source instanceof Uint8Array ? source : new Uint8Array(source)) as Uint8Array<ArrayBuffer>], { type: "application/pdf" });
@@ -453,8 +460,18 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		});
 		// Only a module someone already compiled (preloadPdfium) is shared; compiling it here would land on the open path's main thread.
 		const pdfium = compiled.get(wasmUrl) ?? Promise.resolve(undefined);
+		const buildAt = epochNow();
+		let wasmWaitMs = 0;
+		let workerBootMs = 0;
+		void pdfium.then(() => {
+			wasmWaitMs = epochNow() - buildAt;
+		});
 		for (let i = 0; i < n; i++) {
 			const { current, booted } = spawn("raster", `lector-raster-${i}`);
+			if (i === 0)
+				void booted.then(() => {
+					workerBootMs = epochNow() - buildAt;
+				});
 			rasterWorkers.push(current);
 			const channel = new MessageChannel();
 			corePorts.push(channel.port2);
@@ -473,6 +490,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 
 		let selectedText = "";
 		let opened = false;
+		let readyAt = 0;
+		let openTiming: OpenTiming | undefined;
+		let loadTimings: LoadTimings | null = null;
 		let resolveLoaded: (v: { pages: PageSize[]; info: DocumentInfo }) => void = () => {};
 		let rejectLoaded: (err: EngineError) => void = () => {};
 		const loaded = new Promise<{ pages: PageSize[]; info: DocumentInfo }>((resolve, reject) => {
@@ -536,7 +556,27 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			} else if (e.type === "painted") {
 				// Range loading: the first page is up; now fetch the rest in the background.
 				if (autoFetch && !blob) void fetchAll().catch(() => {});
+				if (!loadTimings && readyAt) {
+					const paintedAt = e.timing?.paintedAt ?? epochNow();
+					loadTimings = {
+						fetchMs,
+						fetchBytes,
+						wasmWaitMs,
+						workerBootMs,
+						...openTiming,
+						readyMs: readyAt - startedAt,
+						firstTileMs: (e.timing?.firstTileAt ?? paintedAt) - startedAt,
+						firstPaintMs: paintedAt - startedAt,
+						rangeLoading: docSource.kind === "url",
+					};
+					if (onEvent) {
+						const load: CoreEvent = { type: "load", timings: loadTimings };
+						queueMicrotask(() => host(() => onEvent(load)));
+					}
+				}
 			} else if (e.type === "ready") {
+				readyAt ||= epochNow();
+				openTiming = e.timing;
 				opened = true;
 				layout = e.layout;
 				resolveLoaded({ pages: e.pages, info: e.info });
