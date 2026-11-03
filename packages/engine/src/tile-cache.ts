@@ -146,7 +146,8 @@ export class TileCache {
 	/** Queues a base bitmap for `writeNext` (a few wait; the farthest from `focus` are dropped). `pixels` must not be reused by the caller. */
 	put(page: number, scale: number, pixels: Uint8Array, w: number, h: number) {
 		const key = `${page}|${scale}|${w}|${h}`;
-		if (!this.enabled || this.keys.has(key) || this.writing.has(key)) return;
+		// queued while the database opens too; `disable` drops the queue if it never does
+		if (this.off || this.keys.has(key) || this.writing.has(key)) return;
 		this.writing.add(key);
 		this.queue.push({ id: key, page, pixels, w, h });
 		while (this.queue.length > this.maxQueued) this.writing.delete(this.queue.splice(this.pick(Math.max), 1)[0]!.id);

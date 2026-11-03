@@ -632,6 +632,7 @@ export class ViewerCore {
 		for (const tile of this.tiles.values()) if (tile.tex) this.gl.free(tile.tex, tile.w, tile.h);
 		this.tiles.clear();
 		this.tilesByPage.clear();
+		for (const { pixels } of this.arrived) if (!(pixels instanceof Uint8Array)) pixels.close();
 		this.arrived = [];
 		this.texts.clear();
 		this.textWaiters.clear();
@@ -1623,9 +1624,16 @@ export class ViewerCore {
 			case "select-all":
 				void this.selectAll(cmd.scope ?? "auto");
 				return;
-			case "tile-cache":
-				this.cache ??= new TileCache(cmd.key, cmd.budgetMB * 1024 * 1024, this.opts.textureBudgetMB <= 128 ? 2 : 4);
+			case "tile-cache": {
+				if (this.cache) return;
+				const cache = new TileCache(cmd.key, cmd.budgetMB * 1024 * 1024, this.opts.textureBudgetMB <= 128 ? 2 : 4);
+				this.cache = cache;
+				// tiles planned while it opened go to the cache now; bitmaps queued meanwhile get written
+				void cache.ready.then(() => {
+					if (!this.disposed && cache.enabled) this.requestFrame();
+				});
 				return;
+			}
 			case "options": {
 				const copyChanged = "copyOptions" in cmd.options && JSON.stringify(cmd.options.copyOptions) !== JSON.stringify(this.opts.copyOptions);
 				this.opts = { ...this.opts, ...cmd.options };
