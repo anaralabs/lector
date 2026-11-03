@@ -683,7 +683,11 @@ export class ViewerCore {
 				else if (last) this.pages[i] = last;
 			}
 		}
-		if (!changed && this.unknown > 0) return;
+		if (!changed && this.unknown > 0) {
+			// Same layout, but these pages may be drawn now.
+			if (resolved.length) this.requestFrame();
+			return;
+		}
 		const before = this.layout;
 		this.relayout();
 		if (changed && this.camReady) {
