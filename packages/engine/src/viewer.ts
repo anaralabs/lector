@@ -460,7 +460,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			corePorts.push(channel.port2);
 			Promise.all([booted, pdfium]).then(([worker, module]) => {
 				if (destroyed) return;
-				const init = { t: "init", source: docSource, port: channel.port1, wasmUrl, password, sizes: i === 0 } as const;
+				// A full file that arrived before this worker (e.g. during a respawn) replaces range requests.
+				const init = { t: "init", source: blob ? ({ kind: "blob", blob } as const) : docSource, port: channel.port1, wasmUrl, password, sizes: i === 0 } as const;
 				try {
 					worker.postMessage(module ? { ...init, module } : init, [channel.port1]);
 				} catch {
