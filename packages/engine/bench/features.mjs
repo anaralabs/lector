@@ -863,6 +863,24 @@ const fresh = await freshPage.evaluate(async (src) => {
 		el.remove();
 		return { before, landed, firstAtTarget: !!cam && cams.every((c) => Math.abs(c.y - cam.y) < 0.5), top: Math.round(top * 100) / 100, pending: core?.pending ?? null };
 	};
+	// A resize after ready anchors on the size the view had before ready.
+	const anchor = document.createElement("div");
+	anchor.style.cssText = "position:fixed;left:0;top:0;width:400px;height:300px";
+	document.body.appendChild(anchor);
+	const av = await createViewer(anchor, "/cadbots.pdf", { wasmUrl, workerUrls, createWorker: loader, offscreen: false, workers: 1 });
+	await av.loaded;
+	await new Promise((r) => setTimeout(r, 200));
+	av.zoomTo(3);
+	av.scrollToFraction(0.2);
+	const core = window.__core;
+	core.cam.x += 40;
+	const centre = () => core.cam.x + core.vw / 2 / core.cam.zoom;
+	const centreBefore = centre();
+	anchor.style.width = "300px";
+	await new Promise((r) => setTimeout(r, 200));
+	const centreShift = Math.abs(centre() - centreBefore);
+	av.destroy();
+	anchor.remove();
 	const hidden = await run(true, false);
 	const early = await run(false, true);
 	// Destroyed while waiting: the promise settles and the core lets go of it.
@@ -872,12 +890,12 @@ const fresh = await freshPage.evaluate(async (src) => {
 	const v = await createViewer(el, "/cadbots.pdf", { wasmUrl, workerUrls, createWorker: loader, offscreen: false, workers: 1 });
 	await v.loaded;
 	const jump = v.reveal(14, rect);
-	const core = window.__core;
-	const waiting = !!core.pending;
+	const waitingCore = window.__core;
+	const waiting = !!waitingCore.pending;
 	v.destroy();
 	el.remove();
 	const destroyed = await Promise.race([jump, new Promise((r) => setTimeout(() => r("pending"), 3000))]);
-	return { hidden, early, destroy: [waiting, destroyed, core.pending] };
+	return { hidden, early, destroy: [waiting, destroyed, waitingCore.pending], centreShift };
 }, new URL("../src", import.meta.url).pathname);
 await freshPage.close();
 check(
@@ -887,6 +905,7 @@ check(
 );
 check("jump before ready is the first frame", fresh.early.landed && fresh.early.firstAtTarget && fresh.early.top === 0.3, JSON.stringify(fresh.early));
 check("destroy while a jump waits", fresh.destroy.join() === "true,false,", JSON.stringify(fresh.destroy));
+check("resize after ready keeps the centre", fresh.centreShift < 0.5, `moved ${fresh.centreShift.toFixed(1)}pt`);
 
 check("no errors", errors.length === 0, errors.join(" | "));
 await browser.close();

@@ -964,10 +964,8 @@ export class ViewerCore {
 						f.fit = next.fit;
 					}
 				}
-				if (this.canAim()) {
-					this.measuredW = this.vw;
-					this.landPending();
-				}
+				if (this.vw > 0 && this.vh > 0) this.measuredW = this.vw;
+				this.landPending();
 				// Resizing clears the drawing buffer: draw synchronously so the
 				// new size never shows an empty frame.
 				this.dirty = true;
