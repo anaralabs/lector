@@ -4,6 +4,7 @@
 
 import { markColor } from "./colors";
 import { Compositor } from "./gl";
+import { uploadRank } from "./upload-rank";
 import type { DocumentInfo, ErrorCode, ErrorPhase, Link, LoadFailureDetail, OpenTiming, OutlineItem, PageSize } from "./protocol";
 import { RasterPool, type TextResult, type TileResult } from "./raster-pool";
 import { boundedDistance, foldQuery, insertRanked, matchPage, type RawMatch, type SearchOptions, splitLimit } from "./search";
@@ -1952,18 +1953,13 @@ export class ViewerCore {
 		if (tile.tex) this.gl.free(tile.tex, tile.w, tile.h);
 	}
 
-	/** 0: a visible page's base bitmap, 1: a visible sharp tile, 2: anything else */
-	private uploadRank(tile: Tile, visible: number[]) {
-		if (!visible.includes(tile.page)) return 2;
-		return tile.scale === this.baseScale(tile.page) ? 0 : tile.scale === this.targetScale ? 1 : 2;
-	}
 
 	/** Uploads arrived tiles, most visible first, within a byte budget so one frame never carries a burst. */
 	private uploadArrived(visible: number[]) {
 		const t0 = performance.now();
 		let bytes = 0;
 		// Off-screen pixels nothing plans any more are dropped; on-screen ones still serve as fallbacks (old zoom levels).
-		const stale = (tile: Tile) => tile.lastWanted !== this.frameId && !visible.includes(tile.page);
+		const stale = (tile: Tile) => tile.lastWanted !== this.frameId && (!visible.includes(tile.page) || tile.scale === this.targetScale);
 		if (this.arrived.some((a) => stale(a.tile))) {
 			this.arrived = this.arrived.filter(({ tile }) => {
 				if (!stale(tile)) return true;
@@ -1972,7 +1968,10 @@ export class ViewerCore {
 				return false;
 			});
 		}
-		if (this.arrived.length > 1) this.arrived.sort((a, b) => this.uploadRank(a.tile, visible) - this.uploadRank(b.tile, visible));
+		if (this.arrived.length > 1) {
+			const rank = (t: Tile) => uploadRank(t, visible, this.frameId, this.baseScale(t.page), this.targetScale);
+			this.arrived.sort((a, b) => rank(a.tile) - rank(b.tile));
+		}
 		while (this.arrived.length > 0 && performance.now() - t0 < UPLOAD_BUDGET_MS) {
 			const next = this.arrived[0]!;
 			if (bytes > 0 && bytes + next.pixels.byteLength > this.uploadBudget) break;
