@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { blockVerdict, probeVerdict, readLinearization, totalFromContentRange } from "../src/range.ts";
+import { blockVerdict, openErrorCode, probeVerdict, readLinearization, retryableBlockStatus, totalFromContentRange } from "../src/range.ts";
 
 test("Content-Range total, including when CORS hides it", () => {
 	assert.equal(totalFromContentRange("bytes 0-1023/52428800"), 52428800);
@@ -34,4 +34,18 @@ test("linearization dictionary", () => {
 	// Updated after linearizing: /L no longer matches, the hints are stale.
 	assert.equal(readLinearization(head, 52500000), null);
 	assert.equal(readLinearization(new TextEncoder().encode("%PDF-1.4\n1 0 obj\n<</Type/Catalog>>"), 100), null);
+});
+
+test("block: dropped connections, timeouts and server errors get another try; client errors do not", () => {
+	for (const status of [0, 408, 429, 500, 503]) assert.equal(retryableBlockStatus(status), true, String(status));
+	for (const status of [206, 200, 403, 404, 416]) assert.equal(retryableBlockStatus(status), false, String(status));
+});
+
+test("open: a block that could not be read is a fetch failure, not a broken file", () => {
+	assert.equal(openErrorCode(3, false), "parse");
+	assert.equal(openErrorCode(3, true), "fetch");
+	assert.equal(openErrorCode(2, true), "fetch");
+	assert.equal(openErrorCode(4, true), "password");
+	assert.equal(openErrorCode(5, false), "security");
+	assert.equal(openErrorCode(9, false), "unknown");
 });

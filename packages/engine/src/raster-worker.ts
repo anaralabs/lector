@@ -4,8 +4,8 @@
 
 import { BlockCache } from "./blocks";
 import { init, type Pdfium } from "./pdfium/pdfium.js";
-import type { DocSource, DocumentInfo, ErrorCode, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
-import { blockVerdict, RANGE_BLOCK } from "./range";
+import type { DocSource, DocumentInfo, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
+import { blockVerdict, openErrorCode, RANGE_BLOCK, retryableBlockStatus } from "./range";
 
 const FPDF_ANNOT = 0x01;
 const FPDF_REVERSE_BYTE_ORDER = 0x10; // RGBA instead of BGRA
@@ -541,8 +541,6 @@ function readImages(page: number, index: number, xf: Xf): { images: Float32Array
 	return { images: new Float32Array(out), scans: scans.size };
 }
 
-/** FPDF_GetLastError -> ErrorCode */
-const LOAD_ERRORS: Record<number, ErrorCode> = { 2: "file", 3: "parse", 4: "password", 5: "security" };
 const PDFIUM_ERRORS: LoadFailureDetail["pdfium"][] = ["success", "unknown", "file", "format", "password", "security", "page"];
 
 const latin1 = (bytes: Uint8Array) => String.fromCharCode(...bytes);
@@ -584,6 +582,8 @@ let pendingPassword: string | undefined;
 /** blocks other workers shared before this one had a cache */
 const early: [number, Uint8Array][] = [];
 let reader: FileReaderSync | null = null;
+/** the last block read that failed, cleared before each open */
+let readFailure: string | null = null;
 
 const heapBytes = () => heap().length + (cache?.bytes ?? 0);
 
@@ -593,12 +593,8 @@ function fetchBlock(start: number, end: number): Uint8Array {
 		reader ??= new FileReaderSync();
 		return new Uint8Array(reader.readAsArrayBuffer(src.blob.slice(start, end)));
 	}
-	const xhr = new XMLHttpRequest();
-	xhr.open("GET", src.url, false);
-	xhr.withCredentials = src.credentials;
-	xhr.responseType = "arraybuffer";
-	xhr.setRequestHeader("Range", `bytes=${start}-${end - 1}`);
-	xhr.send();
+	let xhr = rangeRequest(src, start, end);
+	if (retryableBlockStatus(xhr.status)) xhr = rangeRequest(src, start, end);
 	const buf = xhr.response as ArrayBuffer | null;
 	const verdict = blockVerdict(xhr.status, buf?.byteLength ?? 0, start, end, fileLen);
 	if (verdict === "ok") return new Uint8Array(buf!);
@@ -612,12 +608,25 @@ function fetchBlock(start: number, end: number): Uint8Array {
 	throw new Error(`range request ${start}-${end - 1} failed (HTTP ${xhr.status})`);
 }
 
+function rangeRequest(src: Extract<DocSource, { kind: "url" }>, start: number, end: number): XMLHttpRequest {
+	const xhr = new XMLHttpRequest();
+	xhr.open("GET", src.url, false);
+	xhr.withCredentials = src.credentials;
+	xhr.responseType = "arraybuffer";
+	xhr.setRequestHeader("Range", `bytes=${start}-${end - 1}`);
+	try {
+		xhr.send();
+	} catch {}
+	return xhr;
+}
+
 /** int GetBlock(void* param, unsigned long position, unsigned char* buf, unsigned long size) */
 function getBlock(_param: number, position: number, buf: number, size: number): number {
 	try {
 		return cache!.read(position >>> 0, size >>> 0, heap(), buf) ? 1 : 0;
 	} catch (err) {
-		console.error(`lector-engine: ${String((err as Error)?.message ?? err)}`);
+		readFailure = String((err as Error)?.message ?? err);
+		console.error(`lector-engine: ${readFailure}`);
 		return 0;
 	}
 }
@@ -633,16 +642,19 @@ function loadDocument(password: string | undefined) {
 		view[1] = fn;
 		view[2] = 0;
 	}
+	readFailure = null;
 	doc = P.FPDF_LoadCustomDocument(fileAccess, password ?? "");
 	if (!doc) {
 		const err = P.FPDF_GetLastError();
-		const code = LOAD_ERRORS[err] ?? "unknown";
+		const code = openErrorCode(err, readFailure !== null);
 		const message =
 			code === "password"
 				? password
 					? "Incorrect password: PDFium could not decrypt the document."
 					: "The document is password-protected."
-				: `PDFium could not open the document (${code === "unknown" ? `error ${err}` : code})`;
+				: code === "fetch"
+					? `Could not read the document: ${readFailure}`
+					: `PDFium could not open the document (${code === "unknown" ? `error ${err}` : code})`;
 		send({ t: "error", message, code, phase: "document-load", detail: loadFailureDetail(err) });
 		return;
 	}

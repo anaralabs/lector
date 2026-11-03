@@ -1,5 +1,7 @@
 // Decisions for HTTP range loading, kept free of I/O so tests run them in Node.
 
+import type { ErrorCode } from "./protocol";
+
 /** Total length from `Content-Range: bytes 0-1023/12345` (null when absent, unexposed by CORS, or `*`). */
 export function totalFromContentRange(header: string | null): number | null {
 	const total = Number(/\/(\d+)\s*$/.exec(header ?? "")?.[1]);
@@ -38,6 +40,24 @@ export function blockVerdict(status: number, received: number, start: number, en
 	// The server ignored the range and sent everything.
 	if (status === 200 && received === fileLen) return "full";
 	return "error";
+}
+
+/** A range read worth one more try: a dropped connection, a timeout, a rate limit or a server error. */
+export function retryableBlockStatus(status: number): boolean {
+	return status === 0 || status === 408 || status === 429 || status >= 500;
+}
+
+/** FPDF_GetLastError -> ErrorCode */
+const LOAD_ERRORS: Record<number, ErrorCode> = { 2: "file", 3: "parse", 4: "password", 5: "security" };
+
+/**
+ * Why `FPDF_LoadCustomDocument` failed. PDFium reports a block it could not
+ * read as a format error, so a failed read during the open means the bytes
+ * never arrived, not that the file is broken.
+ */
+export function openErrorCode(pdfiumError: number, readFailed: boolean): ErrorCode {
+	const code = LOAD_ERRORS[pdfiumError] ?? "unknown";
+	return readFailed && code !== "password" ? "fetch" : code;
 }
 
 /**
