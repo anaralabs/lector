@@ -104,7 +104,7 @@ Pages are **0-based** everywhere. Page-space geometry is in PDF points with a to
 | option | default | |
 | --- | --- | --- |
 | `wasmUrl` | required | URL of `pdfium.wasm` |
-| `workers` | half the cores, 2–4 (2 on touch devices) | PDFium raster workers |
+| `workers` | half the cores, 2–4 (2 with 4GB or less, 2 on touch devices, 1 on touch devices with 2GB or less) | PDFium raster workers |
 | `offscreen` | when supported | composite in a worker (`OffscreenCanvas`) |
 | `createWorker`, `workerUrls` | | see [Workers and the wasm](#workers-and-the-wasm) |
 | `onEvent(e)` | | every `CoreEvent` |

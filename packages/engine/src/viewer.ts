@@ -19,6 +19,7 @@ import {
 import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
 import type { DocSource, DocumentInfo, OutlineItem, PageSize } from "./protocol";
+import { rasterWorkerCount } from "./raster-pool";
 import { getEngineSupport } from "./support";
 import type { Rect, TextPoint } from "./text";
 import { TextLayer, type TextLayerLine } from "./text-layer";
@@ -26,7 +27,7 @@ import { TextLayer, type TextLayerLine } from "./text-layer";
 export interface ViewerOptions extends Partial<CoreOptions> {
 	/** URL of the package's `pdfium.wasm` (`@anaralabs/lector-engine/pdfium.wasm`) */
 	wasmUrl: string;
-	/** number of PDFium raster workers (default: half the cores, 2-4) */
+	/** number of PDFium raster workers (default: half the cores, 2-4; 2 on touch devices or with 4GB or less) */
 	workers?: number;
 	/** run the compositor in a worker with an OffscreenCanvas (default: when WebGL2 works on one) */
 	offscreen?: boolean;
@@ -444,7 +445,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		const motionQuery = coreOptions.reducedMotion === undefined && typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
 		if (motionQuery) coreOptions.reducedMotion = motionQuery.matches;
 		if (touchDevice) coreOptions.textureBudgetMB ??= 128;
-		const n = workerCount ?? (touchDevice ? 2 : Math.min(4, Math.max(2, Math.floor((navigator.hardwareConcurrency || 4) / 2))));
+		const n = workerCount ?? rasterWorkerCount({ cores: navigator.hardwareConcurrency, memoryGB: (navigator as { deviceMemory?: number }).deviceMemory, touch: touchDevice });
 		const rasterWorkers: (() => Worker)[] = [];
 		const corePorts: MessagePort[] = [];
 		cleanups.push(() => {

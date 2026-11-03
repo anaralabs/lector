@@ -317,6 +317,10 @@ interface PageRect {
 
 const TILE = 512;
 const BASE_MAX = 1024;
+/** a page whose base bitmap is predicted slower than this gets a quick low-res preview first */
+const PREVIEW_MS = 50;
+/** preview scale = base scale / PREVIEW_DIV (1/16 of the pixels) */
+const PREVIEW_DIV = 4;
 const ZOOM_SETTLE_MS = 180;
 const UPLOAD_BUDGET_MS = 2.5;
 const CLICK_SLOP = 4;
@@ -456,6 +460,8 @@ export class ViewerCore {
 	private frameTimes: number[] = [];
 	private cpuTimes: number[] = [];
 	private tileMs: number[] = [];
+	/** benches only (`debugProbe`): every finished tile job since the last probe */
+	private tileLog: { page: number; base: boolean; ms: number; waitMs: number }[] = [];
 	private lastStats = 0;
 	private lastView: { zoom: number; page: number; fit: Fit } = { zoom: 0, page: -1, fit: false };
 
@@ -702,7 +708,7 @@ export class ViewerCore {
 		const f = this.flight;
 		if (!f) return false;
 		if (f.start < 0) {
-			const ready = f.pages.every((p) => this.tiles.get(this.tileKey(p, this.baseScale(p), 0, 0))?.tex);
+			const ready = f.pages.every((p) => this.hasPageBitmap(p));
 			if (!ready && performance.now() - f.requested < FLIGHT_WAIT_MS) return true;
 			f.start = now;
 		}
@@ -1736,6 +1742,12 @@ export class ViewerCore {
 		return 2 ** Math.floor(Math.log2(BASE_MAX / Math.max(p.w, p.h)));
 	}
 
+	/** a whole-page bitmap (base or its preview) is on the GPU */
+	private hasPageBitmap(page: number) {
+		const s = this.baseScale(page);
+		return !!(this.tiles.get(this.tileKey(page, s, 0, 0))?.tex || this.tiles.get(this.tileKey(page, s / PREVIEW_DIV, 0, 0))?.tex);
+	}
+
 	private tileKey(page: number, scale: number, x: number, y: number) {
 		return `${page}:${scale}:${x}:${y}`;
 	}
@@ -1760,16 +1772,20 @@ export class ViewerCore {
 
 	private requestTile(tile: Tile, priority: number) {
 		const { key, page, scale, x, y, w, h } = tile;
+		const asked = performance.now();
+		const size = this.pages[page]!;
+		const frac = (w * h) / Math.max(1, Math.round(size.w * scale) * Math.round(size.h * scale));
 		this.pool.request(key, priority, { t: "tile", page, scale, x, y, w, h }, (res) => {
 			if (res.t === "error") tile.failed = true;
 			if (res.t !== "tile") return;
 			const r = res as TileResult;
 			this.tileMs.push(r.ms);
+			if (this.tileLog.length < 5000) this.tileLog.push({ page, base: scale <= this.baseScale(page), ms: r.ms, waitMs: performance.now() - asked });
 			if (this.tiles.get(key) !== tile || tile.tex || tile.arrived) return;
 			tile.arrived = true;
 			this.arrived.push({ tile, pixels: new Uint8Array(r.buf) });
 			this.requestFrame();
-		});
+		}, Math.min(1, frac));
 	}
 
 	/** Visible doc-space rect, optionally grown by a fraction of the viewport. */
@@ -1812,10 +1828,21 @@ export class ViewerCore {
 		const near = this.pagesIn(ahead);
 		const cx = (view.x0 + view.x1) / 2;
 		const cy = (view.y0 + view.y1) / 2;
+		const shown = new Set(targetVisible);
 		const baseTile = (p: number, priority: number, pin = false) => {
 			const s = this.baseScale(p);
 			const size = this.pages[p]!;
-			this.ensureTile(p, s, 0, 0, Math.round(size.w * s), Math.round(size.h * s), priority, keep, pin);
+			const w = Math.round(size.w * s);
+			const h = Math.round(size.h * s);
+			if (keep.has(this.tileKey(p, s, 0, 0))) return;
+			// A heavy page about to be blank shows a coarse pass while its base renders; scans gain nothing (decode-bound).
+			const base = this.tiles.get(this.tileKey(p, s, 0, 0));
+			if ((pin || shown.has(p)) && !base?.tex && !base?.arrived) {
+				const cost = this.pool.predict(p);
+				const ps = s / PREVIEW_DIV;
+				if (cost.ms > PREVIEW_MS && cost.overhead < cost.ms * 0.3) this.ensureTile(p, ps, 0, 0, Math.max(1, Math.round(size.w * ps)), Math.max(1, Math.round(size.h * ps)), priority - 0.5, keep, pin);
+			}
+			this.ensureTile(p, s, 0, 0, w, h, priority, keep, pin);
 		};
 
 		// 0. flight: base bitmaps along the path and at the destination (±1 page) first
@@ -1830,10 +1857,12 @@ export class ViewerCore {
 			for (const p of targetVisible) this.requestText(p, 5);
 		}
 
-		// 1. a whole-page base bitmap for everything near the viewport: never blank
+		// 1. a whole-page base bitmap for everything near the viewport: never blank.
+		// Pages past the look-ahead come after the visible sharp tiles.
 		const first = Math.max(0, (near[0] ?? 0) - 3);
 		const last = Math.min(this.layout.length - 1, (near[near.length - 1] ?? 0) + 3);
-		for (let p = first; p <= last; p++) baseTile(p, Math.abs(this.layout[p]!.y + this.layout[p]!.h / 2 - cy) / 1e6);
+		const nearSet = new Set(near);
+		for (let p = first; p <= last; p++) baseTile(p, (nearSet.has(p) ? 0 : 25) + Math.abs(this.layout[p]!.y + this.layout[p]!.h / 2 - cy) / 1e6);
 
 		// 2. sharp tiles: visible first (by distance from centre), then look-ahead.
 		// In flight, what passes by mid-way comes after the destination.
@@ -1857,6 +1886,8 @@ export class ViewerCore {
 						const y = ty * TILE;
 						const dx = r.x + (x + TILE / 2) / s - cx;
 						const dy = r.y + (y + TILE / 2) / s - cy;
+						// A later pass must not demote a tile an earlier one asked for (the pool keeps the last priority).
+						if (base !== 10 && keep.has(this.tileKey(p, s, x, y))) continue;
 						if (base !== 10 && !roomAhead && !this.tiles.has(this.tileKey(p, s, x, y))) continue;
 						const prio = base + Math.hypot(dx, dy) * cam.zoom * 1e-4;
 						this.ensureTile(p, s, x, y, Math.min(TILE, pw - x), Math.min(TILE, ph - y), prio, keep, !!flight && base === 10);
@@ -2157,6 +2188,26 @@ export class ViewerCore {
 				gl.drawCircle(e.x * d, knob * d, HANDLE_R * d, c);
 			});
 		}
+	}
+
+	/**
+	 * Benches only: tile jobs finished since the last call, and how much of the
+	 * visible page area shows any bitmap (`drawn`) or a target-scale one (`sharp`).
+	 */
+	debugProbe() {
+		const view = this.viewRect();
+		let area = 0;
+		let drawn = 0;
+		for (const p of this.pagesIn(view)) {
+			const r = this.layout[p]!;
+			const a = Math.max(0, Math.min(view.x1, r.x + r.w) - Math.max(view.x0, r.x)) * Math.max(0, Math.min(view.y1, r.y + r.h) - Math.max(view.y0, r.y));
+			area += a;
+			if (this.hasPageBitmap(p)) drawn += a;
+			else drawn += a * this.coverage([p]);
+		}
+		const log = this.tileLog;
+		this.tileLog = [];
+		return { drawn: area ? drawn / area : 1, sharp: this.coverage(this.pagesIn(view)), pending: this.pool.pending, textureMB: this.gl.textureBytes / 1048576, workerMB: this.pool.heapBytes / 1048576, log };
 	}
 
 	private coveredByTarget(page: number, ready: Tile[], target: number) {
