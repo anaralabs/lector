@@ -506,6 +506,7 @@ let fileLen = 0;
 let blockSize = BLOB_BLOCK;
 let cache: BlockCache | null = null;
 let fileAccess = 0;
+let pendingPassword: string | undefined;
 /** blocks other workers shared before this one had a cache */
 const early: [number, Uint8Array][] = [];
 let reader: FileReaderSync | null = null;
@@ -695,7 +696,11 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 			else if (m.t === "text") extractText(m);
 			else if (m.t === "outline") send({ t: "outline", id: m.id, items: readOutline(0, 0) });
 			else if (m.t === "sizes") readSizes(m);
-			else if (m.t === "unlock" && P && !doc && fileAccess) loadDocument(m.password);
+			else if (m.t === "unlock" && !doc) {
+				// Before pdfium is ready the password waits for the first open.
+				if (P && fileAccess) loadDocument(m.password);
+				else pendingPassword = m.password;
+			}
 		} catch (err) {
 			const id = "id" in m ? m.id : undefined;
 			send({ t: "error", message: String((err as Error)?.stack ?? err), code: "unknown", phase: m.t === "tile" ? "render" : "text", id });
@@ -725,7 +730,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 	};
 	cache = new BlockCache(fileLen, { size: () => blockSize, fetch: fetchBlock }, { onFetched: share });
 	if (source.kind === "url") for (const [start, data] of [...(source.seeds ?? []), ...early.splice(0)]) cache.seed(start, data);
-	loadDocument(msg.password);
+	loadDocument(pendingPassword ?? msg.password);
 }
 
 // Hosts may load this module through a wrapper (dynamic import from a blob

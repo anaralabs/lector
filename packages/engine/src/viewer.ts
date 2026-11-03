@@ -613,6 +613,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		});
 		// Only a module someone already compiled (preloadPdfium) is shared; compiling it here would land on the open path's main thread.
 		const pdfium = compiled.get(wasmUrl) ?? Promise.resolve(undefined);
+		/** workers that start late (after the first opened) need the password that worked, not the initial one */
+		let latestPassword = password;
 		let resolveFirstOpened: () => void = () => {};
 		// With range loading the other workers start once the first has parsed the file, from the blocks it shared.
 		const firstOpened = new Promise<void>((resolve) => {
@@ -633,7 +635,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				if (destroyed) return;
 				// A full file that arrived before this worker (e.g. during a respawn) replaces range requests.
 				const sizes: SizeHint | undefined = i > 0 ? undefined : blob ? { all: true } : sizeHint;
-				const init: ToRaster = { t: "init", source: blob ? { kind: "blob", blob } : docSource!, port: channel.port1, wasmUrl, password, sizes };
+				const init: ToRaster = { t: "init", source: blob ? { kind: "blob", blob } : docSource!,				port: channel.port1, wasmUrl, password: latestPassword, sizes };
 				try {
 					worker.postMessage(module ? { ...init, module } : init, [channel.port1]);
 				} catch {
@@ -1065,6 +1067,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 					? Promise.resolve(opened)
 					: new Promise<boolean>((resolve) => {
 							unlocks.push(resolve);
+							latestPassword = password;
 							command({ type: "unlock", password });
 						}),
 			get selectedText() {
