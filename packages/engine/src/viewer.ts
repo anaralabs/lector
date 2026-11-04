@@ -616,6 +616,10 @@ async function openRanges(
 	return { length, seeds, stream: head, late };
 }
 
+function isPending(source: ViewerSource): source is PromiseLike<string | ArrayBuffer | Uint8Array> {
+	return typeof source === "object" && source !== null && typeof (source as PromiseLike<unknown>).then === "function";
+}
+
 /** the other raster workers wait at most this long for the first one to open the document */
 const STAGGER_MAX_MS = 3000;
 
@@ -662,7 +666,10 @@ export function preloadPdfium(wasmUrl: string): Promise<WebAssembly.Module | und
 	return module;
 }
 
-export async function createViewer(container: HTMLElement, source: string | ArrayBuffer | Uint8Array, options: ViewerOptions): Promise<Viewer> {
+/** A URL, the file's bytes, or a promise of either (e.g. a download the host started before the viewer). */
+export type ViewerSource = string | ArrayBuffer | Uint8Array | PromiseLike<string | ArrayBuffer | Uint8Array>;
+
+export async function createViewer(container: HTMLElement, source: ViewerSource, options: ViewerOptions): Promise<Viewer> {
 	const support = getEngineSupport();
 	if (!support.supported) {
 		throw new EngineError(
@@ -713,30 +720,45 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	let opening: Promise<void>;
 	// Every download this viewer starts (probe, seeds, the background full file) stops with it.
 	const network = new AbortController();
-	if (typeof source === "string") {
-		const absolute = new URL(source, location.href).href;
+	let sourceUrl: string | undefined;
+	const open = (resolved: string | ArrayBuffer | Uint8Array): Promise<void> => {
+		if (typeof resolved !== "string") {
+			blob = new Blob([(resolved instanceof Uint8Array ? resolved : new Uint8Array(resolved)) as Uint8Array<ArrayBuffer>], { type: "application/pdf" });
+			fileBytes = blob.size;
+			docSource = { kind: "blob", blob };
+			return Promise.resolve();
+		}
+		const absolute = new URL(resolved, location.href).href;
+		sourceUrl = absolute;
 		const firstPage = targetFraction === undefined && !coreOptions.initialOffset && !coreOptions.initialCamera && !targetPage;
 		const pathTarget = targetFraction !== undefined ? (count: number) => targetFraction * count : targetPage;
-		opening = openUrl(absolute, rangeLoading, firstPage, pathTarget, network.signal, net).then((opened) => {
+		return openUrl(absolute, rangeLoading, firstPage, pathTarget, network.signal, net).then((opened) => {
 			if ("blob" in opened) blob = opened.blob;
 			else {
 				stream = opened.stream ?? null;
 				lateSeeds = opened.late ?? null;
 			}
 			loadMode = "blob" in opened ? opened.mode : stream ? "race" : "range";
-			fetchMs = epochNow() - startedAt;
 			fetchBytes = blob?.size ?? (opened as { seeds: [number, Uint8Array][] }).seeds.reduce((sum, [, b]) => sum + b.length, 0);
 			fileBytes = blob?.size ?? (opened as { length: number }).length;
 			docSource = blob
 				? { kind: "blob", blob }
 				: { kind: "url", url: absolute, length: (opened as { length: number }).length, credentials: new URL(absolute).origin === location.origin, seeds: (opened as { seeds: [number, Uint8Array][] }).seeds };
 		});
-	} else {
-		blob = new Blob([(source instanceof Uint8Array ? source : new Uint8Array(source)) as Uint8Array<ArrayBuffer>], { type: "application/pdf" });
-		fileBytes = blob.size;
-		docSource = { kind: "blob", blob };
-		opening = Promise.resolve();
-	}
+	};
+	const pending = isPending(source);
+	if (typeof source === "string") sourceUrl = new URL(source, location.href).href;
+	// The workers boot (and pdfium compiles) while a pending source settles; fetchMs is that wait plus any download after it.
+	opening = (
+		pending
+			? Promise.resolve(source).then(open, (err: unknown) => {
+					throw err instanceof EngineError ? err : new EngineError(`Failed to fetch PDF: ${String((err as Error)?.message ?? err)}`, "fetch", "document-load");
+				})
+			: open(source)
+	).then(() => {
+		if (pending || typeof source === "string") fetchMs = epochNow() - startedAt;
+		if (pending && !fetchBytes) fetchBytes = blob?.size ?? 0;
+	});
 	opening.catch(() => {});
 	/**
 	 * Runs a host callback. A throwing callback must not break the engine (the
@@ -830,7 +852,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 					const phase = opened ? "render" : "engine-load";
 					// Tear down first (settling every promise), then tell the host. Async
 					// (after setup), so handleEvent exists.
-					teardown(new EngineError(message, "worker", phase, typeof source === "string" ? source : undefined));
+					teardown(new EngineError(message, "worker", phase, sourceUrl));
 					handleEvent({ type: "error", message, code: "worker", phase });
 				});
 			};
@@ -1127,7 +1149,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				for (const resolve of unlocks.splice(0)) resolve(false);
 			} else if (e.type === "error" && (e.phase === "document-load" || e.phase === "engine-load") && !opened) {
 				// Fatal: nothing will answer requests (a worker that did not load, a document that cannot open).
-				fail(new EngineError(e.message, e.code, e.phase, typeof source === "string" ? source : undefined));
+				fail(new EngineError(e.message, e.code, e.phase, sourceUrl));
 			} else if (e.type === "search-progress") {
 				const fn = progressFns.get(e.id);
 				if (fn) host(() => fn(e.results));
