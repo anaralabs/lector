@@ -217,8 +217,8 @@ async function readBlob(res: Response, url: string): Promise<Blob> {
 	}
 }
 
-/** bytes read from the end of the file before the workers start: trailer and xref */
-const TAIL_BYTES = 64 * 1024;
+/** bytes read from the end of the file before the workers start: trailer, xref, and the object streams pdfTeX writes there */
+const TAIL_BYTES = 256 * 1024;
 
 type Opened = { blob: Blob; mode: "download" | "whole" } | { length: number; seeds: [number, Uint8Array][] };
 
