@@ -28,7 +28,7 @@ var readyPromise = new Promise((resolve, reject) => {
   readyPromiseResolve = resolve;
   readyPromiseReject = reject;
 });
-["_FORM_ForceToKillFocus","_FORM_OnAfterLoadPage","_FORM_OnBeforeClosePage","_FORM_OnChar","_FORM_OnLButtonDown","_FORM_OnLButtonUp","_FORM_OnMouseMove","_FORM_ReplaceSelection","_FORM_SelectAllText","_FORM_SetFocusedAnnot","_FORM_SetIndexSelected","_FPDF_ClosePage","_FPDF_FFLDraw","_FPDF_GetFileVersion","_FPDF_GetFormType","_FPDF_GetLastError","_FPDF_GetMetaText","_FPDF_GetPageCount","_FPDF_GetPageSizeByIndexF","_FPDF_GetSecurityHandlerRevision","_FPDF_LoadCustomDocument","_FPDF_LoadPage","_FPDF_PageToDevice","_FPDF_RenderPage_Close","_FPDF_RenderPage_Continue","_FPDF_RenderPageBitmap_Start","_FPDF_SetFormFieldHighlightAlpha","_FPDFAction_GetDest","_FPDFAction_GetType","_FPDFAction_GetURIPath","_FPDFAnnot_GetFlags","_FPDFAnnot_GetFontSize","_FPDFAnnot_GetFormFieldAtPoint","_FPDFAnnot_GetFormFieldFlags","_FPDFAnnot_GetFormFieldName","_FPDFAnnot_GetFormFieldType","_FPDFAnnot_GetFormFieldValue","_FPDFAnnot_GetOptionCount","_FPDFAnnot_GetOptionLabel","_FPDFAnnot_GetRect","_FPDFAnnot_GetSubtype","_FPDFBitmap_Create","_FPDFBitmap_Destroy","_FPDFBitmap_FillRect","_FPDFBitmap_GetBuffer","_FPDFBitmap_GetFormat","_FPDFBitmap_GetHeight","_FPDFBitmap_GetStride","_FPDFBitmap_GetWidth","_FPDFBookmark_GetAction","_FPDFBookmark_GetDest","_FPDFBookmark_GetFirstChild","_FPDFBookmark_GetNextSibling","_FPDFBookmark_GetTitle","_FPDFDest_GetDestPageIndex","_FPDFDest_GetLocationInPage","_FPDFFormObj_CountObjects","_FPDFFormObj_GetObject","_FPDFImageObj_GetBitmap","_FPDFImageObj_GetImageMetadata","_FPDFImageObj_GetRenderedBitmap","_FPDFLink_Enumerate","_FPDFLink_GetAction","_FPDFLink_GetAnnotRect","_FPDFLink_GetDest","_FPDFPage_CloseAnnot","_FPDFPage_CountObjects","_FPDFPage_GetAnnot","_FPDFPage_GetAnnotCount","_FPDFPage_GetAnnotIndex","_FPDFPage_GetObject","_FPDFPageObj_GetBounds","_FPDFPageObj_GetMatrix","_FPDFPageObj_GetType","_FPDFText_ClosePage","_FPDFText_CountChars","_FPDFText_GetLooseCharBox","_FPDFText_GetUnicode","_FPDFText_IsGenerated","_FPDFText_LoadPage","_PDFiumExt_CloseFileWriter","_PDFiumExt_GetFileWriterData","_PDFiumExt_GetFileWriterSize","_PDFiumExt_Init","_PDFiumExt_InitFormFillEnvironment","_PDFiumExt_OpenFileWriter","_PDFiumExt_OpenFormFillInfo","_PDFiumExt_SaveAsCopy","_malloc","_free","_memory","___indirect_function_table","onRuntimeInitialized"].forEach((prop) => {
+["_EPDFAnnot_GetColor","_EPDFAnnot_GetObjectNumber","_FORM_ForceToKillFocus","_FORM_OnAfterLoadPage","_FORM_OnBeforeClosePage","_FORM_OnChar","_FORM_OnLButtonDown","_FORM_OnLButtonUp","_FORM_OnMouseMove","_FORM_ReplaceSelection","_FORM_SelectAllText","_FORM_SetFocusedAnnot","_FORM_SetIndexSelected","_FPDF_ClosePage","_FPDF_FFLDraw","_FPDF_GetFileVersion","_FPDF_GetFormType","_FPDF_GetLastError","_FPDF_GetMetaText","_FPDF_GetPageCount","_FPDF_GetPageSizeByIndexF","_FPDF_GetSecurityHandlerRevision","_FPDF_LoadCustomDocument","_FPDF_LoadPage","_FPDF_PageToDevice","_FPDF_RenderPage_Close","_FPDF_RenderPage_Continue","_FPDF_RenderPageBitmap_Start","_FPDF_SetFormFieldHighlightAlpha","_FPDFAction_GetDest","_FPDFAction_GetType","_FPDFAction_GetURIPath","_FPDFAnnot_CountAttachmentPoints","_FPDFAnnot_GetAttachmentPoints","_FPDFAnnot_GetColor","_FPDFAnnot_GetFlags","_FPDFAnnot_GetFontSize","_FPDFAnnot_GetFormFieldAtPoint","_FPDFAnnot_GetFormFieldFlags","_FPDFAnnot_GetFormFieldName","_FPDFAnnot_GetFormFieldType","_FPDFAnnot_GetFormFieldValue","_FPDFAnnot_GetInkListCount","_FPDFAnnot_GetInkListPath","_FPDFAnnot_GetLinkedAnnot","_FPDFAnnot_GetNumberValue","_FPDFAnnot_GetOptionCount","_FPDFAnnot_GetOptionLabel","_FPDFAnnot_GetRect","_FPDFAnnot_GetStringValue","_FPDFAnnot_GetSubtype","_FPDFAnnot_HasKey","_FPDFAnnot_SetFlags","_FPDFBitmap_Create","_FPDFBitmap_Destroy","_FPDFBitmap_FillRect","_FPDFBitmap_GetBuffer","_FPDFBitmap_GetFormat","_FPDFBitmap_GetHeight","_FPDFBitmap_GetStride","_FPDFBitmap_GetWidth","_FPDFBookmark_GetAction","_FPDFBookmark_GetDest","_FPDFBookmark_GetFirstChild","_FPDFBookmark_GetNextSibling","_FPDFBookmark_GetTitle","_FPDFDest_GetDestPageIndex","_FPDFDest_GetLocationInPage","_FPDFFormObj_CountObjects","_FPDFFormObj_GetObject","_FPDFImageObj_GetBitmap","_FPDFImageObj_GetImageMetadata","_FPDFImageObj_GetRenderedBitmap","_FPDFLink_Enumerate","_FPDFLink_GetAction","_FPDFLink_GetAnnotRect","_FPDFLink_GetDest","_FPDFPage_CloseAnnot","_FPDFPage_CountObjects","_FPDFPage_GetAnnot","_FPDFPage_GetAnnotCount","_FPDFPage_GetAnnotIndex","_FPDFPage_GetObject","_FPDFPageObj_GetBounds","_FPDFPageObj_GetMatrix","_FPDFPageObj_GetType","_FPDFText_ClosePage","_FPDFText_CountChars","_FPDFText_GetBoundedText","_FPDFText_GetLooseCharBox","_FPDFText_GetUnicode","_FPDFText_IsGenerated","_FPDFText_LoadPage","_PDFiumExt_CloseFileWriter","_PDFiumExt_GetFileWriterData","_PDFiumExt_GetFileWriterSize","_PDFiumExt_Init","_PDFiumExt_InitFormFillEnvironment","_PDFiumExt_OpenFileWriter","_PDFiumExt_OpenFormFillInfo","_PDFiumExt_SaveAsCopy","_malloc","_free","_memory","___indirect_function_table","onRuntimeInitialized"].forEach((prop) => {
   if (!Object.getOwnPropertyDescriptor(readyPromise, prop)) {
     Object.defineProperty(readyPromise, prop, {
       get: () => abort('You are getting ' + prop + ' on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js'),
@@ -4730,8 +4730,18 @@ Module['_FPDFPage_GetAnnot'] = createExportWrapper('FPDFPage_GetAnnot', 2);
 Module['_FPDFPage_GetAnnotIndex'] = createExportWrapper('FPDFPage_GetAnnotIndex', 2);
 Module['_FPDFPage_CloseAnnot'] = createExportWrapper('FPDFPage_CloseAnnot', 1);
 Module['_FPDFAnnot_GetSubtype'] = createExportWrapper('FPDFAnnot_GetSubtype', 1);
+Module['_FPDFAnnot_GetColor'] = createExportWrapper('FPDFAnnot_GetColor', 6);
+Module['_FPDFAnnot_CountAttachmentPoints'] = createExportWrapper('FPDFAnnot_CountAttachmentPoints', 1);
+Module['_FPDFAnnot_GetAttachmentPoints'] = createExportWrapper('FPDFAnnot_GetAttachmentPoints', 3);
 Module['_FPDFAnnot_GetRect'] = createExportWrapper('FPDFAnnot_GetRect', 2);
+Module['_FPDFAnnot_GetInkListCount'] = createExportWrapper('FPDFAnnot_GetInkListCount', 1);
+Module['_FPDFAnnot_GetInkListPath'] = createExportWrapper('FPDFAnnot_GetInkListPath', 4);
+Module['_FPDFAnnot_HasKey'] = createExportWrapper('FPDFAnnot_HasKey', 2);
+Module['_FPDFAnnot_GetStringValue'] = createExportWrapper('FPDFAnnot_GetStringValue', 4);
+Module['_FPDFAnnot_GetNumberValue'] = createExportWrapper('FPDFAnnot_GetNumberValue', 3);
+Module['_FPDFAnnot_GetLinkedAnnot'] = createExportWrapper('FPDFAnnot_GetLinkedAnnot', 2);
 Module['_FPDFAnnot_GetFlags'] = createExportWrapper('FPDFAnnot_GetFlags', 1);
+Module['_FPDFAnnot_SetFlags'] = createExportWrapper('FPDFAnnot_SetFlags', 2);
 Module['_FPDFAnnot_GetFormFieldFlags'] = createExportWrapper('FPDFAnnot_GetFormFieldFlags', 2);
 Module['_FPDFAnnot_GetFormFieldAtPoint'] = createExportWrapper('FPDFAnnot_GetFormFieldAtPoint', 3);
 Module['_FPDFAnnot_GetFormFieldName'] = createExportWrapper('FPDFAnnot_GetFormFieldName', 4);
@@ -4740,6 +4750,8 @@ Module['_FPDFAnnot_GetFormFieldValue'] = createExportWrapper('FPDFAnnot_GetFormF
 Module['_FPDFAnnot_GetOptionCount'] = createExportWrapper('FPDFAnnot_GetOptionCount', 2);
 Module['_FPDFAnnot_GetOptionLabel'] = createExportWrapper('FPDFAnnot_GetOptionLabel', 5);
 Module['_FPDFAnnot_GetFontSize'] = createExportWrapper('FPDFAnnot_GetFontSize', 3);
+Module['_EPDFAnnot_GetColor'] = createExportWrapper('EPDFAnnot_GetColor', 5);
+Module['_EPDFAnnot_GetObjectNumber'] = createExportWrapper('EPDFAnnot_GetObjectNumber', 1);
 Module['_FPDFBookmark_GetFirstChild'] = createExportWrapper('FPDFBookmark_GetFirstChild', 2);
 Module['_FPDFBookmark_GetNextSibling'] = createExportWrapper('FPDFBookmark_GetNextSibling', 2);
 Module['_FPDFBookmark_GetTitle'] = createExportWrapper('FPDFBookmark_GetTitle', 3);
@@ -4789,6 +4801,7 @@ Module['_FPDFText_CountChars'] = createExportWrapper('FPDFText_CountChars', 1);
 Module['_FPDFText_GetUnicode'] = createExportWrapper('FPDFText_GetUnicode', 2);
 Module['_FPDFText_IsGenerated'] = createExportWrapper('FPDFText_IsGenerated', 2);
 Module['_FPDFText_GetLooseCharBox'] = createExportWrapper('FPDFText_GetLooseCharBox', 3);
+Module['_FPDFText_GetBoundedText'] = createExportWrapper('FPDFText_GetBoundedText', 7);
 Module['_FPDF_GetFormType'] = createExportWrapper('FPDF_GetFormType', 1);
 Module['_FPDF_LoadCustomDocument'] = createExportWrapper('FPDF_LoadCustomDocument', 2);
 Module['_FPDF_GetFileVersion'] = createExportWrapper('FPDF_GetFileVersion', 2);
@@ -5347,6 +5360,8 @@ for (const prop of Object.keys(Module)) {
 
 /* AUTO-GENERATED — DO NOT EDIT BY HAND */
 const functions = {
+    EPDFAnnot_GetColor: [["number", "number", "number", "number", "number"], 'boolean'],
+    EPDFAnnot_GetObjectNumber: [["number"], 'number'],
     FORM_ForceToKillFocus: [["number"], 'boolean'],
     FORM_OnAfterLoadPage: [["number", "number"], null],
     FORM_OnBeforeClosePage: [["number", "number"], null],
@@ -5377,6 +5392,9 @@ const functions = {
     FPDFAction_GetDest: [["number", "number"], 'number'],
     FPDFAction_GetType: [["number"], 'number'],
     FPDFAction_GetURIPath: [["number", "number", "number", "number"], 'number'],
+    FPDFAnnot_CountAttachmentPoints: [["number"], 'number'],
+    FPDFAnnot_GetAttachmentPoints: [["number", "number", "number"], 'boolean'],
+    FPDFAnnot_GetColor: [["number", "number", "number", "number", "number", "number"], 'boolean'],
     FPDFAnnot_GetFlags: [["number"], 'number'],
     FPDFAnnot_GetFontSize: [["number", "number", "number"], 'boolean'],
     FPDFAnnot_GetFormFieldAtPoint: [["number", "number", "number"], 'number'],
@@ -5384,10 +5402,17 @@ const functions = {
     FPDFAnnot_GetFormFieldName: [["number", "number", "number", "number"], 'number'],
     FPDFAnnot_GetFormFieldType: [["number", "number"], 'number'],
     FPDFAnnot_GetFormFieldValue: [["number", "number", "number", "number"], 'number'],
+    FPDFAnnot_GetInkListCount: [["number"], 'number'],
+    FPDFAnnot_GetInkListPath: [["number", "number", "number", "number"], 'number'],
+    FPDFAnnot_GetLinkedAnnot: [["number", "string"], 'number'],
+    FPDFAnnot_GetNumberValue: [["number", "string", "number"], 'boolean'],
     FPDFAnnot_GetOptionCount: [["number", "number"], 'number'],
     FPDFAnnot_GetOptionLabel: [["number", "number", "number", "number", "number"], 'number'],
     FPDFAnnot_GetRect: [["number", "number"], 'boolean'],
+    FPDFAnnot_GetStringValue: [["number", "string", "number", "number"], 'number'],
     FPDFAnnot_GetSubtype: [["number"], 'number'],
+    FPDFAnnot_HasKey: [["number", "string"], 'boolean'],
+    FPDFAnnot_SetFlags: [["number", "number"], 'boolean'],
     FPDFBitmap_Create: [["number", "number", "number"], 'number'],
     FPDFBitmap_Destroy: [["number"], null],
     FPDFBitmap_FillRect: [["number", "number", "number", "number", "number", "number"], 'boolean'],
@@ -5423,6 +5448,7 @@ const functions = {
     FPDFPageObj_GetType: [["number"], 'number'],
     FPDFText_ClosePage: [["number"], null],
     FPDFText_CountChars: [["number"], 'number'],
+    FPDFText_GetBoundedText: [["number", "number", "number", "number", "number", "number", "number"], 'number'],
     FPDFText_GetLooseCharBox: [["number", "number", "number"], 'boolean'],
     FPDFText_GetUnicode: [["number", "number"], 'number'],
     FPDFText_IsGenerated: [["number", "number"], 'number'],

@@ -2,6 +2,7 @@
 // selection and the WebGL frame loop. It never touches the DOM, so the same
 // code runs on the main thread or inside a worker with an OffscreenCanvas.
 
+import type { PdfAnnotation } from "./annotations";
 import { markColor } from "./colors";
 import { type Box, FormDirt, type FormOp, type FormWidget, widgetAt } from "./forms";
 import { Canvas2DCompositor } from "./canvas2d";
@@ -211,6 +212,8 @@ export type Request =
 	/** exact + fuzzy matches; `progress` streams `search-progress` events with partial results */
 	| ({ type: "search-results"; query: string; progress?: boolean } & SearchOptions)
 	| { type: "outline" }
+	/** the page's markup annotations, read once per page */
+	| { type: "annotations"; page: number }
 	| { type: "page-text"; page: number }
 	/** page text plus, per UTF-16 unit, the char index that `rects` takes */
 	| { type: "page-text-map"; page: number }
@@ -1889,6 +1892,7 @@ export class ViewerCore {
 	}
 
 	private outline: Promise<OutlineItem[]> | null = null;
+	private annotations = new Map<number, Promise<PdfAnnotation[]>>();
 	private thumbs = new Map<string, Promise<{ buf: ArrayBuffer; w: number; h: number } | null>>();
 
 	private cancelled = new Set<number>();
@@ -2065,6 +2069,18 @@ export class ViewerCore {
 			}
 			case "save-document":
 				return new Uint8Array(await this.pool.save());
+			case "annotations": {
+				if (!Number.isInteger(req.page) || req.page < 0 || req.page >= this.pages.length) throw new Error(`no page ${req.page}`);
+				let job = this.annotations.get(req.page);
+				if (!job) {
+					job = new Promise((resolve) => {
+						this.pool.request(`annots:${req.page}`, 450 + req.page / 1e4, { t: "annots", page: req.page }, (res) => resolve(res.t === "annots" ? res.items : []));
+						this.pool.pump();
+					});
+					this.annotations.set(req.page, job);
+				}
+				return job;
+			}
 			case "outline":
 				this.outline ??= new Promise((resolve) => {
 					this.pool.request("outline", 400, { t: "outline", page: -1 }, (res) => resolve(res.t === "outline" ? res.items : []));

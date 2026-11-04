@@ -5,7 +5,7 @@
 
 const DB = "lector-engine-tiles";
 /** bumped when rendering changes (PDFium, render flags): older bitmaps are never read */
-const RENDER_VERSION = 2;
+const RENDER_VERSION = 3;
 const STORE = "tiles";
 
 interface Entry {

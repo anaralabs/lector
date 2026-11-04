@@ -2,6 +2,7 @@
 // One PDFium WASM instance per worker. Each worker owns its own copy of the
 // document, so workers never share memory and need no cross-origin isolation.
 
+import { hideNoteIcons, noteIconIndices, type PdfAnnotation, readAnnotations } from "./annotations";
 import { BlockCache } from "./blocks";
 import { applyFormOp, type FormContext, readWidgets, saveDocument } from "./form-fill";
 import { init, type Pdfium } from "./pdfium/pdfium.js";
@@ -124,6 +125,9 @@ function pauseStruct() {
 	return pause;
 }
 
+/** per page index: notes whose icons the host draws (see `hideNoteIcons`) */
+const noteIcons = new Map<number, number[]>();
+
 async function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 	const t0 = performance.now();
 	const size = sizeOf(msg.page);
@@ -136,6 +140,9 @@ async function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 	const bmp = P.FPDFBitmap_Create(w, h, 1);
 	rendering = msg.id;
 	cancelled = false;
+	let notes = noteIcons.get(msg.page);
+	if (!notes) noteIcons.set(msg.page, (notes = noteIconIndices(P, page)));
+	const showNotes = notes.length ? hideNoteIcons(P, page, notes) : null;
 	try {
 		P.FPDFBitmap_FillRect(bmp, 0, 0, w, h, 0xffffffff);
 		sliceEnd = performance.now() + SLICE_MS;
@@ -185,6 +192,7 @@ async function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 		}
 		send({ t: "tile", id: msg.id, buf, w, h, ms: performance.now() - t0, heap: heapBytes() }, [buf]);
 	} finally {
+		showNotes?.();
 		rendering = 0;
 		P.FPDFBitmap_Destroy(bmp);
 		if (!held) pinned.delete(msg.page);
@@ -326,6 +334,17 @@ function readOutline(parent: number, depth: number): OutlineItem[] {
 		if (items.length > 5000) break;
 	}
 	return items;
+}
+
+function listAnnotations(msg: Extract<ToRaster, { t: "annots" }>) {
+	let items: PdfAnnotation[] = [];
+	try {
+		items = withPage(msg.page, (page) => readAnnotations({ P, heap, toPage: transformFor(msg.page) }, msg.page, page));
+	} catch (err) {
+		// A broken annotation must not surface as a viewer error: the page still renders.
+		console.error(err);
+	}
+	send({ t: "annots", id: msg.id, page: msg.page, items });
 }
 
 function extractText(msg: Extract<ToRaster, { t: "text" }>) {
@@ -854,6 +873,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 				if (m.t === "tile") await renderTile(m);
 				else if (m.t === "text") extractText(m);
 				else if (m.t === "outline") send({ t: "outline", id: m.id, items: readOutline(0, 0) });
+				else if (m.t === "annots") listAnnotations(m);
 				else if (m.t === "sizes") readSizes(m);
 				else if (m.t === "unlock" && P && !doc && fileAccess) loadDocument(m.password);
 				else if (m.t === "form") formEdit(m);

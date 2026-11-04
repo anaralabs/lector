@@ -18,6 +18,7 @@ import {
 	type SearchResults,
 	ViewerCore,
 } from "./core";
+import type { PdfAnnotation } from "./annotations";
 import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
 import { FormLayer, modifiers, type FormHit } from "./form-layer";
@@ -169,6 +170,13 @@ export interface Viewer {
 	/** a search is running */
 	readonly isSearching: boolean;
 	outline(): Promise<OutlineItem[]>;
+	/**
+	 * The markup annotations already in the file on a page (0-based): highlights,
+	 * underlines, notes with their replies, ink, free text, shapes. Read once per
+	 * page. Tiles paint all of them except notes (Text and Popup annotations),
+	 * whose icons the host draws.
+	 */
+	annotations(page: number): Promise<PdfAnnotation[]>;
 	pageText(page: number): Promise<string>;
 	/** page text plus `chars[i]`: the char index (for `rects`) of UTF-16 unit `i` */
 	pageTextMap(page: number): Promise<{ text: string; chars: Int32Array }>;
@@ -1548,6 +1556,10 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 				return searches.size > 0;
 			},
 			outline: () => request<OutlineItem[]>({ type: "outline" }),
+			annotations: async (page) => {
+				await loaded;
+				return request<PdfAnnotation[]>({ type: "annotations", page });
+			},
 			pageText: (page) => request<string>({ type: "page-text", page }),
 			pageTextMap: (page) => request<{ text: string; chars: Int32Array }>({ type: "page-text-map", page }),
 			rects: (page, from, to) => request<Rect[]>({ type: "rects", page, from, to }),
