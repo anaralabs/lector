@@ -44,10 +44,7 @@ export function probeVerdict(
 	return { kind: "need-length" };
 }
 
-/**
- * How much of the probe's body to read before cancelling it: the head block,
- * or for a linearized file opening on page 1, through that page's section.
- */
+/** How much of the probe's body to read before cancelling it: the head block, or through page 1's section for a linearized file opening there. */
 export function probeReadBytes(lin: { firstPageEnd: number } | null, firstPage: boolean, length: number, block = RANGE_BLOCK): number {
 	const head = Math.min(length, block);
 	if (!lin || !firstPage) return head;
@@ -97,6 +94,19 @@ export function readLinearization(head: Uint8Array, fileLen: number): { firstPag
 	const N = num("N");
 	if (L !== fileLen || !(E > 0) || E > fileLen || !(N > 0)) return null;
 	return { firstPageEnd: E, pages: N };
+}
+
+/** a whole-file download is reconsidered once it has run this long */
+export const WHOLE_PATIENCE_MS = 1500;
+/** what opening from range reads costs before the first paint, roughly (benchmarks: 5-23 requests, 0.4-2.5MB) */
+const RANGE_OPEN_TRIPS = 12;
+const RANGE_OPEN_BYTES = 1024 * 1024;
+
+/** The rest of a whole-file download at its rate so far would take over twice what range reads need (slow start makes the rate err low, towards ranges). */
+export function abandonWhole(s: { elapsedMs: number; received: number; length: number; rttMs: number }): boolean {
+	if (s.elapsedMs < WHOLE_PATIENCE_MS || s.received <= 0 || s.received >= s.length) return false;
+	const perMs = s.received / s.elapsedMs;
+	return (s.length - s.received) / perMs > 2 * (RANGE_OPEN_TRIPS * s.rttMs + RANGE_OPEN_BYTES / perMs);
 }
 
 /** block size for range reads (a worker's cache and the main thread's seeds align to it) */

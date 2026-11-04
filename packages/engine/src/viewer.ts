@@ -22,7 +22,7 @@ import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
 import type { DocSource, DocumentInfo, OpenTiming, OutlineItem, PageSize, SizeHint, ToRaster } from "./protocol";
 import { rasterWorkerCount } from "./raster-pool";
-import { probeReadBytes, probeVerdict, RANGE_BLOCK, readLinearization, WHOLE_FILE_MAX } from "./range";
+import { abandonWhole, probeReadBytes, probeVerdict, RANGE_BLOCK, readLinearization, WHOLE_FILE_MAX } from "./range";
 import { findStartxref, pagePathObjects, parseXref } from "./xref";
 import { getEngineSupport } from "./support";
 import { documentKey } from "./tile-cache";
@@ -355,15 +355,7 @@ async function prefetchPagePath(store: SeedBlocks, tailStart: number, target: nu
 	if (path) await store.ensure(path.map((o) => [o, o + OBJECT_BYTES]));
 }
 
-/**
- * Probes with `Range: bytes=0-(WHOLE_FILE_MAX - 1)`. A file that fits comes
- * back whole in that one response (a range round trip per block costs more
- * than downloading a small file). For a larger one only the head is read
- * (through page 1's section for a linearized file) and the rest is cancelled;
- * the tail (trailer, xref) is fetched as soon as the length is known, and every
- * worker starts with those blocks. A 200 means the server sent the whole file,
- * which is used as is. Servers that hide `Content-Range` from CORS get a HEAD.
- */
+// Small files come back whole from the probe (one request beats a round trip per block); larger ones open from range reads.
 async function openUrl(
 	url: string,
 	range: boolean,
@@ -379,42 +371,82 @@ async function openUrl(
 	};
 	const download = async (): Promise<Opened> => ({ blob: await readBlob(answered(await fetchPdf(url, { signal })), url), mode: "download" });
 	if (!range) return download();
+	const askedAt = epochNow();
 	// A server that refuses the ranged request (e.g. a CORS preflight for `Range`) still serves the plain one.
 	const res = await fetchPdf(url, { headers: { Range: `bytes=0-${WHOLE_FILE_MAX - 1}` }, signal }).then(answered, () => null);
 	if (!res) return download();
+	const rttMs = epochNow() - askedAt;
 	const header = (name: string) => res.headers.get(name);
 	const verdict = probeVerdict({ status: res.status, contentRange: header("Content-Range"), contentEncoding: header("Content-Encoding"), contentLength: header("Content-Length") }, WHOLE_FILE_MAX);
 	if (verdict.kind === "full-body") return { blob: await readBlob(res, url), mode: "download" };
-	if (verdict.kind === "whole") return wholeBody(res, url, verdict.length, download);
-	let length = verdict.kind === "range" ? verdict.length : 0;
+	let length = verdict.kind === "range" || verdict.kind === "whole" ? verdict.length : 0;
 	if (verdict.kind === "need-length") {
 		net.requests++;
 		const head = await fetch(url, { method: "HEAD", credentials: "same-origin", signal }).catch(() => null);
 		length = Number(head?.ok ? head.headers.get("Content-Length") : 0) || 0;
-		if (length > 0 && length <= WHOLE_FILE_MAX) return wholeBody(res, url, length, download);
 	}
-	if (!length) {
+	if (!length || verdict.kind === "download") {
 		void res.body?.cancel().catch(() => {});
 		return download();
 	}
+	const ranges = (head: Uint8Array | Response) => openRanges(url, length, head, firstPage, target, signal, net);
+	if (length > WHOLE_FILE_MAX) return ranges(res);
+	const whole = await streamWhole(res, url, length, rttMs);
+	if (whole instanceof Blob) return whole.size === length ? { blob: whole, mode: "whole" } : download();
+	return ranges(whole);
+}
+
+/** The probe's body as the whole file, or the prefix that arrived before the download proved slower than range reads. */
+async function streamWhole(res: Response, url: string, length: number, rttMs: number): Promise<Blob | Uint8Array> {
+	const reader = res.body?.getReader();
+	if (!reader) return readBlob(res, url);
+	const chunks: Uint8Array[] = [];
+	let received = 0;
+	let firstAt = 0;
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) return new Blob(chunks as Uint8Array<ArrayBuffer>[], { type: "application/pdf" });
+			chunks.push(value);
+			received += value.length;
+			firstAt ||= performance.now();
+			if (received >= length || !abandonWhole({ elapsedMs: performance.now() - firstAt, received, length, rttMs })) continue;
+			void reader.cancel().catch(() => {});
+			const prefix = new Uint8Array(received);
+			let at = 0;
+			for (const c of chunks) {
+				prefix.set(c, at);
+				at += c.length;
+			}
+			return prefix;
+		}
+	} catch (err) {
+		throw new EngineError(`Failed to fetch PDF "${url}": ${String((err as Error)?.message ?? err)}`, "fetch", "document-load", url);
+	}
+}
+
+/** Head and tail blocks (and the page path) for the workers to start from; `head` is the file's first bytes or the probe still streaming them. */
+async function openRanges(
+	url: string,
+	length: number,
+	head: Uint8Array | Response,
+	firstPage: boolean,
+	target: number | ((count: number) => number),
+	signal: AbortSignal,
+	net: NetCount,
+): Promise<Opened> {
 	const store = new SeedBlocks(url, length, net, signal);
 	const tailStart = Math.floor(Math.max(0, length - TAIL_BYTES) / RANGE_BLOCK) * RANGE_BLOCK;
 	const tail = store.ensure([[tailStart, length]]);
-	const headBytes = await readPrefix(res, (bytes) => probeReadBytes(bytes.length >= RANGE_BLOCK ? readLinearization(bytes, length) : null, firstPage, length));
-	await tail;
-	if (!headBytes || headBytes.length < Math.min(RANGE_BLOCK, length)) return download();
-	store.add(0, headBytes);
-	const lin = readLinearization(headBytes, length);
-	// A linearized file opening on its first page has it all in the head section already.
-	if (lin && firstPage) await store.ensure([[headBytes.length, probeReadBytes(lin, true, length)]]);
+	const headBytes = head instanceof Response ? await readPrefix(head, (bytes) => probeReadBytes(bytes.length >= RANGE_BLOCK ? readLinearization(bytes, length) : null, firstPage, length)) : head;
+	if (headBytes) store.add(0, headBytes);
+	await Promise.all([tail, store.ensure([[0, Math.min(RANGE_BLOCK, length)]])]);
+	const first = store.bytes(0, Math.min(RANGE_BLOCK, length));
+	if (!first) return { blob: await readBlob(await fetchPdf(url, { signal }), url), mode: "download" };
+	const lin = readLinearization(first, length);
+	if (lin && firstPage) await store.ensure([[0, probeReadBytes(lin, true, length)]]);
 	else await prefetchPagePath(store, tailStart, target).catch(() => {});
 	return { length, seeds: store.seeds() };
-}
-
-/** The probe's body is the whole file; a body of the wrong size is downloaded again. */
-async function wholeBody(res: Response, url: string, length: number, download: () => Promise<Opened>): Promise<Opened> {
-	const blob = await readBlob(res, url);
-	return blob.size === length ? { blob, mode: "whole" } : download();
 }
 
 /** the other raster workers wait at most this long for the first one to open the document */

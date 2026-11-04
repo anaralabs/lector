@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { blockVerdict, openErrorCode, probeReadBytes, probeVerdict, RANGE_BLOCK, readLinearization, retryableBlockStatus, totalFromContentRange, WHOLE_FILE_MAX } from "../src/range.ts";
+import { abandonWhole, blockVerdict, openErrorCode, probeReadBytes, probeVerdict, RANGE_BLOCK, readLinearization, retryableBlockStatus, totalFromContentRange, WHOLE_FILE_MAX, WHOLE_PATIENCE_MS } from "../src/range.ts";
 
 test("Content-Range total, including when CORS hides it", () => {
 	assert.equal(totalFromContentRange("bytes 0-1023/52428800"), 52428800);
@@ -72,4 +72,19 @@ test("open: a block that could not be read is a fetch failure, not a broken file
 	assert.equal(openErrorCode(4, true), "password");
 	assert.equal(openErrorCode(5, false), "security");
 	assert.equal(openErrorCode(9, false), "unknown");
+});
+
+test("whole download: kept while it is quick, abandoned for ranges once it is clearly slower", () => {
+	const len = 6.5 * MB;
+	// not before the patience runs out, however slow
+	assert.equal(abandonWhole({ elapsedMs: WHOLE_PATIENCE_MS - 1, received: 1000, length: len, rttMs: 50 }), false);
+	// 10 Mbit/s, 50ms: 4.6MB left take ~3.7s, ranges ~1.4s
+	assert.equal(abandonWhole({ elapsedMs: 1500, received: 1.875 * MB, length: len, rttMs: 50 }), true);
+	// 50 Mbit/s, 150ms: nearly done
+	assert.equal(abandonWhole({ elapsedMs: 1500, received: 6 * MB, length: len, rttMs: 150 }), false);
+	// a 2MB file at 10 Mbit/s is almost there by then
+	assert.equal(abandonWhole({ elapsedMs: 1500, received: 1.875 * MB, length: 2.1 * MB, rttMs: 50 }), false);
+	// very slow links: ranges cost bytes too, so a small file stays whole
+	assert.equal(abandonWhole({ elapsedMs: 1500, received: 60_000, length: 1.5 * MB, rttMs: 300 }), false);
+	assert.equal(abandonWhole({ elapsedMs: 1500, received: len, length: len, rttMs: 50 }), false);
 });
