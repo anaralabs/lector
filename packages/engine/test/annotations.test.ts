@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { test } from "node:test";
-import { type PdfAnnotation, parsePdfDate, type RawAnnotation, readAnnotations, threadReplies } from "../src/annotations.ts";
+import { hideNoteIcons, noteIconIndices, type PdfAnnotation, parsePdfDate, type RawAnnotation, readAnnotations, threadReplies } from "../src/annotations.ts";
 // @ts-expect-error plain .mjs script, no types
 import { annotated, H, ROTATED_RECT, W, ZOTERO_RECTS } from "../bench/fixtures/make-annotations.mjs";
 
@@ -141,4 +141,50 @@ test("quads on a rotated page map to the page as displayed", async () => {
 		JSON.stringify(rot!.rects[0]),
 	);
 	assert.ok(rot!.rect.w < rot!.rect.h, "a horizontal line of text is vertical once the page turns");
+});
+
+test("note icons are hidden for a render only; text markup still paints and the flags come back", async () => {
+	const { init } = await import(require.resolve("@embedpdf/pdfium").replace(/index\.cjs$/, "index.js"));
+	const P = await init({ wasmBinary: readFileSync(require.resolve("@embedpdf/pdfium/pdfium.wasm")) });
+	P.PDFiumExt_Init();
+	const bytes: Uint8Array = await annotated();
+	const heap = () => (P.pdfium as { HEAPU8: Uint8Array }).HEAPU8;
+	const ptr = P.pdfium.wasmExports.malloc(bytes.length);
+	heap().set(bytes, ptr);
+	const doc = P.FPDF_LoadMemDocument(ptr, bytes.length, "");
+	const page = P.FPDF_LoadPage(doc, 1);
+	// BGRA pixels in page points [x0, y0, x1, y1] (top-left origin) matching `match`
+	const count = (box: number[], match: (r: number, g: number, b: number) => boolean) => {
+		const bmp = P.FPDFBitmap_Create(W, H, 1);
+		P.FPDFBitmap_FillRect(bmp, 0, 0, W, H, 0xffffffff);
+		P.FPDF_RenderPageBitmap(bmp, page, 0, 0, W, H, 0, 0x01);
+		const buf = P.FPDFBitmap_GetBuffer(bmp);
+		const stride = P.FPDFBitmap_GetStride(bmp);
+		let n = 0;
+		for (let y = box[1]!; y < box[3]!; y++)
+			for (let x = box[0]!; x < box[2]!; x++) {
+				const o = buf + y * stride + x * 4;
+				if (match(heap()[o + 2]!, heap()[o + 1]!, heap()[o]!)) n++;
+			}
+		P.FPDFBitmap_Destroy(bmp);
+		return n;
+	};
+	const previewNote = [560, H - 540, 580, H - 520];
+	const yellow = (r: number, g: number, b: number) => r > 200 && g > 180 && b < 160;
+	const strike = [322, H - 432, 482, H - 415];
+	const red = (r: number, g: number, b: number) => r > 200 && g < 120 && b < 120;
+	const notes = noteIconIndices(P, page);
+	assert.equal(notes.length, 4, "the reply notes, the Preview note and Anara's note; not the hidden one");
+	assert.ok(count(previewNote, yellow) > 20, "PDFium paints the note icon");
+	const flags = notes.map((i) => P.FPDFAnnot_GetFlags(P.FPDFPage_GetAnnot(page, i)));
+	const restore = hideNoteIcons(P, page, notes);
+	assert.equal(count(previewNote, yellow), 0, "the icon is gone while hidden");
+	assert.ok(count(strike, red) > 20, "the strikeout still paints");
+	restore();
+	assert.deepEqual(
+		notes.map((i) => P.FPDFAnnot_GetFlags(P.FPDFPage_GetAnnot(page, i))),
+		flags,
+	);
+	const listed = readAnnotations({ P, heap, toPage: (x, y) => [x, H - y] }, 1, page);
+	assert.ok(listed.some((a) => a.contents === "Compare with Walker 2009"), "notes are still listed");
 });

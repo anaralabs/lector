@@ -323,6 +323,45 @@ function readOne(ctx: AnnotContext, page: number, pageIndex: number, index: numb
 	};
 }
 
+/** FPDF_ANNOT_TEXT and FPDF_ANNOT_POPUP: their icons and boxes are the host's to draw (`readAnnotations` still lists them). */
+export const NOTE_ICON_SUBTYPES: ReadonlySet<number> = new Set([1, 16]);
+
+/** Indices of the page's visible note annotations, the ones `hideNoteIcons` hides. */
+export function noteIconIndices(P: Pdfium, page: number): number[] {
+	const out: number[] = [];
+	const n = Math.min(MAX_ANNOTS, P.FPDFPage_GetAnnotCount(page));
+	for (let i = 0; i < n; i++) {
+		const annot = P.FPDFPage_GetAnnot(page, i);
+		if (!annot) continue;
+		if (NOTE_ICON_SUBTYPES.has(P.FPDFAnnot_GetSubtype(annot)) && !(P.FPDFAnnot_GetFlags(annot) & ANNOT_HIDDEN)) out.push(i);
+		P.FPDFPage_CloseAnnot(annot);
+	}
+	return out;
+}
+
+/**
+ * Hides those notes in the in-memory document for one render and returns the
+ * undo; a job never runs between the two, so reads and saves see the file's flags.
+ */
+export function hideNoteIcons(P: Pdfium, page: number, indices: readonly number[]): () => void {
+	const saved: [number, number][] = [];
+	for (const i of indices) {
+		const annot = P.FPDFPage_GetAnnot(page, i);
+		if (!annot) continue;
+		const flags = P.FPDFAnnot_GetFlags(annot);
+		if (P.FPDFAnnot_SetFlags(annot, flags | ANNOT_HIDDEN)) saved.push([i, flags]);
+		P.FPDFPage_CloseAnnot(annot);
+	}
+	return () => {
+		for (const [i, flags] of saved) {
+			const annot = P.FPDFPage_GetAnnot(page, i);
+			if (!annot) continue;
+			P.FPDFAnnot_SetFlags(annot, flags);
+			P.FPDFPage_CloseAnnot(annot);
+		}
+	};
+}
+
 /** The page's visible markup annotations in annotation order, replies folded into their threads. */
 export function readAnnotations(ctx: AnnotContext, pageIndex: number, page: number): PdfAnnotation[] {
 	const { P } = ctx;

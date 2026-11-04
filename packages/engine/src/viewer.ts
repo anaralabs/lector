@@ -170,7 +170,8 @@ export interface Viewer {
 	/**
 	 * The markup annotations already in the file on a page (0-based): highlights,
 	 * underlines, notes with their replies, ink, free text, shapes. Read once per
-	 * page; tiles already paint them, so hosts only list or hit-test them.
+	 * page. Tiles paint all of them except notes (Text and Popup annotations),
+	 * whose icons the host draws.
 	 */
 	annotations(page: number): Promise<PdfAnnotation[]>;
 	pageText(page: number): Promise<string>;

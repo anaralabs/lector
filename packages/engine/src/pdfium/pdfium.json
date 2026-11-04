@@ -2,7 +2,7 @@
 	"source": "@embedpdf/pdfium@2.15.1",
 	"sourceSha256": "5e4cd023c3dad4a895b3571ca573d3fc51bac6de48360d95283134385b954eaa",
 	"binaryen": "132.0.0",
-	"sha256": "23b89f80ff494eb82ba7dc1df4a4bf4dc696572c4866c855064670c5ff79936c",
+	"sha256": "b4f1029e80a67fdadda32d6372645635896f061f9ca376a45514a49e196220c0",
 	"api": [
 		"EPDFAnnot_GetColor",
 		"EPDFAnnot_GetObjectNumber",
@@ -40,6 +40,7 @@
 		"FPDFAnnot_GetStringValue",
 		"FPDFAnnot_GetSubtype",
 		"FPDFAnnot_HasKey",
+		"FPDFAnnot_SetFlags",
 		"FPDFBitmap_Create",
 		"FPDFBitmap_Destroy",
 		"FPDFBitmap_FillRect",
