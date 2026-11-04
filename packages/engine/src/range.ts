@@ -10,6 +10,8 @@ export function totalFromContentRange(header: string | null): number | null {
 
 /** files up to this size open from one request instead of range reads */
 export const WHOLE_FILE_MAX = 8 * 1024 * 1024;
+/** files up to this size keep downloading whole while range reads open them: whichever has the first page first wins */
+export const RACE_FILE_MAX = 32 * 1024 * 1024;
 
 export type ProbeVerdict =
 	/** the 206 body is the entire file (it fits in the probed range): read it to the end */

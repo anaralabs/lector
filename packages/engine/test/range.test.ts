@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { abandonWhole, blockVerdict, openErrorCode, HEAD_BYTES, probeReadBytes, probeVerdict, RANGE_GRANULE, readLinearization, retryableBlockStatus, totalFromContentRange, WHOLE_FILE_MAX, WHOLE_PATIENCE_MS } from "../src/range.ts";
+import { abandonWhole, blockVerdict, openErrorCode, HEAD_BYTES, probeReadBytes, probeVerdict, RACE_FILE_MAX, RANGE_GRANULE, readLinearization, retryableBlockStatus, totalFromContentRange, WHOLE_FILE_MAX, WHOLE_PATIENCE_MS } from "../src/range.ts";
 
 test("Content-Range total, including when CORS hides it", () => {
 	assert.equal(totalFromContentRange("bytes 0-1023/52428800"), 52428800);
@@ -24,6 +24,13 @@ test("probe: a file that fits in the probed range is the whole response", () => 
 	assert.deepEqual(probeVerdict({ status: 206, contentRange: null, contentEncoding: null, contentLength: "1500000" }, 8 * MB), { kind: "whole", length: 1500000 });
 	// encoded bytes are never used as the file
 	assert.deepEqual(probeVerdict({ status: 206, contentRange: "bytes 0-999/1000", contentEncoding: "br" }, 8 * MB), { kind: "download" });
+});
+
+test("probe through RACE_FILE_MAX: a mid-size file arrives whole in the probe, a bigger one is range-read", () => {
+	assert.deepEqual(probeVerdict({ status: 206, contentRange: `bytes 0-${12 * MB - 1}/${12 * MB}`, contentEncoding: null }, RACE_FILE_MAX), { kind: "whole", length: 12 * MB });
+	assert.deepEqual(probeVerdict({ status: 206, contentRange: null, contentEncoding: null, contentLength: String(25 * MB) }, RACE_FILE_MAX), { kind: "whole", length: 25 * MB });
+	assert.deepEqual(probeVerdict({ status: 206, contentRange: `bytes 0-${RACE_FILE_MAX - 1}/${60 * MB}`, contentEncoding: null }, RACE_FILE_MAX), { kind: "range", length: 60 * MB });
+	assert.ok(WHOLE_FILE_MAX < RACE_FILE_MAX);
 });
 
 test("probe read: the head block, or through page 1's section for a linearized file opening there", () => {

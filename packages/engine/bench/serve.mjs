@@ -4,7 +4,8 @@
 //   node bench/serve.mjs <root> [port=5300]
 // Query on the page URL is ignored; control it with these env vars or /__config:
 //   MBIT (default 0 = unthrottled), RTT (ms, default 0), RANGES=0 (ignore Range),
-//   EXPOSE=0 (no Access-Control-Expose-Headers, like a CDN that hides Content-Range)
+//   EXPOSE=0 (no Access-Control-Expose-Headers, like a CDN that hides Content-Range),
+//   ASSETS=0 (only PDFs are throttled: scripts and wasm arrive as if cached; Chrome does not cache over this self-signed cert)
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { open } from "node:fs/promises";
@@ -15,7 +16,7 @@ import { extname, join, normalize } from "node:path";
 
 const root = process.argv[2];
 const port = Number(process.argv[3] ?? 5300);
-const cfg = { mbit: Number(process.env.MBIT ?? 0), rtt: Number(process.env.RTT ?? 0), ranges: process.env.RANGES !== "0", expose: process.env.EXPOSE !== "0" };
+const cfg = { mbit: Number(process.env.MBIT ?? 0), rtt: Number(process.env.RTT ?? 0), ranges: process.env.RANGES !== "0", expose: process.env.EXPOSE !== "0", assets: process.env.ASSETS !== "0" };
 const extraRoots = (process.env.EXTRA_ROOTS ?? "").split(",").filter(Boolean);
 
 const certDir = join(tmpdir(), "lector-bench-cert");
@@ -80,7 +81,7 @@ const server = http2.createSecureServer({ key: readFileSync(join(certDir, "key.p
 	if (url.startsWith("/__config")) {
 		const q = new URL(url, "https://x").searchParams;
 		for (const k of ["mbit", "rtt"]) if (q.has(k)) cfg[k] = Number(q.get(k));
-		for (const k of ["ranges", "expose"]) if (q.has(k)) cfg[k] = q.get(k) !== "0";
+		for (const k of ["ranges", "expose", "assets"]) if (q.has(k)) cfg[k] = q.get(k) !== "0";
 		res.setHeader("Content-Type", "application/json");
 		res.end(JSON.stringify(cfg));
 		return;
@@ -126,10 +127,10 @@ const server = http2.createSecureServer({ key: readFileSync(join(certDir, "key.p
 		res.setHeader("Cache-Control", "public, max-age=3600");
 		res.setHeader("Content-Length", String(body.length));
 		requests.push({ id: nextId++, t: Date.now(), pdf: false, path: url.split("?")[0], method: req.method, range: null, bytes: body.length, status: 200 });
-		if (cfg.rtt) await sleep(cfg.rtt);
+		if (cfg.rtt && cfg.assets) await sleep(cfg.rtt);
 		for (let pos = 0; pos < body.length; pos += CHUNK) {
 			const chunk = body.subarray(pos, pos + CHUNK);
-			await take(chunk.length);
+			if (cfg.assets) await take(chunk.length);
 			if (!res.write(chunk)) await new Promise((r) => res.once("drain", r));
 		}
 		res.end();
@@ -155,7 +156,8 @@ const server = http2.createSecureServer({ key: readFileSync(join(certDir, "key.p
 	res.setHeader("Content-Length", String(end - start));
 	const id = nextId++;
 	requests.push({ id, t: Date.now(), pdf: isPdf, path: url.split("?")[0], method: req.method, range: req.headers.range ?? null, bytes: end - start, status: res.statusCode });
-	if (cfg.rtt) await sleep(cfg.rtt);
+	const throttled = isPdf || cfg.assets;
+	if (cfg.rtt && throttled) await sleep(cfg.rtt);
 	if (req.method === "HEAD") {
 		res.end();
 		return;
@@ -167,7 +169,7 @@ const server = http2.createSecureServer({ key: readFileSync(join(certDir, "key.p
 	try {
 		for (let pos = start; pos < end && !closed(); pos += CHUNK) {
 			const n = Math.min(CHUNK, end - pos);
-			await take(n);
+			if (throttled) await take(n);
 			const buf = Buffer.alloc(n);
 			await fh.read(buf, 0, n, pos);
 			if (closed()) break;

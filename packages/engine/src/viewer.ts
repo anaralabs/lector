@@ -22,7 +22,7 @@ import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
 import type { DocSource, DocumentInfo, OpenTiming, OutlineItem, PageSize, SizeHint, ToRaster } from "./protocol";
 import { rasterWorkerCount } from "./raster-pool";
-import { abandonWhole, HEAD_BYTES, probeReadBytes, probeVerdict, RANGE_GRANULE, readLinearization, WHOLE_FILE_MAX } from "./range";
+import { abandonWhole, HEAD_BYTES, probeReadBytes, probeVerdict, RACE_FILE_MAX, RANGE_GRANULE, readLinearization, WHOLE_FILE_MAX } from "./range";
 import { findStartxref, pagePathObjects, parseXref } from "./xref";
 import { getEngineSupport } from "./support";
 import { documentKey } from "./tile-cache";
@@ -219,13 +219,18 @@ async function readBlob(res: Response, url: string): Promise<Blob> {
 
 /** bytes read from the end of the file before the workers start: trailer, xref, and the object streams pdfTeX writes there */
 const TAIL_BYTES = 256 * 1024;
+/** also read while racing a whole download, in parallel: pdfTeX's object streams often reach further back, and a round trip costs more than the bytes */
+const RACE_TAIL_BYTES = 1024 * 1024;
 
-type Opened = { blob: Blob; mode: "download" | "whole" } | { length: number; seeds: [number, Uint8Array][] };
+/** `late`: seeds still arriving when the workers start */
+type Opened = { blob: Blob; mode: "download" | "whole" } | { length: number; seeds: [number, Uint8Array][]; stream?: FileStream; late?: Promise<[number, Uint8Array][]> };
 
 /** PDF requests the main thread made while opening, and when the first answered */
 interface NetCount {
 	requests: number;
 	firstByteAt: number;
+	/** PDF bytes the main thread received */
+	bytes: number;
 }
 
 async function rangeBytes(url: string, start: number, end: number, net: NetCount, signal?: AbortSignal): Promise<Uint8Array | null> {
@@ -235,6 +240,7 @@ async function rangeBytes(url: string, start: number, end: number, net: NetCount
 		const res = await fetch(url, { credentials: "same-origin", cache: "no-store", headers: { Range: `bytes=${start}-${end - 1}` }, signal });
 		if (res.status !== 206) return null;
 		const bytes = new Uint8Array(await res.arrayBuffer());
+		net.bytes += bytes.length;
 		return bytes.length === end - start ? bytes : null;
 	} catch {
 		return null;
@@ -265,9 +271,102 @@ async function readPrefix(res: Response, need: (bytes: Uint8Array) => number): P
 	return buf;
 }
 
+/** the most of a racing download's prefix handed to the workers as seeds (past it they wait for the whole file) */
+const STREAM_SEED_MAX = 4 * 1024 * 1024;
+/** the racing download's prefix goes to the workers in pieces of at least this */
+const STREAM_FORWARD_BYTES = 256 * 1024;
+
+/** The probe's body, read to the end in the background: its prefix seeds range reads, and once complete it is the file. */
+class FileStream {
+	readonly buf: Uint8Array<ArrayBuffer>;
+	received = 0;
+	/** stopped before the end: slower than range reads, failed, or no longer wanted */
+	stopped = false;
+	/** bytes [0, seeded) were handed to the workers */
+	seeded = 0;
+	readonly whole: Promise<Blob | null>;
+	onData?: () => void;
+	private firstAt = 0;
+	private waiters: { pos: number; resolve: (ok: boolean) => void }[] = [];
+	private reader: ReadableStreamDefaultReader<Uint8Array> | null;
+
+	constructor(
+		res: Response,
+		readonly length: number,
+		private rttMs: number,
+		private net: NetCount,
+	) {
+		this.buf = new Uint8Array(length);
+		this.reader = res.body?.getReader() ?? null;
+		this.whole = this.pump();
+	}
+
+	private async pump(): Promise<Blob | null> {
+		const reader = this.reader;
+		if (!reader) return this.stop();
+		try {
+			for (;;) {
+				const { done, value } = await reader.read();
+				if (this.stopped) return null;
+				if (done) break;
+				if (this.received + value.length > this.length) return this.stop();
+				this.buf.set(value, this.received);
+				this.received += value.length;
+				this.net.bytes += value.length;
+				this.firstAt ||= performance.now();
+				this.settle();
+				this.onData?.();
+				if (this.received < this.length && abandonWhole({ elapsedMs: performance.now() - this.firstAt, received: this.received, length: this.length, rttMs: this.rttMs })) return this.stop();
+			}
+		} catch {
+			return this.stop();
+		}
+		if (this.received !== this.length) return this.stop();
+		return new Blob([this.buf], { type: "application/pdf" });
+	}
+
+	stop(): null {
+		if (!this.stopped) {
+			this.stopped = true;
+			void this.reader?.cancel().catch(() => {});
+		}
+		for (const w of this.waiters.splice(0)) w.resolve(this.received >= w.pos);
+		this.onData = undefined;
+		return null;
+	}
+
+	private settle() {
+		this.waiters = this.waiters.filter((w) => {
+			if (this.received < w.pos) return true;
+			w.resolve(true);
+			return false;
+		});
+	}
+
+	/** true once bytes [0, pos) arrived, false if the stream stops first */
+	until(pos: number): Promise<boolean> {
+		if (this.received >= pos) return Promise.resolve(true);
+		if (this.stopped) return Promise.resolve(false);
+		return new Promise((resolve) => this.waiters.push({ pos, resolve }));
+	}
+
+	/** where the stream should be `ms` from now at its rate so far */
+	reach(ms: number): number {
+		if (this.stopped) return this.received;
+		// headers only so far: the head is on its way
+		if (!this.firstAt) return Math.min(this.length, HEAD_BYTES);
+		return Math.min(this.length, this.received + (this.received / Math.max(1, performance.now() - this.firstAt)) * ms);
+	}
+}
+
 /** Granules the main thread fetched, handed to every worker as seeds. */
 class SeedBlocks {
 	blocks = new Map<number, Uint8Array>();
+	/** a whole-file download still running: spans it reaches within `waitMs` come from it instead of a new request */
+	stream: FileStream | null = null;
+	waitMs = 0;
+	/** granule -> the request bringing it */
+	private pending = new Map<number, Promise<void>>();
 	constructor(
 		private url: string,
 		private length: number,
@@ -285,8 +384,13 @@ class SeedBlocks {
 	/** Fetches the missing blocks covering each [start, end) in parallel, coalescing neighbours. */
 	async ensure(spans: [number, number][]) {
 		const missing = new Set<number>();
+		const inFlight = new Set<Promise<unknown>>();
 		for (const [start, end] of spans) {
-			for (let s = Math.floor(start / RANGE_GRANULE) * RANGE_GRANULE; s < Math.min(end, this.length); s += RANGE_GRANULE) if (!this.blocks.has(s)) missing.add(s);
+			for (let s = Math.floor(start / RANGE_GRANULE) * RANGE_GRANULE; s < Math.min(end, this.length); s += RANGE_GRANULE) {
+				const pending = this.pending.get(s);
+				if (pending) inFlight.add(pending);
+				else if (!this.blocks.has(s)) missing.add(s);
+			}
 		}
 		const sorted = [...missing].sort((a, b) => a - b);
 		const runs: [number, number][] = [];
@@ -295,7 +399,25 @@ class SeedBlocks {
 			if (last && last[1] === s) last[1] = Math.min(this.length, s + RANGE_GRANULE);
 			else runs.push([s, Math.min(this.length, s + RANGE_GRANULE)]);
 		}
-		await Promise.all(runs.map(([s, e]) => rangeBytes(this.url, s, e, this.net, this.signal).then((b) => b && this.add(s, b))));
+		await Promise.all([...inFlight, ...runs.map(([s, e]) => this.fetchRun(s, e))]);
+	}
+
+	private async fetchRun(s: number, e: number) {
+		const request = (from: number, to: number) => {
+			const p = rangeBytes(this.url, from, to, this.net, this.signal).then((b) => {
+				if (b) this.add(from, b);
+				for (let g = from; g < to; g += RANGE_GRANULE) this.pending.delete(g);
+			});
+			for (let g = from; g < to; g += RANGE_GRANULE) this.pending.set(g, p);
+			return p;
+		};
+		const stream = this.stream;
+		const reach = stream ? Math.min(e, Math.ceil(stream.reach(this.waitMs) / RANGE_GRANULE) * RANGE_GRANULE) : 0;
+		if (!stream || s >= reach) return void (await request(s, e));
+		const rest = reach < e ? request(reach, e) : null;
+		if (await stream.until(reach)) this.add(s, stream.buf.slice(s, reach));
+		else await request(s, reach);
+		await rest;
 	}
 
 	bytes(start: number, end: number): Uint8Array | null {
@@ -373,11 +495,11 @@ async function openUrl(
 	if (!range) return download();
 	const askedAt = epochNow();
 	// A server that refuses the ranged request (e.g. a CORS preflight for `Range`) still serves the plain one.
-	const res = await fetchPdf(url, { headers: { Range: `bytes=0-${WHOLE_FILE_MAX - 1}` }, signal }).then(answered, () => null);
+	const res = await fetchPdf(url, { headers: { Range: `bytes=0-${RACE_FILE_MAX - 1}` }, signal }).then(answered, () => null);
 	if (!res) return download();
 	const rttMs = epochNow() - askedAt;
 	const header = (name: string) => res.headers.get(name);
-	const verdict = probeVerdict({ status: res.status, contentRange: header("Content-Range"), contentEncoding: header("Content-Encoding"), contentLength: header("Content-Length") }, WHOLE_FILE_MAX);
+	const verdict = probeVerdict({ status: res.status, contentRange: header("Content-Range"), contentEncoding: header("Content-Encoding"), contentLength: header("Content-Length") }, RACE_FILE_MAX);
 	if (verdict.kind === "full-body") return { blob: await readBlob(res, url), mode: "download" };
 	let length = verdict.kind === "range" || verdict.kind === "whole" ? verdict.length : 0;
 	if (verdict.kind === "need-length") {
@@ -390,10 +512,37 @@ async function openUrl(
 		return download();
 	}
 	const ranges = (head: Uint8Array | Response) => openRanges(url, length, head, firstPage, target, signal, net);
-	if (length > WHOLE_FILE_MAX) return ranges(res);
+	if (length > RACE_FILE_MAX) return ranges(res);
+	if (length > WHOLE_FILE_MAX) return race(url, res, length, rttMs, firstPage, target, signal, net);
 	const whole = await streamWhole(res, url, length, rttMs);
 	if (whole instanceof Blob) return whole.size === length ? { blob: whole, mode: "whole" } : download();
 	return ranges(whole);
+}
+
+/** The probe keeps downloading the whole file while range reads (seeded from its prefix) open the document; the first to be ready wins. */
+async function race(
+	url: string,
+	res: Response,
+	length: number,
+	rttMs: number,
+	firstPage: boolean,
+	target: number | ((count: number) => number),
+	signal: AbortSignal,
+	net: NetCount,
+): Promise<Opened> {
+	const stream = new FileStream(res, length, rttMs, net);
+	const ranging = new AbortController();
+	const stop = () => {
+		stream.stop();
+		ranging.abort();
+	};
+	signal.addEventListener("abort", stop, { once: true });
+	const viaRanges = openRanges(url, length, stream, firstPage, target, ranging.signal, net, rttMs);
+	const viaWhole = stream.whole.then((blob): Opened | Promise<Opened> => (blob ? { blob, mode: "whole" } : viaRanges));
+	const opened = await Promise.race([viaRanges.catch(() => viaWhole), viaWhole]);
+	if ("blob" in opened) ranging.abort();
+	if (!("seeds" in opened) && opened.mode !== "whole") stream.stop();
+	return opened;
 }
 
 /** The probe's body as the whole file, or the prefix that arrived before the download proved slower than range reads. */
@@ -429,16 +578,24 @@ async function streamWhole(res: Response, url: string, length: number, rttMs: nu
 async function openRanges(
 	url: string,
 	length: number,
-	head: Uint8Array | Response,
+	head: Uint8Array | Response | FileStream,
 	firstPage: boolean,
 	target: number | ((count: number) => number),
 	signal: AbortSignal,
 	net: NetCount,
+	rttMs = 0,
 ): Promise<Opened> {
 	const store = new SeedBlocks(url, length, net, signal);
+	if (head instanceof FileStream) {
+		store.stream = head;
+		store.waitMs = rttMs;
+	}
 	const tailStart = Math.floor(Math.max(0, length - TAIL_BYTES) / RANGE_GRANULE) * RANGE_GRANULE;
 	const tail = store.ensure([[tailStart, length]]);
-	const headBytes = head instanceof Response ? await readPrefix(head, (bytes) => probeReadBytes(bytes.length >= HEAD_BYTES ? readLinearization(bytes, length) : null, firstPage, length)) : head;
+	const farStart = Math.floor(Math.max(0, length - RACE_TAIL_BYTES) / RANGE_GRANULE) * RANGE_GRANULE;
+	const far = head instanceof FileStream && farStart < tailStart ? store.ensure([[farStart, tailStart]]) : null;
+	const headBytes =
+		head instanceof Response ? await readPrefix(head, (bytes) => probeReadBytes(bytes.length >= HEAD_BYTES ? readLinearization(bytes, length) : null, firstPage, length)) : head instanceof Uint8Array ? head : null;
 	if (headBytes) store.add(0, headBytes);
 	await Promise.all([tail, store.ensure([[0, Math.min(HEAD_BYTES, length)]])]);
 	const first = store.bytes(0, Math.min(HEAD_BYTES, length));
@@ -446,7 +603,13 @@ async function openRanges(
 	const lin = readLinearization(first, length);
 	if (lin && firstPage) await store.ensure([[0, probeReadBytes(lin, true, length)]]);
 	else await prefetchPagePath(store, tailStart, target).catch(() => {});
-	return { length, seeds: store.seeds() };
+	if (!(head instanceof FileStream)) return { length, seeds: store.seeds() };
+	head.seeded = Math.floor(Math.min(head.received, STREAM_SEED_MAX) / RANGE_GRANULE) * RANGE_GRANULE;
+	store.add(0, head.buf.slice(0, head.seeded));
+	const seeds = store.seeds();
+	const sent = new Set(seeds.map(([start]) => start));
+	const late = far?.then(() => [...store.blocks].filter(([start]) => start >= farStart && start < tailStart && !sent.has(start)));
+	return { length, seeds, stream: head, late };
 }
 
 /** the other raster workers wait at most this long for the first one to open the document */
@@ -528,7 +691,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	let fetchBytes = 0;
 	let loadMode: LoadTimings["loadMode"] = "memory";
 	let fileBytes = 0;
-	const net: NetCount = { requests: 0, firstByteAt: 0 };
+	const net: NetCount = { requests: 0, firstByteAt: 0, bytes: 0 };
+	let stream: FileStream | null = null;
+	let lateSeeds: Promise<[number, Uint8Array][]> | null = null;
 	const target = coreOptions.initialTarget;
 	const targetPage = target && "page" in target ? target.page : (coreOptions.initialPage ?? 0);
 	const targetFraction = target && "fraction" in target ? target.fraction : undefined;
@@ -542,7 +707,11 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		const pathTarget = targetFraction !== undefined ? (count: number) => targetFraction * count : targetPage;
 		opening = openUrl(absolute, rangeLoading, firstPage, pathTarget, network.signal, net).then((opened) => {
 			if ("blob" in opened) blob = opened.blob;
-			loadMode = "blob" in opened ? opened.mode : "range";
+			else {
+				stream = opened.stream ?? null;
+				lateSeeds = opened.late ?? null;
+			}
+			loadMode = "blob" in opened ? opened.mode : stream ? "race" : "range";
 			fetchMs = epochNow() - startedAt;
 			fetchBytes = blob?.size ?? (opened as { seeds: [number, Uint8Array][] }).seeds.reduce((sum, [, b]) => sum + b.length, 0);
 			fileBytes = blob?.size ?? (opened as { length: number }).length;
@@ -657,26 +826,61 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			return { current: () => worker, booted };
 		};
 		let fullFetch: Promise<Blob> | null = null;
-		const fetchAll = () => {
+		const arrived = (b: Blob) => {
+			if (blob) return blob;
+			blob = b;
+			for (const w of rasterWorkers) w().postMessage({ t: "source", blob: b });
+			command({ type: "remote", on: false });
+			return b;
+		};
+		const fetchAll = (): Promise<Blob> => {
 			if (blob) return Promise.resolve(blob);
+			if (fullFetch) return fullFetch;
+			// a racing download still running is the full fetch
+			if (stream && !stream.stopped) {
+				fullFetch = stream.whole.then((b) => {
+					fullFetch = null;
+					return b ? arrived(b) : fetchAll();
+				});
+				return fullFetch;
+			}
 			const url = (docSource as { url: string }).url;
 			// Low priority: it must not slow down range requests for what is on screen.
-			fullFetch ??= fetchPdf(url, { priority: "low", signal: network.signal } as RequestInit)
+			fullFetch = fetchPdf(url, { priority: "low", signal: network.signal } as RequestInit)
 				.then((res) => readBlob(res, url))
-				.then(
-					(b) => {
-						blob = b;
-						for (const w of rasterWorkers) w().postMessage({ t: "source", blob: b });
-						command({ type: "remote", on: false });
-						return b;
-					},
-					(err) => {
-						fullFetch = null;
-						throw err;
-					},
-				);
+				.then(arrived, (err) => {
+					fullFetch = null;
+					throw err;
+				});
 			return fullFetch;
 		};
+		// The racing download's prefix keeps seeding the workers, and once complete it is their source.
+		void opening.then(
+			() => {
+				const s = stream;
+				if (!s) return;
+				s.onData = () => {
+					const upTo = Math.floor(Math.min(s.received, STREAM_SEED_MAX) / RANGE_GRANULE) * RANGE_GRANULE;
+					if (upTo <= s.seeded || (upTo - s.seeded < STREAM_FORWARD_BYTES && upTo < STREAM_SEED_MAX)) return;
+					const start = s.seeded;
+					s.seeded = upTo;
+					for (const w of rasterWorkers) {
+						const data = s.buf.slice(start, upTo);
+						w().postMessage({ t: "block", start, data }, [data.buffer]);
+					}
+				};
+				void s.whole.then((b) => b && !destroyed && arrived(b));
+				void lateSeeds?.then((seeds) => {
+					if (destroyed || blob) return;
+					for (const w of rasterWorkers)
+						for (const [start, bytes] of seeds) {
+							const data = bytes.slice();
+							w().postMessage({ t: "block", start, data }, [data.buffer]);
+						}
+				});
+			},
+			() => {},
+		);
 
 		const canvas = document.createElement("canvas");
 		// Sized in px from `resized` events, so the browser never stretches a stale
@@ -760,6 +964,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				if (destroyed) return;
 				// A full file that arrived before this worker (e.g. during a respawn) replaces range requests.
 				const sizes: SizeHint | undefined = i > 0 ? undefined : blob ? { all: true } : sizeHint;
+				// the racing download finished first: the document opens from it
+				if (i === 0 && blob && loadMode === "race") loadMode = "whole";
 				const init: ToRaster = { t: "init", source: blob ? { kind: "blob", blob } : docSource!,				port: channel.port1, wasmUrl, password: latestPassword, sizes };
 				try {
 					worker.postMessage(module ? { ...init, module } : init, [channel.port1]);
@@ -838,6 +1044,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			} else if (e.type === "painted") {
 				// Range loading: the first page is up; now fetch the rest in the background.
 				if (autoFetch && !blob) void fetchAll().catch(() => {});
+				else if (!autoFetch && !loadTimings) stream?.stop();
 				if (!loadTimings && readyAt) {
 					const paintedAt = e.timing?.paintedAt ?? epochNow();
 					loadTimings = {
@@ -854,7 +1061,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 						loadMode,
 						fileKB: Math.round(fileBytes / 1024),
 						requestsBeforePaint: net.requests + workerRequests,
-						kbBeforePaint: Math.round((loadMode === "range" ? fetchBytes + workerBytes : loadMode === "memory" ? 0 : fileBytes) / 1024),
+						kbBeforePaint: Math.round((loadMode === "range" ? fetchBytes + workerBytes : loadMode === "race" ? net.bytes + workerBytes : loadMode === "memory" ? 0 : fileBytes) / 1024),
 						ttfbMs: net.firstByteAt ? net.firstByteAt - startedAt : 0,
 					};
 					if (onEvent) {
