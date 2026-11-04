@@ -520,7 +520,8 @@ export class ViewerCore {
 	private settleTimer: ReturnType<typeof setTimeout> | null = null;
 
 	private texts = new Map<number, PageText>();
-	private textPending = new Set<number>();
+	/** page -> priority of its queued text job */
+	private textPending = new Map<number, number>();
 	/** raster image boxes per page (l, t, r, b in points), kept in original colours in dark mode */
 	private images = new Map<number, Float32Array>();
 	private links = new Map<number, Link[]>();
@@ -539,6 +540,18 @@ export class ViewerCore {
 	private dragging = false;
 	private pointer = { x: 0, y: 0 };
 	private downAt: { x: number; y: number } | null = null;
+	/** a mouse press on a page whose text had not arrived: anchored once it does (doc points) */
+	private pendingPress: {
+		page: number;
+		x: number;
+		y: number;
+		clicks: number;
+		shift: boolean;
+		gen: number;
+		release: { x: number; y: number } | null;
+		/** the anchor is set; only the release point's page was still loading */
+		anchored?: boolean;
+	} | null = null;
 	private cursor: Cursor = "default";
 	private hovered: string | null = null;
 
@@ -558,7 +571,7 @@ export class ViewerCore {
 	private velocity = { x: 0, y: 0 };
 	private samples: { t: number; x: number; y: number }[] = [];
 	private gestureZoom: number | null = null;
-	private press: { x: number; y: number; t: number; timer: ReturnType<typeof setTimeout> | null } | null = null;
+	private press: { x: number; y: number; t: number; timer: ReturnType<typeof setTimeout> | null; waitingText?: number } | null = null;
 	/** a finger is extending the selection (after a long-press or on a handle) */
 	private touchSelect = false;
 	/** finger -> hit-test point offset while dragging a handle */
@@ -1282,6 +1295,12 @@ export class ViewerCore {
 		press.timer = null;
 		const at = this.toPage(press.x, press.y);
 		const text = at && this.texts.get(at.page);
+		if (at && !text) {
+			// Text still loading: select once it arrives, if the finger is still down.
+			press.waitingText = at.page;
+			this.requestText(at.page, 0);
+			return;
+		}
 		if (!at || !text || !text.isOverText(at.x, at.y)) return;
 		const hit = this.hitPoint(press.x, press.y);
 		if (!hit) return;
@@ -1361,24 +1380,25 @@ export class ViewerCore {
 		if (msg.phase === "down" && msg.buttons & 1) {
 			this.selGen++;
 			this.downAt = { x: msg.x, y: msg.y };
+			this.pendingPress = null;
 			const hit = this.hitPoint(msg.x, msg.y);
 			if (!hit) {
-				this.clearSelection();
+				const at = this.toPage(msg.x, msg.y);
+				if (!at || !this.textPending.has(at.page)) {
+					this.clearSelection();
+					return;
+				}
+				// The page's text is on its way (raised to the front by hitPoint): keep the gesture.
+				this.dragging = true;
+				this.handles = false;
+				// no anchor until the text arrives, so moves meanwhile cannot change the range
+				this.selAnchor = null;
+				if (!msg.shift) this.setRange(null);
+				this.pendingPress = { page: at.page, ...this.toDoc(msg.x, msg.y), clicks: msg.clicks, shift: msg.shift, gen: this.selGen, release: null };
+				this.emit({ type: "selection", selection: null, final: false });
 				return;
 			}
-			this.dragging = true;
-			this.handles = false;
-			this.emit({ type: "selection", selection: null, final: false });
-			if (msg.shift && this.selRange) {
-				this.selUnit = "char";
-				this.selAnchor = [this.selRange[0], this.selRange[0]];
-				this.setFocus(hit);
-				return;
-			}
-			this.selUnit = msg.clicks >= 3 ? "line" : msg.clicks === 2 ? "word" : "char";
-			this.selAnchor = this.expand(hit);
-			if (this.selUnit === "char") this.setRange(null);
-			else this.setFocus(hit);
+			this.startSelection(hit, msg.shift, msg.clicks);
 			return;
 		}
 		if (msg.phase === "move") {
@@ -1390,12 +1410,72 @@ export class ViewerCore {
 			const down = this.downAt;
 			this.downAt = null;
 			const click = msg.phase === "up" && down && Math.hypot(msg.x - down.x, msg.y - down.y) < CLICK_SLOP && msg.clicks <= 1;
+			const waiting = this.pendingPress;
+			if (waiting) {
+				this.dragging = false;
+				if ((click && !waiting.shift) || msg.phase === "cancel") {
+					this.pendingPress = null;
+					this.emitSelection(true);
+					if (click && !this.selRange) this.click(msg.x, msg.y);
+				} else waiting.release = this.toDoc(msg.x, msg.y);
+				return;
+			}
 			if (this.dragging) {
 				this.dragging = false;
 				this.emitSelection(true);
 			}
 			if (click && !this.selRange) this.click(msg.x, msg.y);
 		}
+	}
+
+	private startSelection(hit: TextPoint, shift: boolean, clicks: number) {
+		this.dragging = true;
+		this.handles = false;
+		this.emit({ type: "selection", selection: null, final: false });
+		if (shift && this.selRange) {
+			this.selUnit = "char";
+			this.selAnchor = [this.selRange[0], this.selRange[0]];
+			this.setFocus(hit);
+			return;
+		}
+		this.selUnit = clicks >= 3 ? "line" : clicks === 2 ? "word" : "char";
+		this.selAnchor = this.expand(hit);
+		if (this.selUnit === "char") this.setRange(null);
+		else this.setFocus(hit);
+	}
+
+	/** A press that waited for this page's text starts its selection where it was made. */
+	private resolvePress(page: number) {
+		const p = this.pendingPress;
+		if (!p || p.page !== page) return;
+		this.pendingPress = null;
+		if (p.gen !== this.selGen) return;
+		if (!p.anchored) {
+			const anchor = this.hitDoc(p.x, p.y);
+			if (!anchor) return;
+			const dragging = this.dragging;
+			this.startSelection(anchor, p.shift, p.clicks);
+			if (dragging) {
+				this.updateDrag();
+				return;
+			}
+			this.dragging = false;
+		}
+		const release = p.release;
+		const focusPage = release ? this.pageAtDocY(release.y) : -1;
+		if (release && !this.texts.has(focusPage)) {
+			this.pendingPress = { ...p, page: focusPage, anchored: true, gen: this.selGen };
+			this.requestText(focusPage, 0);
+			return;
+		}
+		const focus = release && this.hitDoc(release.x, release.y);
+		if (focus) this.setFocus(focus);
+		this.emitSelection(true);
+		this.requestFrame();
+	}
+
+	private toDoc(sx: number, sy: number) {
+		return { x: this.cam.x + sx / this.cam.zoom, y: this.cam.y + sy / this.cam.zoom };
 	}
 
 	/** Doc point -> page index and page-local point. */
@@ -1868,9 +1948,12 @@ export class ViewerCore {
 	}
 
 	private hitPoint(sx: number, sy: number): TextPoint | null {
+		const { x, y } = this.toDoc(sx, sy);
+		return this.hitDoc(x, y);
+	}
+
+	private hitDoc(dx: number, dy: number): TextPoint | null {
 		if (this.layout.length === 0) return null;
-		const dx = this.cam.x + sx / this.cam.zoom;
-		const dy = this.cam.y + sy / this.cam.zoom;
 		const page = this.pageAtDocY(dy);
 		const r = this.layout[page]!;
 		const text = this.texts.get(page);
@@ -2043,8 +2126,16 @@ export class ViewerCore {
 	}
 
 	private requestText(page: number, priority: number) {
-		if (this.texts.has(page) || this.textPending.has(page)) return;
-		this.textPending.add(page);
+		if (this.texts.has(page)) return;
+		const queued = this.textPending.get(page);
+		if (queued !== undefined && queued <= priority) return;
+		this.textPending.set(page, priority);
+		if (queued !== undefined) {
+			// already requested: only raise its priority (a press is waiting on it)
+			this.pool.request(`text:${page}`, priority, { t: "text", page }, () => {});
+			this.pool.pump();
+			return;
+		}
 		this.pool.request(`text:${page}`, priority, { t: "text", page }, (res) => {
 			this.textPending.delete(page);
 			if (res.t !== "text") {
@@ -2053,6 +2144,7 @@ export class ViewerCore {
 					this.texts.set(page, new PageText(new Uint32Array(0), new Float32Array(0)));
 					for (const fn of this.textWaiters.get(page) ?? []) fn();
 					this.textWaiters.delete(page);
+					this.textArrived(page);
 				}
 				return;
 			}
@@ -2066,10 +2158,23 @@ export class ViewerCore {
 			}
 			for (const fn of this.textWaiters.get(page) ?? []) fn();
 			this.textWaiters.delete(page);
-			if (this.dragging) this.updateDrag();
-			else this.updateCursor(this.pointer.x, this.pointer.y);
+			this.textArrived(page);
 		});
 		this.pool.pump();
+	}
+
+	private textArrived(page: number) {
+		if (this.press?.waitingText === page && this.press.timer === null && this.touches.size === 1) {
+			this.press.waitingText = undefined;
+			this.longPress();
+			return;
+		}
+		if (this.pendingPress?.page === page) {
+			this.resolvePress(page);
+			return;
+		}
+		if (this.dragging) this.updateDrag();
+		else this.updateCursor(this.pointer.x, this.pointer.y);
 	}
 
 	// ---------------------------------------------------------------- tiles

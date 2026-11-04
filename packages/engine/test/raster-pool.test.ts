@@ -158,3 +158,31 @@ test("a waiting visible job cancels an unwanted render even when another worker 
 	assert.equal(ports[1]!.busy?.page, 1);
 	assert.ok(ports[0]!.sent.some((m) => m.t === "cancel"));
 });
+
+test("page text never waits behind a busy worker while another is idle", () => {
+	const { pool, ports, finish, tile, advance } = setup(2);
+	// A scan: 60ms cold, 1ms per tile once loaded, so its tiles stay on the worker that has it.
+	tile("base", 0, 0, 1);
+	pool.pump();
+	const [a, b] = ports;
+	finish(a!, 60);
+	tile("t1", 0, 10);
+	pool.pump();
+	finish(a!, 1);
+	tile("t2", 0, 10);
+	pool.pump();
+	assert.equal(a!.busy?.page, 0);
+	advance(0.5);
+	pool.request("text:0", 20, { t: "text", page: 0 }, () => {});
+	pool.pump();
+	assert.equal(b!.sent.at(-1)?.t, "text", "the idle worker extracts the text instead of queueing behind the tile");
+});
+
+test("text cost is learned from what extraction took", () => {
+	const { pool, ports } = setup(1);
+	pool.request("text:3", 20, { t: "text", page: 3 }, () => {});
+	pool.pump();
+	const job = ports[0]!.busy!;
+	ports[0]!.reply({ t: "text", id: job.id, page: 3, codes: new Uint32Array(0), boxes: new Float32Array(0), links: [], images: new Float32Array(0), scans: 1, size: { w: 1, h: 1 }, ms: 120, heap: 0 });
+	assert.ok((pool as unknown as { textMs: number }).textMs > 30);
+});

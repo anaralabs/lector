@@ -187,6 +187,64 @@ const scanHits = await page.evaluate(() => window.__viewer.search("invoice"));
 check("scan OCR text searchable", scanHits.length === 1 && scanHits[0].page === 0, `${scanHits.length} hits`);
 }
 
+// Selection that starts before the page's text arrives (slow scans): the gesture waits for it instead of being dropped.
+if (!(await has("scan.pdf"))) skip("selection before text", "scan.pdf");
+else {
+	await page.goto(fixture("scan.pdf", "&offscreen=0"));
+	await page.waitForFunction(() => window.__firstPaintMs !== undefined && window.__core?.texts.has(0));
+	const at = await page.evaluate(() => {
+		const c = window.__core;
+		const request = c.pool.request.bind(c.pool);
+		c.pool.request = (key, priority, msg, onDone, ...rest) => request(key, priority, msg, key === "text:0" ? (res) => setTimeout(() => onDone(res), 400) : onDone, ...rest);
+		window.__dropText = () => {
+			window.__viewer.clearSelection();
+			c.texts.delete(0);
+			c.textPending.delete(0);
+		};
+		const r = c.layout[0];
+		const sx = (x) => (r.x + x - c.cam.x) * c.cam.zoom;
+		return { x0: sx(72), x1: sx(250), y: (r.y + 97 - c.cam.y) * c.cam.zoom };
+	});
+	const selected = () => page.evaluate(() => window.__viewer.selectedText);
+	await page.evaluate(() => window.__dropText());
+	await page.mouse.move(at.x0, at.y);
+	await page.mouse.down();
+	await page.mouse.move(at.x1, at.y, { steps: 12 });
+	await page.waitForTimeout(600);
+	await page.mouse.up();
+	const slow = await selected();
+	await page.evaluate(() => window.__dropText());
+	await page.mouse.move(at.x0, at.y);
+	await page.mouse.down();
+	await page.mouse.move(at.x1, at.y, { steps: 3 });
+	await page.mouse.up();
+	const early = await selected();
+	await page.waitForTimeout(700);
+	const quick = await selected();
+	await page.evaluate(() => window.__dropText());
+	await page.mouse.click(at.x0 + 40, at.y, { clickCount: 2 });
+	await page.waitForTimeout(700);
+	const word = await selected();
+	await page.evaluate(() => {
+		window.__core.texts.delete(0);
+		window.__core.textPending.delete(0);
+	});
+	await page.keyboard.down("Shift");
+	await page.mouse.click(at.x1, at.y);
+	await page.keyboard.up("Shift");
+	await page.waitForTimeout(700);
+	const extended = await selected();
+	await page.evaluate(() => window.__dropText());
+	await page.mouse.click(at.x0 + 40, at.y);
+	await page.waitForTimeout(700);
+	const click = await selected();
+	check("drag that starts before the text arrives", /invoice/.test(slow), JSON.stringify(slow));
+	check("drag released before the text arrives selects once it does", early === "" && /invoice/.test(quick), JSON.stringify([early, quick]));
+	check("double-click before the text arrives selects the word", word.trim() === "Scanned", JSON.stringify(word));
+	check("shift-click before the text arrives extends the selection", extended.startsWith("Scanned invoice"), JSON.stringify(extended));
+	check("plain click before the text arrives selects nothing", click === "", JSON.stringify(click));
+}
+
 // Password-protected documents: a typed error, then unlock().
 if (!(await has("password.pdf"))) skip("password", "password.pdf");
 else {
