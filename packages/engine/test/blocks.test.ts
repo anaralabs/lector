@@ -44,7 +44,8 @@ test("range fallback: blocks after the size change come from the right offsets",
 	assert.deepEqual(read(cache, 262144 + 50, 100), file.subarray(262194, 262294));
 });
 
-test("a read across missing blocks is one request; cached blocks split it", () => {
+test("a read across missing blocks is one request; a cached block splits it, a few cached granules do not", () => {
+	const G = 16 * 1024;
 	const { cache, calls } = ranged();
 	assert.deepEqual(read(cache, K - 10, 20), file.subarray(K - 10, K + 10));
 	assert.deepEqual(calls, [[0, 2 * K]]);
@@ -56,6 +57,11 @@ test("a read across missing blocks is one request; cached blocks split it", () =
 		[2 * K, 3 * K],
 		[4 * K, 6 * K],
 	]);
+	calls.length = 0;
+	// one cached granule in the middle is fetched again rather than costing a second round trip
+	cache.seed(8 * K + G, file.slice(8 * K + G, 8 * K + 2 * G));
+	assert.deepEqual(read(cache, 8 * K, 2 * K), file.subarray(8 * K, 10 * K));
+	assert.deepEqual(calls, [[8 * K, 10 * K]]);
 });
 
 test("sequential misses read further ahead each time, up to maxRun", () => {
@@ -136,4 +142,75 @@ test("fetched blocks are reported for sharing, seeded ones are not", () => {
 	cache.seed(0, file.slice(0, K));
 	read(cache, 0, 2 * K);
 	assert.deepEqual(shared, [K]);
+});
+
+test("each request is reported once with all its bytes, so the host can count requests", () => {
+	const runs: [number, number][] = [];
+	const cache = new BlockCache(file.length, { size: () => K, fetch: (s, e) => file.slice(s, e) }, { onFetched: (s, d) => runs.push([s, s + d.length]) });
+	read(cache, 0, 3 * K);
+	read(cache, 8 * K, 1);
+	assert.deepEqual(runs, [
+		[0, 3 * K],
+		[8 * K, 9 * K],
+	]);
+	assert.equal(cache.requests, 2);
+});
+
+test("seeds finer than a block: a scattered object costs no request, a miss next to it starts after it", () => {
+	const G = 16 * 1024;
+	const calls: [number, number][] = [];
+	const fetch = (s: number, e: number) => {
+		calls.push([s, e]);
+		return file.slice(s, e);
+	};
+	const cache = new BlockCache(file.length, { size: () => 4 * K, fetch }, { granule: G });
+	cache.seed(5 * G, file.slice(5 * G, 6 * G));
+	assert.deepEqual(read(cache, 5 * G + 7, 100), file.subarray(5 * G + 7, 5 * G + 107));
+	assert.equal(calls.length, 0);
+	// a read over it is still one request
+	assert.deepEqual(read(cache, 0, 8 * G), file.subarray(0, 8 * G));
+	assert.deepEqual(calls, [[0, 4 * K]]);
+});
+
+test("read-ahead stops at maxRun blocks", () => {
+	const calls: [number, number][] = [];
+	const fetch = (s: number, e: number) => {
+		calls.push([s, e]);
+		return file.slice(s, e);
+	};
+	const cache = new BlockCache(file.length, { size: () => K, fetch }, { maxRun: 2 });
+	for (let pos = 0; pos < 8 * K; pos += K) read(cache, pos, K);
+	assert.ok(calls.every(([s, e]) => e - s <= 2 * K));
+});
+
+test("cached granules at the block start are skipped; the request starts at the first missing one", () => {
+	const G = 16 * 1024;
+	const calls: [number, number][] = [];
+	const fetch = (s: number, e: number) => {
+		calls.push([s, e]);
+		return file.slice(s, e);
+	};
+	const cache = new BlockCache(file.length, { size: () => 4 * K, fetch }, { granule: G });
+	cache.seed(0, file.slice(0, 3 * G));
+	cache.seed(5 * G, file.slice(5 * G, 6 * G));
+	assert.deepEqual(read(cache, 7 * G + 3, 10), file.subarray(7 * G + 3, 7 * G + 13));
+	assert.deepEqual(calls, [[3 * G, 4 * K]]);
+});
+
+test("random reads over random seeds always return the file's bytes", () => {
+	let seed = 7;
+	const rand = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+	const G = 16 * 1024;
+	for (let trial = 0; trial < 20; trial++) {
+		const cache = new BlockCache(file.length, { size: () => 4 * K, fetch: (s, e) => file.slice(s, e) }, { granule: G, maxRun: 4, max: Math.floor(rand() * 600_000) + G });
+		for (let i = 0; i < 12; i++) {
+			const s = Math.floor((rand() * file.length) / G) * G;
+			cache.seed(s, file.slice(s, Math.min(file.length, s + G * (1 + Math.floor(rand() * 3)))));
+		}
+		for (let i = 0; i < 300; i++) {
+			const pos = Math.floor(rand() * file.length);
+			const n = Math.max(1, Math.min(file.length - pos, Math.floor(rand() * (rand() < 0.1 ? 300_000 : 5000))));
+			assert.deepEqual(read(cache, pos, n), file.subarray(pos, pos + n));
+		}
+	}
 });

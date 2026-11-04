@@ -8,7 +8,12 @@ export function totalFromContentRange(header: string | null): number | null {
 	return total > 0 ? total : null;
 }
 
+/** files up to this size open from one request instead of range reads */
+export const WHOLE_FILE_MAX = 8 * 1024 * 1024;
+
 export type ProbeVerdict =
+	/** the 206 body is the entire file (it fits in the probed range): read it to the end */
+	| { kind: "whole"; length: number }
 	/** ranges work: read blocks on demand */
 	| { kind: "range"; length: number }
 	/** ranges work but the total is hidden (CORS without `Content-Range` exposed): ask with HEAD */
@@ -19,17 +24,31 @@ export type ProbeVerdict =
 	| { kind: "download" };
 
 /**
- * What a `Range: bytes=0-N` probe says. Encoded (compressed) responses cannot be
- * range-read: offsets would point into compressed bytes. `Content-Encoding` is
- * not visible cross-origin unless exposed, so a body longer than asked for also
- * counts as "not ranged".
+ * What a `Range: bytes=0-(asked - 1)` probe says. Encoded (compressed)
+ * responses cannot be range-read: offsets would point into compressed bytes.
+ * `Content-Encoding` is not visible cross-origin unless exposed, so a body
+ * longer than asked for also counts as "not ranged". `Content-Length` is always
+ * readable: shorter than asked means the range was clipped to the whole file.
  */
-export function probeVerdict(res: { status: number; contentRange: string | null; contentEncoding: string | null }): ProbeVerdict {
+export function probeVerdict(
+	res: { status: number; contentRange: string | null; contentEncoding: string | null; contentLength?: string | null },
+	asked: number,
+): ProbeVerdict {
 	if (res.status === 200) return { kind: "full-body" };
 	if (res.status !== 206) return { kind: "download" };
 	if ((res.contentEncoding ?? "identity") !== "identity") return { kind: "download" };
 	const total = totalFromContentRange(res.contentRange);
-	return total ? { kind: "range", length: total } : { kind: "need-length" };
+	if (total) return total <= asked ? { kind: "whole", length: total } : { kind: "range", length: total };
+	const sent = Number(res.contentLength ?? 0);
+	if (sent > 0 && sent < asked) return { kind: "whole", length: sent };
+	return { kind: "need-length" };
+}
+
+/** How much of the probe's body to read before cancelling it: the head block, or through page 1's section for a linearized file opening there. */
+export function probeReadBytes(lin: { firstPageEnd: number } | null, firstPage: boolean, length: number): number {
+	const head = Math.min(length, HEAD_BYTES);
+	if (!lin || !firstPage) return head;
+	return Math.max(head, Math.min(length, WHOLE_FILE_MAX, Math.ceil(lin.firstPageEnd / RANGE_GRANULE) * RANGE_GRANULE));
 }
 
 export type BlockVerdict = "ok" | "full" | "error";
@@ -77,5 +96,24 @@ export function readLinearization(head: Uint8Array, fileLen: number): { firstPag
 	return { firstPageEnd: E, pages: N };
 }
 
-/** block size for range reads (a worker's cache and the main thread's seeds align to it) */
-export const RANGE_BLOCK = 16 * 1024;
+/** a whole-file download is reconsidered once it has run this long */
+export const WHOLE_PATIENCE_MS = 1500;
+/** what opening from range reads costs before the first paint, roughly (benchmarks with 256KB reads: 3-15 requests, 0.3-2.5MB) */
+const RANGE_OPEN_TRIPS = 8;
+const RANGE_OPEN_BYTES = 1024 * 1024;
+
+/** The rest of a whole-file download at its rate so far would take clearly longer than range reads need (slow start makes the rate err low, towards ranges). */
+export function abandonWhole(s: { elapsedMs: number; received: number; length: number; rttMs: number }): boolean {
+	if (s.elapsedMs < WHOLE_PATIENCE_MS || s.received <= 0 || s.received >= s.length) return false;
+	const perMs = s.received / s.elapsedMs;
+	return (s.length - s.received) / perMs > 1.25 * (RANGE_OPEN_TRIPS * s.rttMs + RANGE_OPEN_BYTES / perMs);
+}
+
+/** the least a worker's range read fetches (fewer round trips; costs some bytes on slow links) */
+export const RANGE_BLOCK = 256 * 1024;
+/** unit of a worker's block cache and of the main thread's seeds, so scattered objects cost little */
+export const RANGE_GRANULE = 16 * 1024;
+/** the file's first bytes read from the probe: header and linearization dictionary */
+export const HEAD_BYTES = 64 * 1024;
+/** the most one range read fetches as read-ahead grows */
+export const RANGE_MAX_RUN = 1024 * 1024;

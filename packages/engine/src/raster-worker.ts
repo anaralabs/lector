@@ -5,7 +5,7 @@
 import { BlockCache } from "./blocks";
 import { init, type Pdfium } from "./pdfium/pdfium.js";
 import type { DocSource, DocumentInfo, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
-import { blockVerdict, openErrorCode, RANGE_BLOCK, retryableBlockStatus } from "./range";
+import { blockVerdict, openErrorCode, RANGE_BLOCK, RANGE_GRANULE, RANGE_MAX_RUN, retryableBlockStatus } from "./range";
 
 const FPDF_ANNOT = 0x01;
 const FPDF_REVERSE_BYTE_ORDER = 0x10; // RGBA instead of BGRA
@@ -570,7 +570,7 @@ function loadFailureDetail(err: number): LoadFailureDetail {
 // from HTTP range requests (sync XHR, allowed in workers), through a small LRU
 // cache. No worker holds a copy of the whole file.
 const BLOB_BLOCK = 64 * 1024;
-// Small: misses next to each other coalesce into one request, and sequential reads grow their read-ahead.
+// Misses next to each other coalesce into one request, and sequential reads grow their read-ahead.
 const URL_BLOCK = RANGE_BLOCK;
 
 let source: DocSource | null = null;
@@ -841,7 +841,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 		const copy = data.slice();
 		self.postMessage({ t: "block", start, data: copy }, [copy.buffer]);
 	};
-	cache = new BlockCache(fileLen, { size: () => blockSize, fetch: fetchBlock }, { onFetched: share });
+	cache = new BlockCache(fileLen, { size: () => blockSize, fetch: fetchBlock }, { onFetched: share, granule: RANGE_GRANULE, maxRun: Math.max(1, RANGE_MAX_RUN / URL_BLOCK) });
 	if (source.kind === "url") for (const [start, data] of [...(source.seeds ?? []), ...early.splice(0)]) cache.seed(start, data);
 	loadDocument(pendingPassword ?? msg.password);
 }
@@ -858,7 +858,7 @@ self.onmessage = (ev: MessageEvent<ToRaster>) => {
 	}
 	if (ev.data.t === "block") {
 		if (!cache) early.push([ev.data.start, ev.data.data]);
-		else if (source?.kind === "url" && blockSize === URL_BLOCK) cache.seed(ev.data.start, ev.data.data);
+		else if (source?.kind === "url") cache.seed(ev.data.start, ev.data.data);
 		return;
 	}
 	if (ev.data.t !== "init") return;

@@ -97,7 +97,7 @@ Pages are **0-based** everywhere. Page-space geometry is in PDF points with a to
 
 ###`createViewer(container, source, options): Promise<Viewer>`
 
-`source` is a URL, `ArrayBuffer` or `Uint8Array`. The workers start (and compile pdfium) while the file downloads; the promise resolves once the file (or, with `rangeLoading`, its first and last 64KB) has arrived, and the document opens asynchronously (await `viewer.loaded` or listen for `ready`). It rejects with an `EngineError` when the browser is unsupported (`code: "unsupported"`), the fetch fails (`"fetch"`), or the main-thread WebGL2 context cannot be created (`"gpu"`).
+`source` is a URL, `ArrayBuffer` or `Uint8Array`. The workers start (and compile pdfium) while the file downloads; the promise resolves once the file (or, with `rangeLoading` and a file over 8MB, its first 64KB and last 256KB) has arrived, and the document opens asynchronously (await `viewer.loaded` or listen for `ready`). It rejects with an `EngineError` when the browser is unsupported (`code: "unsupported"`), the fetch fails (`"fetch"`), or the main-thread WebGL2 context cannot be created (`"gpu"`).
 
 `ViewerOptions` (creation-only, plus every `CoreOptions` below):
 
@@ -265,10 +265,12 @@ Raster workers never hold a copy of the document. Each one opens it with `FPDF_L
 
 `rangeLoading: true` opens the document from HTTP range requests and draws the page in view before the rest of the file has downloaded:
 
-- The main thread reads the first 64KB (which also probes for range support) and the last 64KB (trailer and cross-reference table) while the workers boot, and hands both to every worker. For a linearized file opening on its first page, the first page's section (`/E`) is read in the same step.
-- Workers read 64KB blocks with synchronous range requests as PDFium asks for bytes. Missing blocks next to each other go out as one request, and reads that keep moving forward fetch further ahead each time (up to 1MB). A block one worker downloads is passed to the others, and a page's jobs stay on the worker that loaded it, so each byte crosses the network once.
+- The main thread probes with `Range: bytes=0-8388607`. A file up to 8MB comes back whole in that one response and opens from memory, like a plain download: for a small file, one request beats the round trips PDFium makes while opening and drawing a page. If that download is still far from done after 1.5s at the rate so far (a slow link), it stops and the bytes that arrived seed range reads instead. For a larger file the probe's body is read only as far as the first 64KB (or, for a linearized file opening on its first page, through that page's section `/E`) and the rest is cancelled; the last 256KB (trailer, cross-reference table, and the object streams pdfTeX writes at the end) is requested as soon as the probe's headers give the length. Both go to every worker.
+- Workers read at least 256KB per synchronous range request as PDFium asks for bytes. Missing blocks next to each other go out as one request, and reads that keep moving forward fetch further ahead each time (up to 1MB). The cache keeps 16KB granules, so the objects the main thread prefetches for a deep page (16KB each) do not each cost a 256KB read. A request one worker makes is passed to the others, and a page's jobs stay on the worker that loaded it, so each byte crosses the network once.
 - Only the sizes of the pages the view opens on are read up front (`initialTarget`/`initialPage` and their neighbours, plus page 1). The other pages are laid out at the nearest known size, are never rasterised as estimates, and get their real sizes in the background, pages in view first. When an estimate resolves, the camera moves with the layout so the content on screen stays still (`layout` event). `scrollToFraction` (and `initialTarget: { fraction }`) made before every size is known is re-applied as sizes arrive, until the reader moves.
 - After the first paint, the whole file downloads in the background at low priority (`autoFetch`), and the workers switch to it.
+
+The `load` event's `LoadTimings` says which way a document opened (`loadMode`: `memory`, `download`, `whole` or `range`), its size (`fileKB`), the PDF requests and KB downloaded before the first paint (`requestsBeforePaint`, `kbBeforePaint`, worker range reads included), and the time to the first PDF response headers (`ttfbMs`), next to `fetchMs`, `readyMs` and `firstPaintMs`.
 
 It falls back to a full download when the server ignores `Range` (the 200 response is used as is) or compresses the response. A cross-origin server that does not expose `Content-Range` costs one extra `HEAD` for the length (`Content-Length` is always readable). Range loading stays **opt-in** because requests are synchronous inside the workers (a slow block stalls that worker), and because in files whose page dictionaries are spread out (no object streams) resolving every size costs about one request per page: the first paint does not wait for that, but `layout` keeps changing in the background until it is done or the full download lands.
 
@@ -316,6 +318,7 @@ node bench/frames.mjs     # frame timing (HEADED=1 for a vsync'd window)
 node bench/memory.mjs [/big.pdf] ["&range=1"] [Mbit/s]   # ready/painted time and memory
 node bench/serve.mjs demo/dist   # HTTP/2 + ranges + server-side throttling, for open-at.mjs
 MBIT=10 RTT=40 SETTLE=1 node bench/open-at.mjs https://127.0.0.1:5300 "file=/scan-big.pdf&page=32&topFraction=0.5&range=1&track=32"   # first paint, bytes before it, view movement
+node bench/load-matrix.mjs https://127.0.0.1:5300 3 full:main:range=0 range:main:range=1 -- /pdf/small.pdf -- 10/50 50/150   # first paint per build × file × Mbit/RTT (builds under /<name>/, see the header)
 ```
 
 Fixtures other than `cadbots.pdf` are generated, not committed: `node bench/fixtures/make-{scan,password,form,rtl,links,big,scan-big}.mjs`. They need `pdf-lib` (and `mupdf` for the password fixture). Point `PDF_LIB` / `MUPDF` at those packages. `features.mjs` skips checks whose fixture is missing.

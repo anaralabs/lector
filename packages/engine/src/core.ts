@@ -350,7 +350,7 @@ export const epochNow = () => performance.timeOrigin + performance.now();
 
 /** Where the time to first paint went. Durations in ms; `readyMs` and later count from `createViewer`. */
 export interface LoadTimings extends Partial<OpenTiming> {
-	/** downloading the document before opening (the 1KB probe with range loading; 0 for in-memory sources) */
+	/** downloading the document before opening (with range loading: the probe and seeds, or the whole small file; 0 for in-memory sources) */
 	fetchMs: number;
 	fetchBytes: number;
 	/** waiting for the shared pdfium.wasm compile (`preloadPdfium`) */
@@ -363,7 +363,18 @@ export interface LoadTimings extends Partial<OpenTiming> {
 	firstPaintMs: number;
 	/** tiles served from the `tileCache` by the first paint (0 without one) */
 	tileCacheHits: number;
+	/** the document opened from range requests (`loadMode: "range"`) */
 	rangeLoading: boolean;
+	/** memory: ArrayBuffer source; download: one plain GET; whole: the range probe found a small file and read it in that one response; range: block reads */
+	loadMode: "memory" | "download" | "whole" | "range";
+	/** document size (0 when unknown) */
+	fileKB: number;
+	/** PDF requests before the first paint: probe, HEAD, seeds and the workers' range reads */
+	requestsBeforePaint: number;
+	/** PDF bytes downloaded before the first paint */
+	kbBeforePaint: number;
+	/** `createViewer` until the first PDF response headers (0 for in-memory sources) */
+	ttfbMs: number;
 }
 
 /** frames later than this were suspended (hidden tab), not slow */
