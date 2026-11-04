@@ -225,6 +225,15 @@ else {
 	await page.mouse.click(at.x0 + 40, at.y, { clickCount: 2 });
 	await page.waitForTimeout(700);
 	const word = await selected();
+	await page.evaluate(() => {
+		window.__core.texts.delete(0);
+		window.__core.textPending.delete(0);
+	});
+	await page.keyboard.down("Shift");
+	await page.mouse.click(at.x1, at.y);
+	await page.keyboard.up("Shift");
+	await page.waitForTimeout(700);
+	const extended = await selected();
 	await page.evaluate(() => window.__dropText());
 	await page.mouse.click(at.x0 + 40, at.y);
 	await page.waitForTimeout(700);
@@ -232,6 +241,7 @@ else {
 	check("drag that starts before the text arrives", /invoice/.test(slow), JSON.stringify(slow));
 	check("drag released before the text arrives selects once it does", early === "" && /invoice/.test(quick), JSON.stringify([early, quick]));
 	check("double-click before the text arrives selects the word", word.trim() === "Scanned", JSON.stringify(word));
+	check("shift-click before the text arrives extends the selection", extended.startsWith("Scanned invoice"), JSON.stringify(extended));
 	check("plain click before the text arrives selects nothing", click === "", JSON.stringify(click));
 }
 

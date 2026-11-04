@@ -541,7 +541,17 @@ export class ViewerCore {
 	private pointer = { x: 0, y: 0 };
 	private downAt: { x: number; y: number } | null = null;
 	/** a mouse press on a page whose text had not arrived: anchored once it does (doc points) */
-	private pendingPress: { page: number; x: number; y: number; clicks: number; shift: boolean; gen: number; release: { x: number; y: number } | null } | null = null;
+	private pendingPress: {
+		page: number;
+		x: number;
+		y: number;
+		clicks: number;
+		shift: boolean;
+		gen: number;
+		release: { x: number; y: number } | null;
+		/** the anchor is set; only the release point's page was still loading */
+		anchored?: boolean;
+	} | null = null;
 	private cursor: Cursor = "default";
 	private hovered: string | null = null;
 
@@ -1381,10 +1391,9 @@ export class ViewerCore {
 				// The page's text is on its way (raised to the front by hitPoint): keep the gesture.
 				this.dragging = true;
 				this.handles = false;
-				if (!msg.shift) {
-					this.selAnchor = null;
-					this.setRange(null);
-				}
+				// no anchor until the text arrives, so moves meanwhile cannot change the range
+				this.selAnchor = null;
+				if (!msg.shift) this.setRange(null);
 				this.pendingPress = { page: at.page, ...this.toDoc(msg.x, msg.y), clicks: msg.clicks, shift: msg.shift, gen: this.selGen, release: null };
 				this.emit({ type: "selection", selection: null, final: false });
 				return;
@@ -1404,11 +1413,11 @@ export class ViewerCore {
 			const waiting = this.pendingPress;
 			if (waiting) {
 				this.dragging = false;
-				if (click || msg.phase === "cancel") {
+				if ((click && !waiting.shift) || msg.phase === "cancel") {
 					this.pendingPress = null;
 					this.emitSelection(true);
+					if (click && !this.selRange) this.click(msg.x, msg.y);
 				} else waiting.release = this.toDoc(msg.x, msg.y);
-				if (click && !this.selRange) this.click(msg.x, msg.y);
 				return;
 			}
 			if (this.dragging) {
@@ -1441,16 +1450,25 @@ export class ViewerCore {
 		if (!p || p.page !== page) return;
 		this.pendingPress = null;
 		if (p.gen !== this.selGen) return;
-		const anchor = this.hitDoc(p.x, p.y);
-		if (!anchor) return;
-		const dragging = this.dragging;
-		this.startSelection(anchor, p.shift, p.clicks);
-		if (dragging) {
-			this.updateDrag();
+		if (!p.anchored) {
+			const anchor = this.hitDoc(p.x, p.y);
+			if (!anchor) return;
+			const dragging = this.dragging;
+			this.startSelection(anchor, p.shift, p.clicks);
+			if (dragging) {
+				this.updateDrag();
+				return;
+			}
+			this.dragging = false;
+		}
+		const release = p.release;
+		const focusPage = release ? this.pageAtDocY(release.y) : -1;
+		if (release && !this.texts.has(focusPage)) {
+			this.pendingPress = { ...p, page: focusPage, anchored: true, gen: this.selGen };
+			this.requestText(focusPage, 0);
 			return;
 		}
-		this.dragging = false;
-		const focus = p.release && this.hitDoc(p.release.x, p.release.y);
+		const focus = release && this.hitDoc(release.x, release.y);
 		if (focus) this.setFocus(focus);
 		this.emitSelection(true);
 		this.requestFrame();
