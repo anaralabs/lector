@@ -1000,10 +1000,10 @@ export class ViewerCore {
 	 * Aims a jump that replaces `prev` as if `prev` had already reached its zoom
 	 * and fit mode: a camera caught mid-zoom (pulled back) must not set the new zoom.
 	 */
-	private aimFrom(prev: Flight, retarget: Flight["retarget"]) {
+	private aimFrom(prev: Flight, retarget: Flight["retarget"], zoom = prev.to.zoom) {
 		const live = this.cam;
 		const fit = this.fitMode;
-		this.cam = fromState({ ...toState(live, this.vw, this.vh), lz: Math.log(prev.to.zoom) }, this.vw, this.vh);
+		this.cam = fromState({ ...toState(live, this.vw, this.vh), lz: Math.log(zoom) }, this.vw, this.vh);
 		this.fitMode = prev.fit;
 		const target = retarget();
 		this.cam = live;
@@ -1089,8 +1089,10 @@ export class ViewerCore {
 	/** A flight in progress re-aims at the same target from where the camera is now (new viewport or layout), keeping its speed. */
 	private reaimFlight() {
 		const f = this.flight;
-		const next = f?.retarget();
-		if (!f || !next) return;
+		if (!f) return;
+		// a fit landing refits the new viewport; otherwise the landing zoom, never the pulled-back one
+		const next = this.aimFrom(f, f.retarget, f.fit ? this.clampZoom(this.fitZoom(f.fit)) : f.to.zoom);
+		if (!next) return;
 		const vel = f.start >= 0 ? this.flightVelocity(f, performance.now()) : null;
 		this.flight = { ...this.makeFlight(f.id, next, f.retarget, f.arrival, vel), requested: f.requested };
 	}
