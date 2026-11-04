@@ -109,11 +109,11 @@ export class BlockCache {
 				n -= k;
 				continue;
 			}
-			// One request for every missing granule this read needs, from its block's start, plus read-ahead.
+			// One request from the block's start (or the last cached granule before this one) through what this read needs, plus read-ahead.
 			const size = this.source.size();
 			const blockStart = Math.floor(pos / size) * size;
-			let start = blockStart;
-			while (start < granule && this.blocks.has(start)) start += g;
+			let start = granule;
+			while (start - g >= blockStart && !this.blocks.has(start - g)) start -= g;
 			this.ahead = start === this.nextSequential ? Math.min(this.maxRun, Math.max(2, this.ahead * 2)) : 1;
 			const limit = Math.min(this.length, Math.max(Math.ceil((pos + n) / size) * size, blockStart + this.ahead * size));
 			let end = start + g;

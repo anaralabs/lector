@@ -179,3 +179,34 @@ test("read-ahead stops at maxRun blocks", () => {
 	for (let pos = 0; pos < 8 * K; pos += K) read(cache, pos, K);
 	assert.ok(calls.every(([s, e]) => e - s <= 2 * K));
 });
+
+test("a cached granule earlier in the block: the request starts after it, not at the block start", () => {
+	const G = 16 * 1024;
+	const calls: [number, number][] = [];
+	const fetch = (s: number, e: number) => {
+		calls.push([s, e]);
+		return file.slice(s, e);
+	};
+	const cache = new BlockCache(file.length, { size: () => 4 * K, fetch }, { granule: G });
+	cache.seed(2 * G, file.slice(2 * G, 3 * G));
+	assert.deepEqual(read(cache, 5 * G + 3, 10), file.subarray(5 * G + 3, 5 * G + 13));
+	assert.deepEqual(calls, [[3 * G, 4 * K]]);
+});
+
+test("random reads over random seeds always return the file's bytes", () => {
+	let seed = 7;
+	const rand = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+	const G = 16 * 1024;
+	for (let trial = 0; trial < 20; trial++) {
+		const cache = new BlockCache(file.length, { size: () => 4 * K, fetch: (s, e) => file.slice(s, e) }, { granule: G, maxRun: 4, max: Math.floor(rand() * 600_000) + G });
+		for (let i = 0; i < 12; i++) {
+			const s = Math.floor((rand() * file.length) / G) * G;
+			cache.seed(s, file.slice(s, Math.min(file.length, s + G * (1 + Math.floor(rand() * 3)))));
+		}
+		for (let i = 0; i < 300; i++) {
+			const pos = Math.floor(rand() * file.length);
+			const n = Math.max(1, Math.min(file.length - pos, Math.floor(rand() * (rand() < 0.1 ? 300_000 : 5000))));
+			assert.deepEqual(read(cache, pos, n), file.subarray(pos, pos + n));
+		}
+	}
+});
