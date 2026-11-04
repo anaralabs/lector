@@ -114,6 +114,7 @@ Pages are **0-based** everywhere. Page-space geometry is in PDF points with a to
 | `interceptFind` | `false` | Cmd/Ctrl+F emits a `find` event instead of opening the browser's find bar |
 | `rangeLoading` | `false` | load a URL with HTTP range requests and draw the page in view before the file has downloaded (see [Large files](#large-files-and-memory)) |
 | `autoFetch` | `true` | with `rangeLoading`: download the rest after the first paint, at low priority |
+| `tileCache` | `false` | keep slow pages' base bitmaps in IndexedDB so a reopened document shows them at once: `true`, or `{ key, budgetMB }` (`key` names the document, e.g. id + version; byte sources default to a content hash; budget 64MB shared by all documents, 24MB on touch, least recently used out first). Leave off for documents that must not persist on the device |
 
 `CoreOptions` (also live through `viewer.setOptions`; read the resolved values from `viewer.options` or the exported `defaultOptions`):
 
@@ -244,7 +245,7 @@ interface SearchHit {
 - `toneMap(rgb, paper, ink, gamma?)`: the dark-mode page colour mapping. `markColor(rgba, paper?)`: the opaque fill the compositor paints for a highlight or selection colour in light mode, or in dark mode when you pass `paper`. Hosts can use these to match swatches and legends.
 - Types: `Camera`, `CoreEvent`, `CoreOptions`, `DocumentInfo`, `EngineError`, `ErrorCode`, `ErrorPhase`, `Highlight`, `Link`, `OutlineItem`, `PageSize`, `Rect`, `SearchHit`, `SearchOptions`, `SearchResults`, `SelectionInfo`, `SelectionTextOptions`, `Stats`, `TextLayerLine`, `TextPoint`.
 
-`<LectorView>` (from `/react`, a client component) takes `source`, `options` (live `CoreOptions`), `onEvent`, `onViewer`, `className`, `style` and every creation option (`wasmUrl`, `workers`, `offscreen`, `onLink`, `createWorker`, `workerUrls`, `password`, `textLayer`, `interceptFind`, `rangeLoading`, `autoFetch`). Its ref is the `Viewer`. Changing any of those except the callbacks recreates the viewer.
+`<LectorView>` (from `/react`, a client component) takes `source`, `options` (live `CoreOptions`), `onEvent`, `onViewer`, `className`, `style` and every creation option (`wasmUrl`, `workers`, `offscreen`, `onLink`, `createWorker`, `workerUrls`, `password`, `textLayer`, `interceptFind`, `rangeLoading`, `autoFetch`, `tileCache`). Its ref is the `Viewer`. Changing any of those except the callbacks recreates the viewer.
 
 ## Behaviour notes and trade-offs
 

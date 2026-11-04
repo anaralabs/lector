@@ -19,15 +19,17 @@ export interface LectorViewProps extends Omit<ViewerOptions, "onEvent" | keyof C
 }
 
 export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function LectorView(
-	{ source, options, onEvent, onViewer, className, style, wasmUrl, workers, offscreen, onLink, createWorker, workerUrls, password, textLayer, interceptFind, rangeLoading, autoFetch },
+	{ source, options, onEvent, onViewer, className, style, wasmUrl, workers, offscreen, onLink, createWorker, workerUrls, password, textLayer, interceptFind, rangeLoading, autoFetch, tileCache },
 	ref,
 ) {
 	const container = useRef<HTMLDivElement>(null);
 	const [viewer, setViewer] = useState<Viewer | null>(null);
-	const latest = useRef({ onEvent, onViewer, onLink, options, createWorker });
+	const latest = useRef({ onEvent, onViewer, onLink, options, createWorker, tileCache });
 	useLayoutEffect(() => {
-		latest.current = { onEvent, onViewer, onLink, options, createWorker };
+		latest.current = { onEvent, onViewer, onLink, options, createWorker, tileCache };
 	});
+	// compared by value: an inline `{ key }` object must not recreate the viewer every render
+	const tileCacheKey = JSON.stringify(tileCache ?? false);
 
 	useEffect(() => {
 		const el = container.current;
@@ -45,6 +47,7 @@ export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function Le
 			interceptFind,
 			rangeLoading,
 			autoFetch,
+			tileCache: latest.current.tileCache,
 			...latest.current.options,
 			onEvent: (e) => latest.current.onEvent?.(e),
 			onLink: latest.current.onLink ? (url) => latest.current.onLink?.(url) : undefined,
@@ -73,7 +76,7 @@ export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function Le
 			latest.current.onViewer?.(null);
 		};
 		// A new password reopens the document; `viewer.unlock` retries without remounting.
-	}, [source, wasmUrl, workers, offscreen, password, textLayer, interceptFind, rangeLoading, autoFetch]);
+	}, [source, wasmUrl, workers, offscreen, password, textLayer, interceptFind, rangeLoading, autoFetch, tileCacheKey]);
 
 	const optionsKey = JSON.stringify(options ?? {});
 	useEffect(() => {
