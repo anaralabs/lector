@@ -97,7 +97,7 @@ Pages are **0-based** everywhere. Page-space geometry is in PDF points with a to
 
 ###`createViewer(container, source, options): Promise<Viewer>`
 
-`source` is a URL, `ArrayBuffer` or `Uint8Array`. The workers start (and compile pdfium) while the file downloads; the promise resolves once the file (or, with `rangeLoading` and a file over 8MB, the seeds for its first page) has arrived, and the document opens asynchronously (await `viewer.loaded` or listen for `ready`). It rejects with an `EngineError` when the browser is unsupported (`code: "unsupported"`), the fetch fails (`"fetch"`), or the main-thread WebGL2 context cannot be created (`"gpu"`).
+`source` is a URL, `ArrayBuffer` or `Uint8Array`, or a promise of one (a download the host started before the viewer, e.g. when a document is clicked: the workers boot while it settles, and `LoadTimings.fetchMs` is the part of it the viewer waited for; bytes open from memory without a probe, a URL opens as usual). The workers start (and compile pdfium) while the file downloads; the promise resolves once the file (or, with `rangeLoading` and a file over 8MB, the seeds for its first page) has arrived, and the document opens asynchronously (await `viewer.loaded` or listen for `ready`). It rejects with an `EngineError` when the browser is unsupported (`code: "unsupported"`), the fetch fails (`"fetch"`), or the main-thread WebGL2 context cannot be created (`"gpu"`).
 
 `ViewerOptions` (creation-only, plus every `CoreOptions` below):
 

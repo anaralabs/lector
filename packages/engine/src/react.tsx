@@ -6,10 +6,11 @@
 import { type CSSProperties, forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import type { CoreEvent, CoreOptions } from "./core";
 import { EngineError } from "./errors";
-import { createViewer, type Viewer, type ViewerOptions } from "./viewer";
+import { createViewer, type Viewer, type ViewerOptions, type ViewerSource } from "./viewer";
 
 export interface LectorViewProps extends Omit<ViewerOptions, "onEvent" | keyof CoreOptions> {
-	source: string | ArrayBuffer | Uint8Array;
+	/** a URL, bytes, or a promise of either; keep a pending source's identity stable across renders */
+	source: ViewerSource;
 	/** live-updatable engine options (dark mode, colours, ...) */
 	options?: Partial<CoreOptions>;
 	onEvent?: (e: CoreEvent) => void;

@@ -4,7 +4,7 @@ import wasmUrl, { workerUrls } from "../src/vite-wasm";
 // extensions that re-wrap workers, and cross-origin asset hosts).
 const createWorker = (url: URL, name: string) =>
 	new Worker(URL.createObjectURL(new Blob([`import(${JSON.stringify(url.href)})`], { type: "text/javascript" })), { name });
-import { type CoreEvent, createViewer, preloadPdfium, type Viewer } from "../src";
+import { type CoreEvent, createViewer, preloadPdfium, type Viewer, type ViewerSource } from "../src";
 
 // Benches read the core (window.__core, or self.__core in the compositor worker).
 (globalThis as { __lectorEngineDebug?: boolean }).__lectorEngineDebug = true;
@@ -84,7 +84,22 @@ const onEvent = (e: CoreEvent) => {
 	hud.textContent = Object.values(info).filter(Boolean).join("\n");
 };
 
-async function open(source: string | ArrayBuffer) {
+const download = (url: string) => fetch(url, { credentials: "same-origin" }).then((res) => res.arrayBuffer());
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// ?hostDelay=N: the viewer is created N ms after the URL is known, as in a host that loads its viewer chunk first.
+// &prefetch=promise: the host downloads from the start and hands the pending bytes over; =wait: it waits for them, then opens.
+async function hostSource(url: string): Promise<{ source: ViewerSource }> {
+	marks.host = performance.now();
+	const delay = Number(params.get("hostDelay") ?? 0);
+	const mode = params.get("prefetch");
+	const bytes = mode ? download(url) : null;
+	await sleep(delay);
+	if (mode === "wait" && bytes) return { source: await bytes };
+	return { source: bytes ?? url };
+}
+
+async function open(source: ViewerSource) {
 	w.__viewer?.destroy();
 	// ?dark=1 previews dark mode with near-black page colours.
 	const dark = params.get("dark") === "1" ? { dark: true, background: [0.03, 0.03, 0.03] as [number, number, number], paper: [0.05, 0.05, 0.05] as [number, number, number] } : {};
@@ -110,7 +125,7 @@ async function open(source: string | ArrayBuffer) {
 	return viewer;
 }
 
-let viewer = await open(src);
+let viewer = await open((await hostSource(src)).source);
 document.getElementById("zin")!.onclick = () => viewer.zoomTo(zoom * 1.25);
 document.getElementById("zout")!.onclick = () => viewer.zoomTo(zoom / 1.25);
 document.getElementById("fit")!.onclick = () => viewer.fitWidth();
