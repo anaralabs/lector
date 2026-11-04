@@ -28,6 +28,7 @@ export interface TextPoint {
 }
 
 import { buildHaystack, type Haystack, type SearchOptions } from "./search";
+import { PageLayout } from "./structure";
 
 const NEWLINE = new Set([0x0a, 0x0d]);
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
@@ -46,14 +47,17 @@ export interface SelectionTextOptions {
 
 export class PageText {
 	readonly lines: Line[] = [];
-	/** char index -> line index (-1 for chars outside any line) */
-	private lineOf: Int32Array;
 
-	constructor(
-		readonly codes: Uint32Array,
-		readonly boxes: Float32Array,
-	) {
-		this.lineOf = new Int32Array(codes.length).fill(-1);
+	readonly codes: Uint32Array;
+	readonly boxes: Float32Array;
+
+	private pageHeight?: number;
+	private layoutCache: PageLayout | null = null;
+
+	constructor(codes: Uint32Array, boxes: Float32Array, pageHeight?: number) {
+		this.codes = codes;
+		this.boxes = boxes;
+		this.pageHeight = pageHeight;
 		this.buildLines();
 	}
 
@@ -101,7 +105,6 @@ export class PageText {
 				// Generated space: belongs to the current line, adds no geometry.
 				if (line) {
 					line.end = i + 1;
-					this.lineOf[i] = this.lines.length;
 				}
 				continue;
 			}
@@ -172,7 +175,6 @@ export class PageText {
 				} else if (STRONG_LTR.test(ch)) dirSet = true;
 			}
 			lastT = t;
-			this.lineOf[i] = this.lines.length;
 		}
 		close();
 	}
@@ -191,12 +193,31 @@ export class PageText {
 		return false;
 	}
 
-	/** Nearest caret position to (x, y) in page points. */
-	hitTest(x: number, y: number): number {
-		if (this.lines.length === 0) return 0;
-		let best = this.lines[0]!;
+	/** Columns, margins, paragraphs, words and sentences (built on first use). */
+	layout(): PageLayout {
+		if (!this.layoutCache) this.layoutCache = new PageLayout(this.codes, this.boxes, this.lines, this.pageHeight);
+		return this.layoutCache;
+	}
+
+	/** Unit-drag caret: stays in `column` unless clearly in another, and off headers/footers unless on them. */
+	flowHit(x: number, y: number, column: number): number {
+		const layout = this.layout();
+		const near = this.nearestLine(x, y);
+		if (near < 0) return 0;
+		const nearCol = layout.lineColumn(near);
+		const clearly = layout.inColumn(nearCol, x, y) && (column < 0 || !layout.inColumn(column, x, y));
+		if (column >= 0 && nearCol !== column && !clearly) return this.hitTest(x, y, (line) => layout.lineColumn(line) === column);
+		if (layout.isMarginLine(near) && !layout.inColumn(nearCol, x, y, 0)) return this.hitTest(x, y, (line) => !layout.isMarginLine(line));
+		return this.hitTest(x, y);
+	}
+
+	/** Index of the line nearest (x, y), among lines `accept` allows (-1 if none). */
+	nearestLine(x: number, y: number, accept?: (line: number) => boolean): number {
+		let best = -1;
 		let bestD = Infinity;
-		for (const line of this.lines) {
+		for (let i = 0; i < this.lines.length; i++) {
+			if (accept && !accept(i)) continue;
+			const line = this.lines[i]!;
 			const dx = x < line.l ? line.l - x : x > line.r ? x - line.r : 0;
 			const dy = y < line.t ? line.t - y : y > line.b ? y - line.b : 0;
 			// Distance across lines matters more: prefer the line you are level with
@@ -204,15 +225,25 @@ export class PageText {
 			const d = line.dir === "ttb" ? dx * 4 + dy : dy * 4 + dx;
 			if (d < bestD) {
 				bestD = d;
-				best = line;
+				best = i;
 			}
 		}
+		return best;
+	}
+
+	/** Nearest caret position to (x, y) in page points; `accept` limits which lines it may land on. */
+	hitTest(x: number, y: number, accept?: (line: number) => boolean): number {
+		if (this.lines.length === 0) return 0;
+		const n = this.nearestLine(x, y, accept);
+		if (n < 0) return accept ? this.hitTest(x, y) : 0;
+		let best = this.lines[n]!;
 		// Lines that overlap the point's band (split mixed-direction runs): the one
 		// with the nearest glyph wins, not the first in logical order.
 		if (best.dir !== "ttb" && y >= best.t && y <= best.b) {
 			let nearest = Infinity;
-			for (const line of this.lines) {
-				if (line.dir === "ttb" || y < line.t || y > line.b) continue;
+			for (let i = 0; i < this.lines.length; i++) {
+				const line = this.lines[i]!;
+				if ((accept && !accept(i)) || line.dir === "ttb" || y < line.t || y > line.b) continue;
 				const d = this.glyphDistance(line, x);
 				if (d < nearest) {
 					nearest = d;
@@ -388,22 +419,9 @@ export class PageText {
 		}));
 	}
 
-	/** Word boundaries around caret `index`. */
+	/** Word around caret `index` (Unicode word rules, hyphenated line breaks joined). */
 	wordAt(index: number): [number, number] {
-		const isWord = (i: number) => i >= 0 && i < this.codes.length && /[\p{L}\p{N}_]/u.test(String.fromCodePoint(this.codes[i]!));
-		let a = index;
-		let z = index;
-		if (!isWord(a) && isWord(a - 1)) a--;
-		if (!isWord(a)) return [index, Math.min(index + 1, this.codes.length)];
-		while (isWord(a - 1)) a--;
-		while (isWord(z)) z++;
-		return [a, z];
-	}
-
-	lineAt(index: number): [number, number] {
-		const li = this.lineOf[Math.min(index, this.codes.length - 1)] ?? -1;
-		const line = this.lines[li];
-		return line ? [line.start, line.end] : [index, index];
+		return this.layout().word(index);
 	}
 }
 
