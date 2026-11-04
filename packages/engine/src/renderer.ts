@@ -70,6 +70,8 @@ interface Doc {
 	worker: Worker | null;
 	port: MessagePort | null;
 	opened: Promise<void>;
+	/** settles `opened` when the document closes before it opened */
+	abandon: (err: unknown) => void;
 	pageCount: number;
 	sizes: Map<number, PageSize>;
 	waiters: Map<number, Waiter>;
@@ -99,6 +101,7 @@ export function createPageRenderer(options: PageRendererOptions): PageRenderer {
 		doc.closed = true;
 		if (docs.get(doc.key) === doc) docs.delete(doc.key);
 		if (doc.idle) clearTimeout(doc.idle);
+		doc.abandon(err);
 		doc.network.abort();
 		if (doc.port) {
 			doc.port.onmessage = null;
@@ -116,6 +119,7 @@ export function createPageRenderer(options: PageRendererOptions): PageRenderer {
 			worker: null,
 			port: null,
 			opened: Promise.resolve(),
+			abandon: () => {},
 			pageCount: 0,
 			sizes: new Map(),
 			waiters: new Map(),
@@ -158,6 +162,7 @@ export function createPageRenderer(options: PageRendererOptions): PageRenderer {
 			worker.addEventListener("message", onBoot);
 		});
 		doc.opened = new Promise<void>((resolve, reject) => {
+			doc.abandon = reject;
 			const fail = (message: string, code: ErrorCode, phase: ErrorPhase) => {
 				const err = new EngineError(message, code, phase, typeof source === "string" ? source : undefined);
 				reject(err);
