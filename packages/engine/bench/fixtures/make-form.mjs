@@ -48,6 +48,7 @@ export async function fillable() {
 	const notes = form.createTextField("notes");
 	notes.enableMultiline();
 	notes.addToPage(page, { x: 160, y: 520, width: 250, height: 64, font });
+	notes.setFontSize(11);
 	label(page, "Agree:", 480);
 	form.createCheckBox("agree").addToPage(page, { x: 160, y: 480, width: 18, height: 18 });
 	label(page, "Size:", 440);
