@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { abandonWhole, blockVerdict, openErrorCode, HEAD_BYTES, probeReadBytes, probeVerdict, RACE_FILE_MAX, RANGE_GRANULE, readLinearization, retryableBlockStatus, totalFromContentRange, WHOLE_FILE_MAX, WHOLE_PATIENCE_MS } from "../src/range.ts";
+import { abandonWhole, blockVerdict, openErrorCode, HEAD_BYTES, probeReadBytes, probeVerdict, RACE_FILE_MAX, RANGE_GRANULE, rangesBeside, readLinearization, retryableBlockStatus, totalFromContentRange, WHOLE_FILE_MAX, WHOLE_PATIENCE_MS } from "../src/range.ts";
 
 test("Content-Range total, including when CORS hides it", () => {
 	assert.equal(totalFromContentRange("bytes 0-1023/52428800"), 52428800);
@@ -83,8 +83,13 @@ test("open: a block that could not be read is a fetch failure, not a broken file
 
 test("whole download: kept while it is quick, abandoned for ranges once it is clearly slower", () => {
 	const len = 6.5 * MB;
-	// not before the patience runs out, however slow
-	assert.equal(abandonWhole({ elapsedMs: WHOLE_PATIENCE_MS - 1, received: 1000, length: len, rttMs: 50 }), false);
+	// too early to judge, however slow
+	assert.equal(abandonWhole({ elapsedMs: 200, received: 1000, length: len, rttMs: 50 }), false);
+	// before the patience runs out only a download several times too slow stops: 12.5MB at 3 Mbit/s, 550ms
+	assert.equal(abandonWhole({ elapsedMs: 300, received: 112_000, length: 12.5 * MB, rttMs: 550 }), true);
+	// 25MB at 20 Mbit/s, 550ms: slower than ranges, but not by enough yet
+	assert.equal(abandonWhole({ elapsedMs: 300, received: 750_000, length: 25 * MB, rttMs: 550 }), false);
+	assert.equal(abandonWhole({ elapsedMs: WHOLE_PATIENCE_MS - 1, received: 1.875 * MB, length: len, rttMs: 150 }), false);
 	// 10 Mbit/s, 50ms: 4.6MB left take ~3.7s, ranges ~1.4s
 	assert.equal(abandonWhole({ elapsedMs: 1500, received: 1.875 * MB, length: len, rttMs: 50 }), true);
 	// 50 Mbit/s, 150ms: nearly done
@@ -96,4 +101,15 @@ test("whole download: kept while it is quick, abandoned for ranges once it is cl
 	// very slow links: ranges cost about a megabyte too, so a file not much bigger stays whole
 	assert.equal(abandonWhole({ elapsedMs: 1500, received: 60_000, length: 1.1 * MB, rttMs: 300 }), false);
 	assert.equal(abandonWhole({ elapsedMs: 1500, received: len, length: len, rttMs: 50 }), false);
+});
+
+test("small file: range reads start beside the download once it looks slow", () => {
+	const len = 4 * MB;
+	// too early to judge
+	assert.equal(rangesBeside({ elapsedMs: 100, received: 30_000, length: len, rttMs: 550 }), false);
+	// 3Mbit: ~9s left against ~3.6s of range reads
+	assert.equal(rangesBeside({ elapsedMs: 300, received: 112_000, length: len, rttMs: 550 }), true);
+	// 50Mbit: done in well under a second
+	assert.equal(rangesBeside({ elapsedMs: 300, received: 1.8 * MB, length: len, rttMs: 550 }), false);
+	assert.equal(rangesBeside({ elapsedMs: 300, received: len, length: len, rttMs: 550 }), false);
 });

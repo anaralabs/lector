@@ -22,7 +22,7 @@ import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
 import type { DocSource, DocumentInfo, OpenTiming, OutlineItem, PageSize, SizeHint, ToRaster } from "./protocol";
 import { rasterWorkerCount } from "./raster-pool";
-import { abandonWhole, HEAD_BYTES, probeReadBytes, probeVerdict, RACE_FILE_MAX, RANGE_GRANULE, readLinearization, WHOLE_FILE_MAX } from "./range";
+import { abandonWhole, HEAD_BYTES, rangesBeside, probeReadBytes, probeVerdict, RACE_FILE_MAX, RANGE_GRANULE, readLinearization, WHOLE_FILE_MAX } from "./range";
 import { findStartxref, pagePathObjects, parseXref } from "./xref";
 import { getEngineSupport } from "./support";
 import { documentKey } from "./tile-cache";
@@ -219,7 +219,9 @@ async function readBlob(res: Response, url: string): Promise<Blob> {
 
 /** bytes read from the end of the file before the workers start: trailer, xref, and the object streams pdfTeX writes there */
 const TAIL_BYTES = 256 * 1024;
-/** also read while racing a whole download, in parallel: pdfTeX's object streams often reach further back, and a round trip costs more than the bytes */
+/** how long the download runs before its rate decides on the far tail */
+const RATE_SAMPLE_MS = 150;
+/** also read, in parallel, while racing a mid-size file's whole download: pdfTeX's object streams often reach further back, and a round trip costs more than the bytes */
 const RACE_TAIL_BYTES = 1024 * 1024;
 
 /** `late`: seeds still arriving when the workers start */
@@ -286,6 +288,8 @@ class FileStream {
 	seeded = 0;
 	readonly whole: Promise<Blob | null>;
 	onData?: () => void;
+	/** called once when the rest looks slower to download than range reads would be to open */
+	onSlow?: () => void;
 	private firstAt = 0;
 	private waiters: { pos: number; resolve: (ok: boolean) => void }[] = [];
 	private reader: ReadableStreamDefaultReader<Uint8Array> | null;
@@ -316,7 +320,13 @@ class FileStream {
 				this.firstAt ||= performance.now();
 				this.settle();
 				this.onData?.();
-				if (this.received < this.length && abandonWhole({ elapsedMs: performance.now() - this.firstAt, received: this.received, length: this.length, rttMs: this.rttMs })) return this.stop();
+				if (this.received >= this.length) continue;
+				const progress = { elapsedMs: performance.now() - this.firstAt, received: this.received, length: this.length, rttMs: this.rttMs };
+				if (this.onSlow && rangesBeside(progress)) {
+					this.onSlow();
+					this.onSlow = undefined;
+				}
+				if (abandonWhole(progress)) return this.stop();
 			}
 		} catch {
 			return this.stop();
@@ -511,15 +521,15 @@ async function openUrl(
 		void res.body?.cancel().catch(() => {});
 		return download();
 	}
-	const ranges = (head: Uint8Array | Response) => openRanges(url, length, head, firstPage, target, signal, net);
-	if (length > RACE_FILE_MAX) return ranges(res);
-	if (length > WHOLE_FILE_MAX) return race(url, res, length, rttMs, firstPage, target, signal, net);
-	const whole = await streamWhole(res, url, length, rttMs);
-	if (whole instanceof Blob) return whole.size === length ? { blob: whole, mode: "whole" } : download();
-	return ranges(whole);
+	if (length > RACE_FILE_MAX) return openRanges(url, length, res, firstPage, target, signal, net);
+	return race(url, res, length, rttMs, firstPage, target, signal, net);
 }
 
-/** The probe keeps downloading the whole file while range reads (seeded from its prefix) open the document; the first to be ready wins. */
+/**
+ * The probe keeps downloading the whole file while range reads (seeded from
+ * its prefix) open the document; the first to be ready wins. Mid-size files
+ * start range reads at once; small ones only once the download looks slow.
+ */
 async function race(
 	url: string,
 	res: Response,
@@ -532,46 +542,30 @@ async function race(
 ): Promise<Opened> {
 	const stream = new FileStream(res, length, rttMs, net);
 	const ranging = new AbortController();
-	const stop = () => {
-		stream.stop();
-		ranging.abort();
-	};
-	signal.addEventListener("abort", stop, { once: true });
-	const viaRanges = openRanges(url, length, stream, firstPage, target, ranging.signal, net, rttMs);
-	const viaWhole = stream.whole.then((blob): Opened | Promise<Opened> => (blob ? { blob, mode: "whole" } : viaRanges));
-	const opened = await Promise.race([viaRanges.catch(() => viaWhole), viaWhole]);
+	signal.addEventListener(
+		"abort",
+		() => {
+			stream.stop();
+			ranging.abort();
+		},
+		{ once: true },
+	);
+	const eager = length > WHOLE_FILE_MAX;
+	let viaRanges: Promise<Opened> | null = null;
+	const ranges = () => (viaRanges ??= openRanges(url, length, stream, firstPage, target, ranging.signal, net, rttMs, eager));
+	const slow = eager ? Promise.resolve() : new Promise<void>((resolve) => (stream.onSlow = resolve));
+	const viaWhole = stream.whole.then((blob): Opened | Promise<Opened> => (blob ? { blob, mode: "whole" } : ranges()));
+	const opened = await Promise.race([slow.then(ranges).catch(() => viaWhole), viaWhole]);
 	if ("blob" in opened) ranging.abort();
 	if (!("seeds" in opened) && opened.mode !== "whole") stream.stop();
 	return opened;
 }
 
-/** The probe's body as the whole file, or the prefix that arrived before the download proved slower than range reads. */
-async function streamWhole(res: Response, url: string, length: number, rttMs: number): Promise<Blob | Uint8Array> {
-	const reader = res.body?.getReader();
-	if (!reader) return readBlob(res, url);
-	const chunks: Uint8Array[] = [];
-	let received = 0;
-	let firstAt = 0;
-	try {
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) return new Blob(chunks as Uint8Array<ArrayBuffer>[], { type: "application/pdf" });
-			chunks.push(value);
-			received += value.length;
-			firstAt ||= performance.now();
-			if (received >= length || !abandonWhole({ elapsedMs: performance.now() - firstAt, received, length, rttMs })) continue;
-			void reader.cancel().catch(() => {});
-			const prefix = new Uint8Array(received);
-			let at = 0;
-			for (const c of chunks) {
-				prefix.set(c, at);
-				at += c.length;
-			}
-			return prefix;
-		}
-	} catch (err) {
-		throw new EngineError(`Failed to fetch PDF "${url}": ${String((err as Error)?.message ?? err)}`, "fetch", "document-load", url);
-	}
+/** whether the download's rate, once measurable, brings `bytes` within a round trip: on a slow link the far tail would only compete */
+async function farTailWorthIt(stream: FileStream, rttMs: number, bytes: number): Promise<boolean> {
+	if (!(await stream.until(1))) return false;
+	await new Promise((resolve) => setTimeout(resolve, RATE_SAMPLE_MS));
+	return stream.reach(rttMs) - stream.received >= bytes;
 }
 
 /** Head and tail blocks (and the page path) for the workers to start from; `head` is the file's first bytes or the probe still streaming them. */
@@ -584,6 +578,7 @@ async function openRanges(
 	signal: AbortSignal,
 	net: NetCount,
 	rttMs = 0,
+	farTail = false,
 ): Promise<Opened> {
 	const store = new SeedBlocks(url, length, net, signal);
 	if (head instanceof FileStream) {
@@ -593,7 +588,7 @@ async function openRanges(
 	const tailStart = Math.floor(Math.max(0, length - TAIL_BYTES) / RANGE_GRANULE) * RANGE_GRANULE;
 	const tail = store.ensure([[tailStart, length]]);
 	const farStart = Math.floor(Math.max(0, length - RACE_TAIL_BYTES) / RANGE_GRANULE) * RANGE_GRANULE;
-	const far = head instanceof FileStream && farStart < tailStart ? store.ensure([[farStart, tailStart]]) : null;
+	const far = farTail && head instanceof FileStream && farStart < tailStart ? farTailWorthIt(head, rttMs, tailStart - farStart).then((yes) => (yes ? store.ensure([[farStart, tailStart]]) : undefined)) : null;
 	const headBytes =
 		head instanceof Response ? await readPrefix(head, (bytes) => probeReadBytes(bytes.length >= HEAD_BYTES ? readLinearization(bytes, length) : null, firstPage, length)) : head instanceof Uint8Array ? head : null;
 	if (headBytes) store.add(0, headBytes);
