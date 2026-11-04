@@ -22,7 +22,7 @@ import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
 import type { DocSource, DocumentInfo, OpenTiming, OutlineItem, PageSize, SizeHint, ToRaster } from "./protocol";
 import { rasterWorkerCount } from "./raster-pool";
-import { abandonWhole, probeReadBytes, probeVerdict, RANGE_BLOCK, readLinearization, WHOLE_FILE_MAX } from "./range";
+import { abandonWhole, HEAD_BYTES, probeReadBytes, probeVerdict, RANGE_GRANULE, readLinearization, WHOLE_FILE_MAX } from "./range";
 import { findStartxref, pagePathObjects, parseXref } from "./xref";
 import { getEngineSupport } from "./support";
 import { documentKey } from "./tile-cache";
@@ -265,7 +265,7 @@ async function readPrefix(res: Response, need: (bytes: Uint8Array) => number): P
 	return buf;
 }
 
-/** Aligned blocks the main thread fetched, handed to every worker as seeds. */
+/** Granules the main thread fetched, handed to every worker as seeds. */
 class SeedBlocks {
 	blocks = new Map<number, Uint8Array>();
 	constructor(
@@ -276,8 +276,8 @@ class SeedBlocks {
 	) {}
 
 	add(start: number, bytes: Uint8Array) {
-		for (let s = Math.ceil(start / RANGE_BLOCK) * RANGE_BLOCK; s < start + bytes.length; s += RANGE_BLOCK) {
-			const e = Math.min(this.length, s + RANGE_BLOCK);
+		for (let s = Math.ceil(start / RANGE_GRANULE) * RANGE_GRANULE; s < start + bytes.length; s += RANGE_GRANULE) {
+			const e = Math.min(this.length, s + RANGE_GRANULE);
 			if (e <= start + bytes.length) this.blocks.set(s, bytes.subarray(s - start, e - start));
 		}
 	}
@@ -286,14 +286,14 @@ class SeedBlocks {
 	async ensure(spans: [number, number][]) {
 		const missing = new Set<number>();
 		for (const [start, end] of spans) {
-			for (let s = Math.floor(start / RANGE_BLOCK) * RANGE_BLOCK; s < Math.min(end, this.length); s += RANGE_BLOCK) if (!this.blocks.has(s)) missing.add(s);
+			for (let s = Math.floor(start / RANGE_GRANULE) * RANGE_GRANULE; s < Math.min(end, this.length); s += RANGE_GRANULE) if (!this.blocks.has(s)) missing.add(s);
 		}
 		const sorted = [...missing].sort((a, b) => a - b);
 		const runs: [number, number][] = [];
 		for (const s of sorted) {
 			const last = runs[runs.length - 1];
-			if (last && last[1] === s) last[1] = Math.min(this.length, s + RANGE_BLOCK);
-			else runs.push([s, Math.min(this.length, s + RANGE_BLOCK)]);
+			if (last && last[1] === s) last[1] = Math.min(this.length, s + RANGE_GRANULE);
+			else runs.push([s, Math.min(this.length, s + RANGE_GRANULE)]);
 		}
 		await Promise.all(runs.map(([s, e]) => rangeBytes(this.url, s, e, this.net, this.signal).then((b) => b && this.add(s, b))));
 	}
@@ -301,7 +301,7 @@ class SeedBlocks {
 	bytes(start: number, end: number): Uint8Array | null {
 		end = Math.min(end, this.length);
 		const out = new Uint8Array(end - start);
-		for (let s = Math.floor(start / RANGE_BLOCK) * RANGE_BLOCK; s < end; s += RANGE_BLOCK) {
+		for (let s = Math.floor(start / RANGE_GRANULE) * RANGE_GRANULE; s < end; s += RANGE_GRANULE) {
 			const b = this.blocks.get(s);
 			if (!b) return null;
 			const from = Math.max(start, s);
@@ -337,7 +337,7 @@ async function prefetchPagePath(store: SeedBlocks, tailStart: number, target: nu
 		if (tailStart - startxref > MAX_XREF_BYTES) return;
 		await store.ensure([[startxref, tailStart]]);
 	}
-	const from = Math.floor(Math.min(startxref, tailStart) / RANGE_BLOCK) * RANGE_BLOCK;
+	const from = Math.floor(Math.min(startxref, tailStart) / RANGE_GRANULE) * RANGE_GRANULE;
 	const table = store.bytes(from, Number.MAX_SAFE_INTEGER);
 	const xref = table && parseXref(table, from, startxref);
 	if (!xref) return;
@@ -436,12 +436,12 @@ async function openRanges(
 	net: NetCount,
 ): Promise<Opened> {
 	const store = new SeedBlocks(url, length, net, signal);
-	const tailStart = Math.floor(Math.max(0, length - TAIL_BYTES) / RANGE_BLOCK) * RANGE_BLOCK;
+	const tailStart = Math.floor(Math.max(0, length - TAIL_BYTES) / RANGE_GRANULE) * RANGE_GRANULE;
 	const tail = store.ensure([[tailStart, length]]);
-	const headBytes = head instanceof Response ? await readPrefix(head, (bytes) => probeReadBytes(bytes.length >= RANGE_BLOCK ? readLinearization(bytes, length) : null, firstPage, length)) : head;
+	const headBytes = head instanceof Response ? await readPrefix(head, (bytes) => probeReadBytes(bytes.length >= HEAD_BYTES ? readLinearization(bytes, length) : null, firstPage, length)) : head;
 	if (headBytes) store.add(0, headBytes);
-	await Promise.all([tail, store.ensure([[0, Math.min(RANGE_BLOCK, length)]])]);
-	const first = store.bytes(0, Math.min(RANGE_BLOCK, length));
+	await Promise.all([tail, store.ensure([[0, Math.min(HEAD_BYTES, length)]])]);
+	const first = store.bytes(0, Math.min(HEAD_BYTES, length));
 	if (!first) return { blob: await readBlob(await fetchPdf(url, { signal }), url), mode: "download" };
 	const lin = readLinearization(first, length);
 	if (lin && firstPage) await store.ensure([[0, probeReadBytes(lin, true, length)]]);
@@ -735,7 +735,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		const relay = (ev: MessageEvent<ToRaster | { t: "opened" }>) => {
 			if (ev.data?.t === "opened") resolveFirstOpened();
 			if (ev.data?.t !== "block") return;
-			if (ev.data.request) workerRequests++;
+			workerRequests++;
 			workerBytes += ev.data.data.length;
 			for (const w of rasterWorkers) if (w() !== ev.target) w().postMessage(ev.data);
 		};

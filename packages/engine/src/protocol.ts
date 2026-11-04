@@ -50,9 +50,8 @@ export type ToRaster =
 	| { t: "init"; source: DocSource; port: MessagePort; wasmUrl: string; module?: WebAssembly.Module; password?: string; sizes?: SizeHint }
 	/** sent to the worker itself (not the port): the full file arrived, read from it from now on */
 	| { t: "source"; blob: Blob }
-	/** sent to the worker itself: a block another worker fetched */
-	/** `request`: the first block of one range request (for request counts) */
-	| { t: "block"; start: number; data: Uint8Array; request?: boolean }
+	/** sent to the worker itself: the bytes of one range request another worker made */
+	| { t: "block"; start: number; data: Uint8Array }
 	/** retry opening the document with a password (after a `password` error) */
 	| { t: "unlock"; password: string }
 	| {

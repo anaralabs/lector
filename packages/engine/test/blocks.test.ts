@@ -138,13 +138,35 @@ test("fetched blocks are reported for sharing, seeded ones are not", () => {
 	assert.deepEqual(shared, [K]);
 });
 
-test("each request's first shared block is marked, so the host can count requests", () => {
-	const firsts: number[] = [];
-	const cache = new BlockCache(file.length, { size: () => K, fetch: (s, e) => file.slice(s, e) }, { onFetched: (s, _d, first) => first && firsts.push(s) });
+test("each request is reported once with all its bytes, so the host can count requests", () => {
+	const runs: [number, number][] = [];
+	const cache = new BlockCache(file.length, { size: () => K, fetch: (s, e) => file.slice(s, e) }, { onFetched: (s, d) => runs.push([s, s + d.length]) });
 	read(cache, 0, 3 * K);
 	read(cache, 8 * K, 1);
-	assert.deepEqual(firsts, [0, 8 * K]);
+	assert.deepEqual(runs, [
+		[0, 3 * K],
+		[8 * K, 9 * K],
+	]);
 	assert.equal(cache.requests, 2);
+});
+
+test("seeds finer than a block: a scattered object costs no request, a miss next to it starts after it", () => {
+	const G = 16 * 1024;
+	const calls: [number, number][] = [];
+	const fetch = (s: number, e: number) => {
+		calls.push([s, e]);
+		return file.slice(s, e);
+	};
+	const cache = new BlockCache(file.length, { size: () => 4 * K, fetch }, { granule: G });
+	cache.seed(5 * G, file.slice(5 * G, 6 * G));
+	assert.deepEqual(read(cache, 5 * G + 7, 100), file.subarray(5 * G + 7, 5 * G + 107));
+	assert.equal(calls.length, 0);
+	// the block [0, 4K) misses before the seeded granule: one request up to it, one after it
+	assert.deepEqual(read(cache, 0, 8 * G), file.subarray(0, 8 * G));
+	assert.deepEqual(calls, [
+		[0, 5 * G],
+		[6 * G, 4 * K],
+	]);
 });
 
 test("read-ahead stops at maxRun blocks", () => {

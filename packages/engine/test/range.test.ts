@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { abandonWhole, blockVerdict, openErrorCode, probeReadBytes, probeVerdict, RANGE_BLOCK, readLinearization, retryableBlockStatus, totalFromContentRange, WHOLE_FILE_MAX, WHOLE_PATIENCE_MS } from "../src/range.ts";
+import { abandonWhole, blockVerdict, openErrorCode, HEAD_BYTES, probeReadBytes, probeVerdict, RANGE_GRANULE, readLinearization, retryableBlockStatus, totalFromContentRange, WHOLE_FILE_MAX, WHOLE_PATIENCE_MS } from "../src/range.ts";
 
 test("Content-Range total, including when CORS hides it", () => {
 	assert.equal(totalFromContentRange("bytes 0-1023/52428800"), 52428800);
@@ -27,11 +27,11 @@ test("probe: a file that fits in the probed range is the whole response", () => 
 });
 
 test("probe read: the head block, or through page 1's section for a linearized file opening there", () => {
-	assert.equal(probeReadBytes(null, true, 50 * MB), RANGE_BLOCK);
+	assert.equal(probeReadBytes(null, true, 50 * MB), HEAD_BYTES);
 	assert.equal(probeReadBytes(null, true, 1000), 1000);
 	const lin = { firstPageEnd: 300_000 };
-	assert.equal(probeReadBytes(lin, true, 50 * MB), Math.ceil(300_000 / RANGE_BLOCK) * RANGE_BLOCK);
-	assert.equal(probeReadBytes(lin, false, 50 * MB), RANGE_BLOCK);
+	assert.equal(probeReadBytes(lin, true, 50 * MB), Math.ceil(300_000 / RANGE_GRANULE) * RANGE_GRANULE);
+	assert.equal(probeReadBytes(lin, false, 50 * MB), HEAD_BYTES);
 	// never past the file or the probed range
 	assert.equal(probeReadBytes({ firstPageEnd: 20 * MB }, true, 50 * MB), WHOLE_FILE_MAX);
 	assert.equal(probeReadBytes({ firstPageEnd: 9_000_100 }, true, 9_000_200), Math.min(9_000_200, WHOLE_FILE_MAX));

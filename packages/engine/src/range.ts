@@ -45,10 +45,10 @@ export function probeVerdict(
 }
 
 /** How much of the probe's body to read before cancelling it: the head block, or through page 1's section for a linearized file opening there. */
-export function probeReadBytes(lin: { firstPageEnd: number } | null, firstPage: boolean, length: number, block = RANGE_BLOCK): number {
-	const head = Math.min(length, block);
+export function probeReadBytes(lin: { firstPageEnd: number } | null, firstPage: boolean, length: number): number {
+	const head = Math.min(length, HEAD_BYTES);
 	if (!lin || !firstPage) return head;
-	return Math.max(head, Math.min(length, WHOLE_FILE_MAX, Math.ceil(lin.firstPageEnd / block) * block));
+	return Math.max(head, Math.min(length, WHOLE_FILE_MAX, Math.ceil(lin.firstPageEnd / RANGE_GRANULE) * RANGE_GRANULE));
 }
 
 export type BlockVerdict = "ok" | "full" | "error";
@@ -109,7 +109,11 @@ export function abandonWhole(s: { elapsedMs: number; received: number; length: n
 	return (s.length - s.received) / perMs > 2 * (RANGE_OPEN_TRIPS * s.rttMs + RANGE_OPEN_BYTES / perMs);
 }
 
-/** block size for range reads (a worker's cache and the main thread's seeds align to it) */
-export const RANGE_BLOCK = 64 * 1024;
+/** the least a worker's range read fetches (fewer round trips; costs some bytes on slow links) */
+export const RANGE_BLOCK = 256 * 1024;
+/** unit of a worker's block cache and of the main thread's seeds, so scattered objects cost little */
+export const RANGE_GRANULE = 16 * 1024;
+/** the file's first bytes read from the probe: header and linearization dictionary */
+export const HEAD_BYTES = 64 * 1024;
 /** the most one range read fetches as read-ahead grows */
 export const RANGE_MAX_RUN = 1024 * 1024;

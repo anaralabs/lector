@@ -5,7 +5,7 @@
 import { BlockCache } from "./blocks";
 import { init, type Pdfium } from "./pdfium/pdfium.js";
 import type { DocSource, DocumentInfo, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
-import { blockVerdict, openErrorCode, RANGE_BLOCK, RANGE_MAX_RUN, retryableBlockStatus } from "./range";
+import { blockVerdict, openErrorCode, RANGE_BLOCK, RANGE_GRANULE, RANGE_MAX_RUN, retryableBlockStatus } from "./range";
 
 const FPDF_ANNOT = 0x01;
 const FPDF_REVERSE_BYTE_ORDER = 0x10; // RGBA instead of BGRA
@@ -836,12 +836,12 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 		blockSize = URL_BLOCK;
 	}
 	// Blocks this worker downloads go to the other workers (through the main thread), so each byte crosses the network once.
-	const share = (start: number, data: Uint8Array, request: boolean) => {
+	const share = (start: number, data: Uint8Array) => {
 		if (source?.kind !== "url") return;
 		const copy = data.slice();
-		self.postMessage({ t: "block", start, data: copy, request }, [copy.buffer]);
+		self.postMessage({ t: "block", start, data: copy }, [copy.buffer]);
 	};
-	cache = new BlockCache(fileLen, { size: () => blockSize, fetch: fetchBlock }, { onFetched: share, maxRun: Math.max(1, RANGE_MAX_RUN / URL_BLOCK) });
+	cache = new BlockCache(fileLen, { size: () => blockSize, fetch: fetchBlock }, { onFetched: share, granule: RANGE_GRANULE, maxRun: Math.max(1, RANGE_MAX_RUN / URL_BLOCK) });
 	if (source.kind === "url") for (const [start, data] of [...(source.seeds ?? []), ...early.splice(0)]) cache.seed(start, data);
 	loadDocument(pendingPassword ?? msg.password);
 }
@@ -858,7 +858,7 @@ self.onmessage = (ev: MessageEvent<ToRaster>) => {
 	}
 	if (ev.data.t === "block") {
 		if (!cache) early.push([ev.data.start, ev.data.data]);
-		else if (source?.kind === "url" && blockSize === URL_BLOCK) cache.seed(ev.data.start, ev.data.data);
+		else if (source?.kind === "url") cache.seed(ev.data.start, ev.data.data);
 		return;
 	}
 	if (ev.data.t !== "init") return;
