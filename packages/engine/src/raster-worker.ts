@@ -2,6 +2,7 @@
 // One PDFium WASM instance per worker. Each worker owns its own copy of the
 // document, so workers never share memory and need no cross-origin isolation.
 
+import { type PdfAnnotation, readAnnotations } from "./annotations";
 import { BlockCache } from "./blocks";
 import { applyFormOp, type FormContext, readWidgets, saveDocument } from "./form-fill";
 import { init, type Pdfium } from "./pdfium/pdfium.js";
@@ -309,6 +310,17 @@ function readOutline(parent: number, depth: number): OutlineItem[] {
 		if (items.length > 5000) break;
 	}
 	return items;
+}
+
+function listAnnotations(msg: Extract<ToRaster, { t: "annots" }>) {
+	let items: PdfAnnotation[] = [];
+	try {
+		items = withPage(msg.page, (page) => readAnnotations({ P, heap, toPage: transformFor(msg.page) }, msg.page, page));
+	} catch (err) {
+		// A broken annotation must not surface as a viewer error: the page still renders.
+		console.error(err);
+	}
+	send({ t: "annots", id: msg.id, page: msg.page, items });
 }
 
 function extractText(msg: Extract<ToRaster, { t: "text" }>) {
@@ -824,6 +836,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 				if (m.t === "tile") await renderTile(m);
 				else if (m.t === "text") extractText(m);
 				else if (m.t === "outline") send({ t: "outline", id: m.id, items: readOutline(0, 0) });
+				else if (m.t === "annots") listAnnotations(m);
 				else if (m.t === "sizes") readSizes(m);
 				else if (m.t === "unlock" && P && !doc && fileAccess) loadDocument(m.password);
 				else if (m.t === "form") formEdit(m);

@@ -4,6 +4,7 @@ export type { Camera, Color, Command, CoreEvent, CoreOptions, Cursor, FlightCaus
 export type { SearchOptions } from "./search";
 export type { DocumentInfo, ErrorCode, ErrorPhase, Link, LoadFailureDetail, OpenTiming, OutlineItem, PageSize } from "./protocol";
 export { EngineError } from "./errors";
+export { type AnnotationKind, type AnnotationReply, type PdfAnnotation, parsePdfDate } from "./annotations";
 export type { Rect, SelectionTextOptions, TextPoint } from "./text";
 export { type EngineFeature, type EngineSupport, getEngineSupport, isEngineSupported } from "./support";
 export type { TextLayerLine } from "./text-layer";

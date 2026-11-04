@@ -178,6 +178,7 @@ interface Viewer {
 	pulse(ids: string | string[], options?: { kind?: "ripple" | "flash"; duration?: number }): void;
 
 	// document
+	annotations(page: number): Promise<PdfAnnotation[]>; // highlights, notes, ink, ... already in the file
 	unlock(password: string): Promise<boolean>;
 	thumbnail(page: number, width: number): Promise<ImageBitmap | null>;
 	getData(): Promise<Uint8Array>; // as loaded
@@ -188,6 +189,7 @@ interface Viewer {
 ```
 
 - `goToPage`/`reveal` resolve `true` when the camera lands and `false` when input, a view command or another jump interrupted it, or the destination does not exist. They can be called at any time, even before `ready` or while the container is hidden (`display: none`, a collapsed pane, a background tab): the jump waits until the document is open and the view has a size, then lands there instantly, before the first frame at that size. Only the latest waiting jump is kept (an older one resolves `false` with cause `jump`). `offset` is in css px: for `goToPage`, the gap kept above the target (default `pageGap`); for `reveal`, added to where the rect lands (e.g. under a sticky header).
+- `annotations(page)` lists the markup annotations already in the file (written by Acrobat, Preview, Zotero, ...): `kind` (`highlight`, `underline`, `squiggly`, `strikeout`, `note`, `freetext`, `ink`, shapes, `stamp`, `caret`, `file`), `rect` and `rects` (one per text-markup quad) in page points, `ink` strokes, `color`, `opacity`, `author`, `contents`, `modified`/`created` (ISO), and `replies` (annotations whose `/IRT` points at it, oldest first). `id` is the file's `/NM`, else `obj:<object number>`. Hidden annotations, popups, links and form widgets are left out. Tiles already paint their appearance, so a host lists or hit-tests them rather than drawing them again. Each page is read once, on a raster worker, at low priority.
 - `scrollState()` reports the position as a scroll container would (`top` of `height`, at the current zoom), for persistence and custom scrollbars. Restore with `initialOffset` (same zoom) or `initialCamera` (exact).
 - In fit-page mode, `goToPage`, `reveal` and link jumps fit the destination page (pages of different sizes get different zooms).
 - `destroy()` stops the frame loop, terminates the workers, frees GPU resources, removes the canvas and overlay and restores the container's styles. Nothing is left pending: `loaded` (if still waiting) and every waiting request (`pageText`, `outline`, `thumbnail`, `rects`, ...) reject with an `EngineError` whose `code` is `"destroyed"` (phase `"request"`), running searches reject with an `AbortError`, `goToPage`/`reveal` resolve `false` and `unlock` resolves `false`. Requests made after `destroy()` reject right away. If the document or the engine fails to load, waiting requests reject with that load error instead. A worker that fails (fails to load, or throws outside a request, before or after `ready`) is terminal: an `error` event with code `worker` is emitted, then the viewer tears itself down as `destroy()` would, rejecting waiting requests with that error.

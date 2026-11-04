@@ -12,7 +12,7 @@ export type TextResult = Extract<FromRaster, { t: "text" }>;
 export type SizesResult = Extract<FromRaster, { t: "sizes" }>;
 export type FormResult = Omit<Extract<FromRaster, { t: "form" }>, "t" | "seq">;
 
-type JobMsg = Extract<ToRaster, { t: "tile" } | { t: "text" } | { t: "outline" }>;
+type JobMsg = Extract<ToRaster, { t: "tile" } | { t: "text" } | { t: "outline" } | { t: "annots" }>;
 
 interface Job {
 	key: string;
@@ -156,6 +156,7 @@ export class RasterPool {
 			| Omit<Extract<ToRaster, { t: "tile" }>, "id">
 			| Omit<Extract<ToRaster, { t: "text" }>, "id">
 			| Omit<Extract<ToRaster, { t: "outline" }>, "id">
+			| Omit<Extract<ToRaster, { t: "annots" }>, "id">
 			| Omit<Extract<ToRaster, { t: "sizes" }>, "id">,
 		onDone: (res: FromRaster) => void,
 		frac = msg.t === "tile" ? 1 : 0,
