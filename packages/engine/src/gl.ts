@@ -54,6 +54,35 @@ void main() {
 /** lighten: per-channel max, so dark paper takes the colour and light ink stays on top */
 export type Blend = "none" | "alpha" | "multiply" | "lighten";
 
+export type Tone = { paper: [number, number, number]; ink: [number, number, number] };
+
+export type CompositorKind = "webgl2" | "canvas2d";
+
+/** What the core draws with; a tile handle is opaque to it. */
+export interface Compositor {
+	readonly kind: CompositorKind;
+	textureBytes: number;
+	lost: boolean;
+	onLost: () => void;
+	onRestored: () => void;
+	dispose(): void;
+	resize(w: number, h: number): void;
+	/** gamma is baked in by backends that cannot apply it per draw */
+	upload(pixels: Uint8Array | ImageBitmap, w: number, h: number, gamma: number, baked?: boolean): unknown;
+	free(tex: unknown, w: number, h: number): void;
+	/** 2D: touch a bitmap as it arrives, so its first draw in a frame is a plain blit */
+	warm?(pixels: ImageBitmap): void;
+	begin(clear: [number, number, number]): void;
+	setTone(tone: Tone | null): void;
+	clip(r: { x: number; y: number; w: number; h: number } | null): void;
+	resetState(): void;
+	/** limit drawing to these device-pixel rects (2D: fallbacks only where the target scale has holes); null lifts it */
+	clipRects?(rects: { x: number; y: number; w: number; h: number }[] | null): void;
+	drawTexture(tex: unknown, x: number, y: number, w: number, h: number, gamma: number): void;
+	drawRect(x: number, y: number, w: number, h: number, color: readonly [number, number, number, number], blend?: Blend): void;
+	drawCircle(cx: number, cy: number, r: number, color: readonly [number, number, number, number]): void;
+}
+
 interface Programs {
 	tex: {
 		prog: WebGLProgram;
@@ -70,12 +99,13 @@ interface Programs {
 	vbo: WebGLBuffer;
 }
 
-export class Compositor {
+export class GLCompositor implements Compositor {
+	readonly kind = "webgl2" as const;
 	readonly gl: WebGL2RenderingContext;
 	private tex!: Programs["tex"];
 	private solid!: Programs["solid"];
 	private res!: Programs;
-	private tone: { paper: [number, number, number]; ink: [number, number, number] } | null = null;
+	private tone: Tone | null = null;
 	private w = 1;
 	private h = 1;
 	textureBytes = 0;
@@ -193,7 +223,7 @@ export class Compositor {
 		this.h = h;
 	}
 
-	upload(pixels: Uint8Array | ImageBitmap, w: number, h: number): WebGLTexture | null {
+	upload(pixels: Uint8Array | ImageBitmap, w: number, h: number, _gamma?: number): WebGLTexture | null {
 		const gl = this.gl;
 		const tex = gl.createTexture();
 		if (!tex) return null; // context lost
@@ -209,8 +239,8 @@ export class Compositor {
 		return tex;
 	}
 
-	free(tex: WebGLTexture, w: number, h: number) {
-		this.gl.deleteTexture(tex);
+	free(tex: unknown, w: number, h: number) {
+		this.gl.deleteTexture(tex as WebGLTexture);
 		this.textureBytes -= w * h * 4;
 	}
 
@@ -254,7 +284,7 @@ export class Compositor {
 	}
 
 	/** Dark-mode tone mapping for page tiles; null for the original colours. */
-	setTone(tone: { paper: [number, number, number]; ink: [number, number, number] } | null) {
+	setTone(tone: Tone | null) {
 		this.tone = tone;
 		this.mode = null;
 	}
@@ -279,17 +309,17 @@ export class Compositor {
 		this.mode = null;
 	}
 
-	drawTexture(tex: WebGLTexture, x: number, y: number, w: number, h: number, gamma: number) {
+	drawTexture(tex: unknown, x: number, y: number, w: number, h: number, gamma: number) {
 		const gl = this.gl;
 		this.use("tex");
 		this.blend("none");
 		gl.uniform1f(this.tex.gamma, gamma);
 		gl.uniform4f(this.tex.rect, x, y, w, h);
-		gl.bindTexture(gl.TEXTURE_2D, tex);
+		gl.bindTexture(gl.TEXTURE_2D, tex as WebGLTexture);
 		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 	}
 
-	drawRect(x: number, y: number, w: number, h: number, color: [number, number, number, number], blend: Blend = "none") {
+	drawRect(x: number, y: number, w: number, h: number, color: readonly [number, number, number, number], blend: Blend = "none") {
 		const gl = this.gl;
 		this.use("solid");
 		this.blend(blend);
@@ -300,7 +330,7 @@ export class Compositor {
 	}
 
 	/** Anti-aliased filled circle, alpha-blended. */
-	drawCircle(cx: number, cy: number, r: number, color: [number, number, number, number]) {
+	drawCircle(cx: number, cy: number, r: number, color: readonly [number, number, number, number]) {
 		const gl = this.gl;
 		this.use("solid");
 		this.blend("alpha");

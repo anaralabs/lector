@@ -103,9 +103,9 @@ async function open(source: string | ArrayBuffer) {
 		...(params.has("offset") ? { initialOffset: Number(params.get("offset")) } : {}),
 		...(params.has("zoom") ? { initialZoom: params.get("zoom")!.startsWith("fit") ? (params.get("zoom") as "fit-page") : Number(params.get("zoom")) } : {}),
 	};
-	const viewer = await createViewer(el, source, { wasmUrl, offscreen, workers, onEvent, password, interceptFind, textLayer, rangeLoading, autoFetch, tileCache, ...initial, ...dark, ...(params.get("loader") === "0" ? {} : { createWorker, workerUrls }) });
+	const viewer = await createViewer(el, source, { wasmUrl, offscreen, workers, onEvent, password, interceptFind, textLayer, rangeLoading, autoFetch, tileCache, compositor: (params.get("compositor") ?? "auto") as "auto", motionResolution: params.get("motionRes") !== "0", ...initial, ...dark, ...(params.get("loader") === "0" ? {} : { createWorker, workerUrls }) });
 	w.__viewer = viewer;
-	info.mode = `compositor: ${viewer.offscreen ? "worker (OffscreenCanvas)" : "main thread"}`;
+	info.mode = `compositor: ${viewer.compositor} ${viewer.offscreen ? "worker (OffscreenCanvas)" : "main thread"}`;
 	el.focus();
 	return viewer;
 }

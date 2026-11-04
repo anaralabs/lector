@@ -53,11 +53,12 @@ export function tileCacheSupported() {
 }
 
 let encodeType: string | null = null;
-async function encode(pixels: Uint8Array, w: number, h: number): Promise<Blob> {
+async function encode(pixels: Uint8Array | ImageBitmap, w: number, h: number): Promise<Blob> {
 	const canvas = new OffscreenCanvas(w, h);
 	const ctx = canvas.getContext("2d");
 	if (!ctx) throw new Error("no 2d context");
-	ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels.buffer as ArrayBuffer, pixels.byteOffset, w * h * 4), w, h), 0, 0);
+	if (pixels instanceof Uint8Array) ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels.buffer as ArrayBuffer, pixels.byteOffset, w * h * 4), w, h), 0, 0);
+	else ctx.drawImage(pixels, 0, 0);
 	// WebP where the browser encodes it (Safari falls back to PNG: use JPEG there, pages are opaque).
 	if (encodeType !== "image/jpeg") {
 		const blob = await canvas.convertToBlob({ type: "image/webp", quality: 0.85 });
@@ -73,7 +74,7 @@ export class TileCache {
 	/** `page|scale|w|h` of every bitmap stored for this document */
 	private keys = new Set<string>();
 	private writing = new Set<string>();
-	private queue: { id: string; page: number; pixels: Uint8Array; w: number; h: number }[] = [];
+	private queue: { id: string; page: number; pixels: Uint8Array | ImageBitmap; w: number; h: number }[] = [];
 	private busy = false;
 	private off = false;
 	readonly ready: Promise<void>;
@@ -109,15 +110,16 @@ export class TileCache {
 		return !this.off && this.db !== null;
 	}
 
-	has(page: number, scale: number, w: number, h: number) {
-		return this.enabled && this.keys.has(`${page}|${scale}|${w}|${h}`);
+	/** `variant` tells baked bitmaps (2D compositor: gamma, dark tone) from raw ones */
+	has(page: number, scale: number, w: number, h: number, variant = "") {
+		return this.enabled && this.keys.has(`${page}|${scale}|${w}|${h}${variant}`);
 	}
 
 	/** The stored bitmap, or null (missing, evicted meanwhile, or storage failed: then it renders as usual). */
-	async get(page: number, scale: number, w: number, h: number): Promise<ImageBitmap | null> {
+	async get(page: number, scale: number, w: number, h: number, variant = ""): Promise<ImageBitmap | null> {
 		const db = this.db;
 		if (!db || this.off) return null;
-		const key = `${page}|${scale}|${w}|${h}`;
+		const key = `${page}|${scale}|${w}|${h}${variant}`;
 		const id = `${this.doc}|${key}`;
 		try {
 			const entry = await req<Entry | undefined>(db.transaction(STORE).objectStore(STORE).get(id));
@@ -144,8 +146,8 @@ export class TileCache {
 	focus = 0;
 
 	/** Queues a base bitmap for `writeNext` (a few wait; the farthest from `focus` are dropped). `pixels` must not be reused by the caller. */
-	put(page: number, scale: number, pixels: Uint8Array, w: number, h: number) {
-		const key = `${page}|${scale}|${w}|${h}`;
+	put(page: number, scale: number, pixels: Uint8Array | ImageBitmap, w: number, h: number, variant = "") {
+		const key = `${page}|${scale}|${w}|${h}${variant}`;
 		// queued while the database opens too; `disable` drops the queue if it never does
 		if (this.off || this.keys.has(key) || this.writing.has(key)) return;
 		this.writing.add(key);

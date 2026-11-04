@@ -1,9 +1,10 @@
-// Feature detection. The engine needs WebGL2, WebAssembly and module workers;
-// below that a host should fall back to another viewer (e.g. @anaralabs/lector).
-// Minimum browsers: Chrome/Edge 80, Firefox 114, Safari / iOS Safari 15.
+// Feature detection: WebGL2 on a hardware GPU composites, anything else uses Canvas 2D. Chrome 80, Firefox 114, Safari 15.
+
+import type { CompositorKind } from "./gl";
 
 export type EngineFeature =
 	| "webgl2"
+	| "canvas2d"
 	| "wasm"
 	| "module-workers"
 	| "message-channel"
@@ -14,11 +15,23 @@ export interface EngineSupport {
 	supported: boolean;
 	/** what is missing; empty when supported */
 	missing: EngineFeature[];
-	/** WebGL2 also works on an OffscreenCanvas, so the compositor can run in a worker */
+	/** the compositor `auto` picks: webgl2 on a hardware GPU, canvas2d without WebGL2 or on a software rasteriser */
+	compositor: CompositorKind;
+	/** WebGL2 works here, even if only in software */
+	webgl2: boolean;
+	/** unmasked WebGL renderer string, when the browser exposes it */
+	renderer: string | null;
+	/** WebGL2 runs on a CPU rasteriser (SwiftShader, WARP / Basic Render Driver, llvmpipe) */
+	softwareGL: boolean;
+	/** the chosen compositor also works on an OffscreenCanvas, so it can run in a worker */
 	offscreen: boolean;
+	/** per compositor, for hosts that force one */
+	offscreenBy: Record<CompositorKind, boolean>;
 }
 
 let cached: EngineSupport | null = null;
+
+const SOFTWARE_GL = /swiftshader|llvmpipe|softpipe|basic render|microsoft basic|\bwarp\b|software/i;
 
 function moduleWorkers(): boolean {
 	if (typeof Worker === "undefined") return false;
@@ -38,16 +51,32 @@ function moduleWorkers(): boolean {
 	return supported;
 }
 
-function webgl2(canvas: HTMLCanvasElement | OffscreenCanvas): boolean {
+function probeWebgl2(canvas: HTMLCanvasElement | OffscreenCanvas): { ok: boolean; renderer: string | null } {
 	try {
 		const gl = canvas.getContext("webgl2") as WebGL2RenderingContext | null;
-		if (!gl) return false;
+		if (!gl) return { ok: false, renderer: null };
+		const info = gl.getExtension("WEBGL_debug_renderer_info");
+		const renderer = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER) ?? "") || null;
 		// Give the context back now instead of waiting for GC (browsers cap live contexts).
 		gl.getExtension("WEBGL_lose_context")?.loseContext();
-		return true;
+		return { ok: true, renderer };
+	} catch {
+		return { ok: false, renderer: null };
+	}
+}
+
+function canvas2d(canvas: HTMLCanvasElement | OffscreenCanvas): boolean {
+	try {
+		return !!canvas.getContext("2d");
 	} catch {
 		return false;
 	}
+}
+
+/** WebGL2 on a hardware GPU composites with WebGL2; no WebGL2 or a CPU rasteriser behind it gets Canvas 2D. */
+export function classifyCompositor(webgl2: boolean, renderer: string | null): { compositor: CompositorKind; softwareGL: boolean } {
+	const softwareGL = webgl2 && !!renderer && SOFTWARE_GL.test(renderer);
+	return { compositor: webgl2 && !softwareGL ? "webgl2" : "canvas2d", softwareGL };
 }
 
 /**
@@ -58,21 +87,27 @@ export function getEngineSupport(): EngineSupport {
 	if (cached) return cached;
 	const missing: EngineFeature[] = [];
 	const hasDom = typeof document !== "undefined";
-	if (!hasDom || typeof WebGL2RenderingContext === "undefined" || !webgl2(document.createElement("canvas"))) missing.push("webgl2");
+	const gl = hasDom && typeof WebGL2RenderingContext !== "undefined" ? probeWebgl2(document.createElement("canvas")) : { ok: false, renderer: null };
+	const has2d = hasDom && canvas2d(document.createElement("canvas"));
+	if (!gl.ok && !has2d) missing.push("canvas2d");
 	if (typeof WebAssembly !== "object" || typeof WebAssembly.instantiate !== "function") missing.push("wasm");
 	if (!moduleWorkers()) missing.push("module-workers");
 	if (typeof MessageChannel === "undefined") missing.push("message-channel");
 	if (typeof ResizeObserver === "undefined") missing.push("resize-observer");
 	if (typeof PointerEvent === "undefined") missing.push("pointer-events");
+	const { compositor, softwareGL } = classifyCompositor(gl.ok, gl.renderer);
 	// Safari 16.4-16.x has OffscreenCanvas and transferControlToOffscreen but
 	// no WebGL on it, so probe the context rather than the constructor.
-	const offscreen =
+	const transferable =
 		missing.length === 0 &&
 		typeof OffscreenCanvas !== "undefined" &&
 		typeof HTMLCanvasElement !== "undefined" &&
-		typeof HTMLCanvasElement.prototype.transferControlToOffscreen === "function" &&
-		webgl2(new OffscreenCanvas(1, 1));
-	cached = { supported: missing.length === 0, missing, offscreen };
+		typeof HTMLCanvasElement.prototype.transferControlToOffscreen === "function";
+	const offscreenBy = {
+		webgl2: transferable && gl.ok && probeWebgl2(new OffscreenCanvas(1, 1)).ok,
+		canvas2d: transferable && canvas2d(new OffscreenCanvas(1, 1)),
+	};
+	cached = { supported: missing.length === 0, missing, compositor, webgl2: gl.ok, renderer: gl.renderer, softwareGL, offscreen: offscreenBy[compositor], offscreenBy };
 	return cached;
 }
 

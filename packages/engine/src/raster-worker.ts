@@ -5,6 +5,7 @@
 import { BlockCache } from "./blocks";
 import { applyFormOp, type FormContext, readWidgets, saveDocument } from "./form-fill";
 import { init, type Pdfium } from "./pdfium/pdfium.js";
+import { bakePixels } from "./bake";
 import type { DocSource, DocumentInfo, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
 import { blockVerdict, openErrorCode, RANGE_BLOCK, RANGE_GRANULE, RANGE_MAX_RUN, retryableBlockStatus } from "./range";
 
@@ -165,6 +166,22 @@ async function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 				out.set(mem.subarray(ptr + row * stride, ptr + row * stride + w * 4), row * w * 4);
 			}
 			buf = out.buffer;
+		}
+		if (msg.bake) {
+			const boxes: number[] = [];
+			if (msg.bake.tone) {
+				const images = pageImages(page, msg.page);
+				for (let i = 0; i < images.length; i += 4) boxes.push(images[i]! * msg.scale - msg.x, images[i + 1]! * msg.scale - msg.y, images[i + 2]! * msg.scale - msg.x, images[i + 3]! * msg.scale - msg.y);
+			}
+			const px = new Uint8ClampedArray(buf);
+			bakePixels(px, w, h, msg.bake.gamma, msg.bake.tone, boxes);
+			if (typeof createImageBitmap === "function" && typeof ImageData !== "undefined") {
+				const bitmap = await createImageBitmap(new ImageData(px, w, h));
+				send({ t: "tile", id: msg.id, bitmap, baked: true, w, h, ms: performance.now() - t0, heap: heapBytes() }, [bitmap]);
+				return;
+			}
+			send({ t: "tile", id: msg.id, buf, baked: true, w, h, ms: performance.now() - t0, heap: heapBytes() }, [buf]);
+			return;
 		}
 		send({ t: "tile", id: msg.id, buf, w, h, ms: performance.now() - t0, heap: heapBytes() }, [buf]);
 	} finally {
@@ -341,6 +358,7 @@ function extractPageText(msg: Extract<ToRaster, { t: "text" }>, page: number) {
 	const { images, scans } = readImages(page, msg.page, xf);
 	const ctx = formContext();
 	const widgets = ctx ? readWidgets(ctx, msg.page, page) : [];
+	imageBoxes.set(msg.page, images.slice());
 	send(
 		{ t: "text", id: msg.id, page: msg.page, codes, boxes, links, images, scans, size: sizeOf(msg.page), widgets, ms: performance.now() - t0, heap: heapBytes() },
 		[codes.buffer, boxes.buffer, images.buffer],
@@ -506,6 +524,18 @@ function scanImages(page: number, images: ImageBox[], pw: number, ph: number): S
  * colour like vector shapes, so they are recoloured with the rest, and so are
  * scans (see `scanImages`). `scans` counts the images classified as scan paper.
  */
+const imageBoxes = new Map<number, Float32Array>();
+
+/** Photo boxes (page points) for baking dark tiles; read once per page. */
+function pageImages(page: number, index: number) {
+	let boxes = imageBoxes.get(index);
+	if (!boxes) {
+		boxes = readImages(page, index, transformFor(index)).images;
+		imageBoxes.set(index, boxes);
+	}
+	return boxes;
+}
+
 function readImages(page: number, index: number, xf: Xf): { images: Float32Array; scans: number } {
 	const found: ImageBox[] = [];
 	const mem = P.pdfium.wasmExports.malloc(28); // FS_MATRIX / 4 bounds / FPDF_IMAGEOBJ_METADATA

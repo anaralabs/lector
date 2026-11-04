@@ -25,6 +25,7 @@ import type { DocSource, DocumentInfo, OpenTiming, OutlineItem, PageSize, SizeHi
 import { rasterWorkerCount } from "./raster-pool";
 import { abandonWhole, HEAD_BYTES, rangesBeside, probeReadBytes, probeVerdict, RACE_FILE_MAX, RANGE_GRANULE, readLinearization, WHOLE_FILE_MAX } from "./range";
 import { findStartxref, pagePathObjects, parseXref } from "./xref";
+import type { CompositorKind } from "./gl";
 import { getEngineSupport } from "./support";
 import { documentKey } from "./tile-cache";
 import type { Rect, TextPoint } from "./text";
@@ -91,6 +92,8 @@ export interface ViewerOptions extends Partial<CoreOptions> {
 export interface Viewer {
 	readonly canvas: HTMLCanvasElement;
 	readonly offscreen: boolean;
+	/** what composites the pages: WebGL2, or Canvas 2D without a usable GPU */
+	readonly compositor: CompositorKind;
 	/**
 	 * A div above the canvas (and the hidden text layer) for host overlays
 	 * (popovers, page-anchored widgets). It is `pointer-events: none`: give
@@ -682,8 +685,12 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		textLayer: wantTextLayer = true,
 		interceptFind = false,
 		tileCache = false,
-		...coreOptions
+		compositor: wantCompositor = "auto",
+		...rest
 	} = options;
+	const compositor = wantCompositor === "auto" ? support.compositor : wantCompositor;
+	let compositorNow: CompositorKind = compositor;
+	const coreOptions = { ...rest, compositor, compositorFallback: wantCompositor === "auto" };
 	const startedAt = epochNow();
 	// Workers may run from blob: URLs (host loaders), where relative URLs don't resolve.
 	const wasmUrl = new URL(wasmUrlOption, location.href).href;
@@ -888,6 +895,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		);
 
 		const canvas = document.createElement("canvas");
+		let display = canvas;
 		// Sized in px from `resized` events, so the browser never stretches a stale
 		// buffer while a resize is in flight (the "jelly" look).
 		canvas.style.cssText = "position:absolute;left:0;top:0;display:block;touch-action:none;";
@@ -1032,14 +1040,32 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		const progressFns = new Map<number, (r: SearchResults) => void>();
 		const flights = new Map<number, (landed: boolean) => void>();
 		const handleEvent = (e: CoreEvent) => {
+			if (e.type === "need-canvas") {
+				// The lost canvas stays on top, transparent, so input listeners and pointer capture keep working.
+				const fresh = document.createElement("canvas");
+				fresh.style.cssText = canvas.style.cssText;
+				fresh.setAttribute("aria-hidden", "true");
+				canvas.before(fresh);
+				canvas.style.opacity = "0";
+				display = fresh;
+				cleanups.push(() => fresh.remove());
+				if (useOffscreen) {
+					const off = fresh.transferControlToOffscreen();
+					postToCore({ t: "canvas", canvas: off }, [off]);
+				} else core?.swapCanvas(fresh);
+				return;
+			}
+			if (e.type === "compositor") compositorNow = e.kind;
 			if (e.type === "resized") {
 				canvas.style.width = `${e.w}px`;
 				canvas.style.height = `${e.h}px`;
+				display.style.width = `${e.w}px`;
+				display.style.height = `${e.h}px`;
 				textLayer?.setViewport(e.w, e.h);
 				viewH = e.h;
 			} else if (e.type === "camera") {
 				camera = e.camera;
-				textLayer?.setCamera(e.camera);
+				textLayer?.setCamera(e.camera, e.moving && compositorNow === "canvas2d");
 				forms?.update();
 			}
 			else if (e.type === "cursor") {
@@ -1117,8 +1143,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 
 		// Probed, not just feature-tested: Safari 16.4-16.x can transfer a canvas
 		// but has no WebGL on OffscreenCanvas, so it composites on the main thread.
-		const useOffscreen = (wantOffscreen ?? true) && support.offscreen;
-		let postToCore: (msg: unknown) => void = () => {};
+		const useOffscreen = (wantOffscreen ?? true) && support.offscreenBy[compositor];
+		let postToCore: (msg: unknown, transfer?: Transferable[]) => void = () => {};
 		let core: ViewerCore | null = null;
 		const debug = !!(globalThis as { __lectorEngineDebug?: boolean }).__lectorEngineDebug;
 		if (useOffscreen) {
@@ -1139,7 +1165,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				if (destroyed) return;
 				worker.postMessage({ t: "init", canvas: offscreen, ports: corePorts, options: coreOptions, debug }, [offscreen, ...corePorts]);
 				for (const msg of pendingInput) worker.postMessage(msg);
-				postToCore = (msg) => worker.postMessage(msg);
+				postToCore = (msg, transfer = []) => worker.postMessage(msg, transfer);
 			});
 		} else {
 			try {
@@ -1448,6 +1474,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		return {
 			canvas,
 			offscreen: useOffscreen,
+			get compositor() {
+				return compositorNow;
+			},
 			zoomTo: (zoom) => command({ type: "zoom", zoom }),
 			overlayElement: overlay,
 			loaded,

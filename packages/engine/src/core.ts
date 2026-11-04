@@ -4,7 +4,9 @@
 
 import { markColor } from "./colors";
 import { type Box, FormDirt, type FormOp, type FormWidget, widgetAt } from "./forms";
-import { Compositor } from "./gl";
+import { Canvas2DCompositor } from "./canvas2d";
+import { createCompositor } from "./compositor";
+import type { Compositor, CompositorKind } from "./gl";
 import { anchoredY, buildLayout, estimateSizes } from "./layout";
 import { uploadRank } from "./upload-rank";
 import type { DocumentInfo, ErrorCode, ErrorPhase, Link, LoadFailureDetail, OpenTiming, OutlineItem, PageSize, SizeEntry } from "./protocol";
@@ -67,6 +69,12 @@ export interface CoreOptions {
 	reducedMotion: boolean;
 	/** how selected text is copied (lector's `copyOptions`); false leaves Cmd/Ctrl+C to the browser */
 	copyOptions: false | SelectionTextOptions;
+	/** canvas2d draws without WebGL (no GPU, software GL); auto tries WebGL2 first */
+	compositor: CompositorKind | "auto";
+	/** WebGL2 that fails to start here (the probe passed elsewhere, e.g. on the main thread) falls back to canvas2d */
+	compositorFallback: boolean;
+	/** canvas2d: draw at 1x while the zoom moves (sharp again once it settles) */
+	motionResolution: boolean;
 }
 
 /** Every option's default (hosts can read `pageGap`, colours, ... from here or `viewer.options`). */
@@ -91,6 +99,9 @@ export const defaultOptions: CoreOptions = {
 	ink: [0.88, 0.88, 0.86],
 	reducedMotion: false,
 	copyOptions: {},
+	compositor: "auto",
+	motionResolution: true,
+	compositorFallback: true,
 };
 
 /** `units: "fraction"`: the rect is 0-1 of the page (its size is not known before the document opens) */
@@ -280,6 +291,7 @@ export interface Stats {
 	workers: number;
 	/** PDFium memory across raster workers (WASM heaps + block caches) */
 	workerMB: number;
+	compositor: CompositorKind;
 }
 
 export interface Camera {
@@ -330,6 +342,10 @@ export type CoreEvent =
 	| { type: "find" }
 	/** the browser restored a lost WebGL context (after a `gpu`/`render` error); tiles are redrawing */
 	| { type: "restored" }
+	/** WebGL did not come back after a context loss: the host shell hands the core a fresh canvas (`swapCanvas`) */
+	| { type: "need-canvas"; reason: "context-lost" }
+	/** the core composites with `kind`: after a swap, or because WebGL2 would not start in this context */
+	| { type: "compositor"; kind: CompositorKind; reason: "context-lost" | "unavailable" }
 	/**
 	 * An animated (or instant) reveal/goto finished. `landed: false` comes with a
 	 * `cause` (see FlightCause). `coverage`: share of the landing view already
@@ -400,7 +416,7 @@ interface Tile {
 	y: number;
 	w: number;
 	h: number;
-	tex: WebGLTexture | null;
+	tex: unknown;
 	/** pixels have arrived from a worker and are waiting for upload */
 	arrived: boolean;
 	lastUsed: number;
@@ -430,6 +446,8 @@ const PREVIEW_MS = 50;
 /** preview scale = base scale / PREVIEW_DIV (1/16 of the pixels) */
 const PREVIEW_DIV = 4;
 const ZOOM_SETTLE_MS = 180;
+const RESTORE_WAIT_MS = 1500;
+const CANVAS2D_BUDGET_MB = 256;
 const UPLOAD_BUDGET_MS = 2.5;
 /** per-frame texture upload budget (bytes): halves after a late frame, grows while frames are on time */
 const UPLOAD_MIN = TILE * TILE * 4;
@@ -535,7 +553,7 @@ export class ViewerCore {
 
 	private tiles = new Map<string, Tile>();
 	private tilesByPage = new Map<number, Set<Tile>>();
-	private arrived: { tile: Tile; pixels: Uint8Array | ImageBitmap }[] = [];
+	private arrived: { tile: Tile; pixels: Uint8Array | ImageBitmap; baked?: boolean }[] = [];
 	private cache: TileCache | null = null;
 	private targetScale = 1;
 	private lastZoomChange = -1e9;
@@ -646,12 +664,47 @@ export class ViewerCore {
 		options: Partial<CoreOptions> = {},
 	) {
 		this.opts = { ...defaultOptions, ...options };
-		this.gl = new Compositor(canvas);
+		this.gl = createCompositor(canvas, this.opts.compositor, this.opts.compositorFallback);
 		this.pool = new RasterPool(ports);
 		this.pool.onOpened = (pageCount, sizes, info, timing) => this.opened(pageCount, sizes, info, timing);
 		this.pool.onError = (message, code, phase, detail) => this.emit({ type: "error", message, code, phase, ...(detail && { detail }) });
-		this.gl.onLost = () => this.emit({ type: "error", message: "lector-engine: the WebGL context was lost; waiting for the browser to restore it", code: "gpu", phase: "render" });
-		this.gl.onRestored = () => this.contextRestored();
+		this.bindCompositor();
+		if (this.opts.compositor !== "auto" && this.gl.kind !== this.opts.compositor) queueMicrotask(() => this.emit({ type: "compositor", kind: this.gl.kind, reason: "unavailable" }));
+	}
+
+	private losses = 0;
+	private lossTimer: ReturnType<typeof setTimeout> | null = null;
+
+	private bindCompositor() {
+		this.gl.onLost = () => {
+			this.emit({ type: "error", message: "lector-engine: the WebGL context was lost; waiting for the browser to restore it", code: "gpu", phase: "render" });
+			if (this.gl.kind !== "webgl2") return;
+			// A second loss, or one the browser does not undo quickly, means this GPU is not dependable: move to 2D.
+			this.losses++;
+			if (this.lossTimer) clearTimeout(this.lossTimer);
+			this.lossTimer = setTimeout(() => this.emit({ type: "need-canvas", reason: "context-lost" }), this.losses > 1 ? 0 : RESTORE_WAIT_MS);
+		};
+		this.gl.onRestored = () => {
+			if (this.lossTimer) clearTimeout(this.lossTimer);
+			this.lossTimer = null;
+			this.contextRestored();
+		};
+	}
+
+	/** Continues on a fresh canvas with the 2D compositor; tiles are fetched again. */
+	swapCanvas(canvas: HTMLCanvasElement | OffscreenCanvas) {
+		if (this.disposed) return;
+		if (this.lossTimer) clearTimeout(this.lossTimer);
+		this.lossTimer = null;
+		for (const tile of this.tiles.values()) tile.tex = null;
+		this.gl.dispose();
+		this.gl = new Canvas2DCompositor(canvas);
+		this.bindCompositor();
+		this.drawnDpr = this.dpr;
+		this.gl.resize(Math.round(this.vw * this.dpr), Math.round(this.vh * this.dpr));
+		this.dirty = true;
+		this.requestFrame();
+		this.emit({ type: "compositor", kind: "canvas2d", reason: "context-lost" });
 	}
 
 	private disposed = false;
@@ -667,14 +720,14 @@ export class ViewerCore {
 		this.pending = null;
 		this.dragging = false;
 		this.velocity = { x: 0, y: 0 };
-		for (const timer of [this.settleTimer, this.idleTimer, this.cacheTimer, this.press?.timer]) if (timer) clearTimeout(timer);
+		for (const timer of [this.settleTimer, this.idleTimer, this.cacheTimer, this.press?.timer, this.lossTimer]) if (timer) clearTimeout(timer);
 		this.settleTimer = this.idleTimer = this.cacheTimer = null;
 		this.press = null;
 		this.pool.dispose();
 		for (const tile of this.tiles.values()) if (tile.tex) this.gl.free(tile.tex, tile.w, tile.h);
 		this.tiles.clear();
 		this.tilesByPage.clear();
-		for (const { pixels } of this.arrived) if (!(pixels instanceof Uint8Array)) pixels.close();
+		for (const { pixels } of this.arrived) this.release(pixels);
 		this.arrived = [];
 		this.texts.clear();
 		this.textWaiters.clear();
@@ -1163,6 +1216,7 @@ export class ViewerCore {
 				this.vw = msg.w;
 				this.vh = msg.h;
 				this.dpr = msg.dpr;
+				this.drawnDpr = msg.dpr;
 				this.gl.resize(Math.round(msg.w * msg.dpr), Math.round(msg.h * msg.dpr));
 				const wasReady = this.camReady;
 				this.initCamera();
@@ -1990,7 +2044,7 @@ export class ViewerCore {
 					job = new Promise((resolve) => {
 						this.pool.request(key, 600 + req.page, { t: "tile", page: req.page, scale, x: 0, y: 0, w, h }, (res) => {
 							this.thumbs.delete(key);
-							resolve(res.t === "tile" ? { buf: res.buf, w: res.w, h: res.h } : null);
+							resolve(res.t === "tile" && res.buf ? { buf: res.buf, w: res.w, h: res.h } : null);
 						});
 						this.pool.pump();
 					});
@@ -2279,11 +2333,35 @@ export class ViewerCore {
 	}
 
 	private tileKey(page: number, scale: number, x: number, y: number) {
-		const key = `${page}:${scale}:${x}:${y}`;
+		const key = `${page}:${scale}:${x}:${y}${this.bakeTag()}`;
 		if (!this.dirt.edited(page)) return key;
 		const box: Box | null = scale <= this.baseScale(page) ? null : [x / scale, y / scale, (x + TILE) / scale, (y + TILE) / scale];
 		const v = this.dirt.version(page, box);
 		return v ? `${key}#${v}` : key;
+	}
+
+	/** 2D tiles are baked by the workers, so a gamma or tone change makes them different tiles. */
+	private bakeTag() {
+		if (this.gl.kind !== "canvas2d") return "";
+		const { gamma, dark, paper, ink } = this.opts;
+		return dark ? `@${gamma}|${paper.join()}|${ink.join()}` : `@${gamma}`;
+	}
+
+	private bake() {
+		if (this.gl.kind !== "canvas2d") return undefined;
+		const { gamma, dark, paper, ink } = this.opts;
+		return { gamma, tone: dark ? [...paper, ...ink] : null };
+	}
+
+	/** 2D tiles live in the renderer's RAM, next to everything else, so they get a smaller budget than GPU textures. */
+	private budgetBytes() {
+		const mb = this.gl.kind === "canvas2d" ? Math.min(this.opts.textureBudgetMB, CANVAS2D_BUDGET_MB) : this.opts.textureBudgetMB;
+		return mb * 1024 * 1024;
+	}
+
+	/** GL uploads copy an ImageBitmap; the 2D compositor keeps it as the tile, so only GL closes them. */
+	private release(pixels: Uint8Array | ImageBitmap) {
+		if (!(pixels instanceof Uint8Array) && this.gl.kind === "webgl2") pixels.close();
 	}
 
 	private ensureTile(page: number, scale: number, x: number, y: number, w: number, h: number, priority: number, keep: Set<string>, pin = false) {
@@ -2301,7 +2379,7 @@ export class ViewerCore {
 			set.add(tile);
 		}
 		// Not kept for the pool while it loads from the cache: a queued raster job for it is dropped.
-		if (scale === this.baseScale(page) && !this.dirt.edited(page) && this.cache?.has(page, scale, w, h)) {
+		if (scale === this.baseScale(page) && !this.dirt.edited(page) && this.cache?.has(page, scale, w, h, this.bakeTag())) {
 			this.loadCached(tile);
 			return;
 		}
@@ -2311,10 +2389,11 @@ export class ViewerCore {
 
 	private loadCached(tile: Tile) {
 		tile.loading = true;
-		void this.cache!.get(tile.page, tile.scale, tile.w, tile.h).then((bitmap) => {
+		const tag = this.bakeTag();
+		void this.cache!.get(tile.page, tile.scale, tile.w, tile.h, tag).then((bitmap) => {
 			tile.loading = false;
 			if (this.disposed || this.tiles.get(tile.key) !== tile || tile.tex || tile.arrived || !bitmap || bitmap.width !== tile.w || bitmap.height !== tile.h) {
-				bitmap?.close();
+				if (bitmap) this.release(bitmap);
 				// a miss renders it as usual on the next plan
 				this.requestFrame();
 				return;
@@ -2322,7 +2401,8 @@ export class ViewerCore {
 			this.firstTileAt ||= epochNow();
 			this.cacheHits++;
 			tile.arrived = true;
-			this.arrived.push({ tile, pixels: bitmap });
+			if (tag) this.gl.warm?.(bitmap);
+			this.arrived.push({ tile, pixels: bitmap, baked: tag !== "" });
 			this.requestFrame();
 		});
 	}
@@ -2332,20 +2412,23 @@ export class ViewerCore {
 		const asked = performance.now();
 		const size = this.pages[page]!;
 		const frac = (w * h) / Math.max(1, Math.round(size.w * scale) * Math.round(size.h * scale));
-		this.pool.request(key, priority, { t: "tile", page, scale, x, y, w, h }, (res) => {
+		const bake = this.bake();
+		const tag = this.bakeTag();
+		this.pool.request(key, priority, { t: "tile", page, scale, x, y, w, h, ...(bake && { bake }) }, (res) => {
 			if (res.t === "error") tile.failed = true;
 			if (res.t !== "tile") return;
 			const r = res as TileResult;
 			this.tileMs.push(r.ms);
 			this.firstTileAt ||= epochNow();
 			if (this.tileLog.length < 5000) this.tileLog.push({ page, base: scale <= this.baseScale(page), ms: r.ms, waitMs: performance.now() - asked });
-			const pixels = new Uint8Array(r.buf);
+			const pixels = r.bitmap ?? new Uint8Array(r.buf!);
 			// Slow pages are worth keeping for the next open; cheap ones render faster than they decode.
 			// Never after an edit: the cache holds the document as it was opened.
-			if (this.cache && !this.dirt.any && r.ms >= CACHE_MIN_MS && scale === this.baseScale(page)) this.cache.put(page, scale, pixels, w, h);
+			if (this.cache && !this.dirt.any && r.ms >= CACHE_MIN_MS && scale === this.baseScale(page)) this.cache.put(page, scale, pixels, w, h, r.baked ? tag : "");
 			if (this.tiles.get(key) !== tile || tile.tex || tile.arrived) return;
 			tile.arrived = true;
-			this.arrived.push({ tile, pixels });
+			if (r.bitmap && r.baked) this.gl.warm?.(r.bitmap);
+			this.arrived.push({ tile, pixels, baked: !!r.baked });
 			this.requestFrame();
 		}, Math.min(1, frac));
 	}
@@ -2382,7 +2465,7 @@ export class ViewerCore {
 		const keep = new Set<string>();
 		this.pinned.clear();
 		// Near the texture budget, keep what is cached ahead but stop fetching more.
-		const roomAhead = this.gl.textureBytes < this.opts.textureBudgetMB * 1024 * 1024 * 0.8;
+		const roomAhead = this.gl.textureBytes < this.budgetBytes() * 0.8;
 		const view = this.viewRect(0, cam);
 		const ahead = this.viewRect(flight ? 0.25 : 0.75, cam);
 		const visible = this.pagesIn(this.viewRect());
@@ -2497,7 +2580,7 @@ export class ViewerCore {
 		if (this.arrived.some((a) => stale(a.tile))) {
 			this.arrived = this.arrived.filter(({ tile, pixels }) => {
 				if (!stale(tile)) return true;
-				if (!(pixels instanceof Uint8Array)) pixels.close();
+				this.release(pixels);
 				tile.arrived = false;
 				if (this.tiles.get(tile.key) === tile && !tile.tex) this.dropTile(tile);
 				return false;
@@ -2511,14 +2594,14 @@ export class ViewerCore {
 			const next = this.arrived[0]!;
 			if (bytes > 0 && bytes + next.tile.w * next.tile.h * 4 > this.uploadBudget) break;
 			this.arrived.shift();
-			const { tile, pixels } = next;
+			const { tile, pixels, baked } = next;
 			tile.arrived = false;
 			if (this.tiles.get(tile.key) !== tile || tile.tex) {
-				if (!(pixels instanceof Uint8Array)) pixels.close();
+				this.release(pixels);
 				continue;
 			}
-			tile.tex = this.gl.upload(pixels, tile.w, tile.h);
-			if (!(pixels instanceof Uint8Array)) pixels.close();
+			tile.tex = this.gl.upload(pixels, tile.w, tile.h, this.opts.gamma, baked);
+			this.release(pixels);
 			// Lost mid-frame: fetch it again after the restore.
 			if (!tile.tex) break;
 			if (this.dirt.edited(tile.page)) this.dropReplaced(tile);
@@ -2534,7 +2617,7 @@ export class ViewerCore {
 	 * the hard budget everything needed goes at once.
 	 */
 	private evict(frameId: number) {
-		const budget = this.opts.textureBudgetMB * 1024 * 1024;
+		const budget = this.budgetBytes();
 		if (this.gl.textureBytes <= budget) {
 			if (this.evicting === 0) return;
 		} else if (this.evicting === 0) this.evicting = budget * 0.85;
@@ -2635,7 +2718,20 @@ export class ViewerCore {
 		if (this.animating) this.requestFrame();
 		this.inFrame = false;
 		this.frameEnd = performance.now();
+		if (this.debugFrames && this.debugFrames.length < 20000) {
+			const c = this.cam;
+			const d = this.debugCam;
+			this.debugFrames.push(c.x !== d.x || c.y !== d.y || c.zoom !== d.zoom ? this.frameEnd : -this.frameEnd);
+			this.debugCam = { ...c };
+		}
 	}
+
+	/** device pixels per css pixel of the canvas buffer (below `dpr` mid-zoom on the 2D compositor) */
+	private drawnDpr = 1;
+
+	/** benches only: when each frame finished (negative: the camera did not move), when set to an array */
+	debugFrames: number[] | null = null;
+	private debugCam: Camera = { x: 0, y: 0, zoom: 0 };
 
 	private recordFrame(now: number) {
 		const continuous = this.wantedAt === this.lastFrame;
@@ -2690,7 +2786,14 @@ export class ViewerCore {
 	private draw(visible: number[], now: number) {
 		let sharp = true;
 		const gl = this.gl;
-		const S = this.cam.zoom * this.dpr;
+		const zooming = !!this.flight || now - this.lastZoomChange < ZOOM_SETTLE_MS;
+		// 2D mid-zoom: a CPU's bilinear blits cost per pixel, so draw at most 1x and let the browser stretch it until the zoom settles.
+		const dpr = gl.kind === "canvas2d" && zooming && this.opts.motionResolution ? Math.min(this.dpr, 1) : this.dpr;
+		if (gl.kind === "canvas2d" && dpr !== this.drawnDpr) {
+			gl.resize(Math.round(this.vw * dpr), Math.round(this.vh * dpr));
+			this.drawnDpr = dpr;
+		}
+		const S = this.cam.zoom * dpr;
 		const target = this.targetScale;
 		const { background, selectionColor, selectionColorDark, highlightColor, gamma, dark, paper, ink } = this.opts;
 		gl.setTone(dark ? { paper, ink } : null);
@@ -2701,7 +2804,7 @@ export class ViewerCore {
 		// Dark: a deep version of the colour over the paper, so light ink keeps its
 		// contrast. Alpha is boosted: light-mode alphas (~0.35) read too faint on dark.
 		const mark = (c: Color, dark: boolean): Color => markColor(c, dark ? paper : null);
-		const px = this.dpr;
+		const px = dpr;
 		gl.resetState();
 		gl.begin(background);
 		const view = this.viewRect();
@@ -2745,11 +2848,28 @@ export class ViewerCore {
 			ready.sort((a, b) => (a.scale === target ? 1 : 0) - (b.scale === target ? 1 : 0) || a.scale - b.scale || (stale.has(a) ? 0 : 1) - (stale.has(b) ? 0 : 1));
 			// If the target scale fully covers the view, skip the fallbacks.
 			const covered = this.coveredByTarget(p, ready, target);
-			const start = covered ? ready.findIndex((t) => t.scale === target) : 0;
+			let start = covered ? ready.findIndex((t) => t.scale === target) : 0;
+			let end = ready.length;
+			// Every layer is a full blit on a CPU: start from the finest scale that covers the view, and mid-zoom draw only that one.
+			if (!covered && this.gl.kind === "canvas2d") {
+				start = this.firstCovering(p, ready);
+				if (zooming) while (end > start + 1 && ready[end - 1]!.scale !== ready[start]!.scale) end--;
+			}
 			if (!covered && !(target <= base && ready.some((t) => t.scale === base))) sharp = false;
-			const drawTiles = () => {
-				for (let i = Math.max(0, start); i < ready.length; i++) {
-					const t = ready[i]!;
+			// 2D, at rest: the target tiles go down first and the fallbacks only fill the target's holes, so no pixel is blitted twice.
+			const holes = this.gl.kind === "canvas2d" && !covered && !zooming ? this.targetHoles(p, ready, target, sx, sy, S) : null;
+			const order = holes ? [...ready.slice(start, end).filter((t) => t.scale === target), ...ready.slice(start, end).filter((t) => t.scale !== target)] : ready;
+			const firstFallback = holes ? order.findIndex((t) => t.scale !== target) : -1;
+			const drawTiles = (clipped = false) => {
+				const reordered = !!holes && !clipped;
+				const list = reordered ? order : ready;
+				const to = reordered ? order.length : end;
+				for (let i = reordered ? 0 : Math.max(0, start); i < to; i++) {
+					const t = list[i]!;
+					if (reordered && i === firstFallback) {
+						if (!holes!.length) break;
+						gl.clipRects?.(holes);
+					}
 					const k = S / t.scale;
 					let x = sx + t.x * k;
 					let y = sy + t.y * k;
@@ -2765,6 +2885,7 @@ export class ViewerCore {
 						this.emit({ type: "painted", page: p, timing: { firstTileAt: this.firstTileAt || epochNow(), paintedAt: epochNow(), cacheHits: this.cacheHits } });
 					}
 				}
+				if (reordered && firstFallback >= 0) gl.clipRects?.(null);
 			};
 			const drawMarks = (dark: boolean) => {
 				const markBlend = dark ? "lighten" : "multiply";
@@ -2841,7 +2962,9 @@ export class ViewerCore {
 			// original (usually light) colours, so marks there use the light style.
 			// Scan paper is not in `images` (the worker classifies it), so a
 			// scanned page darkens like any other and its marks use the dark style.
-			const images = dark ? this.images.get(p) : undefined;
+			// 2D tiles are baked with photos untoned, so only marks over a photo need this pass.
+			const baked = this.gl.kind === "canvas2d" && !this.highlights.some((h) => h.page === p) && !this.selRects.some((sel) => sel.page === p);
+			const images = dark && !baked ? this.images.get(p) : undefined;
 			if (images) {
 				gl.setTone(null);
 				for (let i = 0; i < images.length; i += 4) {
@@ -2851,7 +2974,7 @@ export class ViewerCore {
 					const b = Math.min(r.h, images[i + 3]!);
 					if (rr <= l || b <= t || rr < vx0 || l > vx1 || b < vy0 || t > vy1) continue;
 					gl.clip({ x: sx + l * S, y: sy + t * S, w: (rr - l) * S, h: (b - t) * S });
-					drawTiles();
+					drawTiles(true);
 					drawMarks(false);
 				}
 				gl.clip(null);
@@ -2860,7 +2983,7 @@ export class ViewerCore {
 		}
 		const ends = this.handles ? this.handleEnds() : null;
 		if (ends) {
-			const d = this.dpr;
+			const d = dpr;
 			const c: Color = [0.16, 0.45, 0.95, 1];
 			// Like iOS: the start knob sits above the line, the end knob below.
 			ends.forEach((e, i) => {
@@ -2890,6 +3013,53 @@ export class ViewerCore {
 		const log = this.tileLog;
 		this.tileLog = [];
 		return { drawn: area ? drawn / area : 1, sharp: this.coverage(this.pagesIn(view)), pending: this.pool.pending, textureMB: this.gl.textureBytes / 1048576, workerMB: this.pool.heapBytes / 1048576, log };
+	}
+
+	/** Device-pixel rects of the target-scale grid cells in view that have no tile yet. */
+	private targetHoles(page: number, ready: Tile[], target: number, sx: number, sy: number, S: number) {
+		const r = this.layout[page]!;
+		const view = this.viewRect();
+		const pw = Math.round(r.w * target);
+		const ph = Math.round(r.h * target);
+		const lx0 = Math.max(0, (view.x0 - r.x) * target);
+		const ly0 = Math.max(0, (view.y0 - r.y) * target);
+		const lx1 = Math.min(pw, (view.x1 - r.x) * target);
+		const ly1 = Math.min(ph, (view.y1 - r.y) * target);
+		const have = new Set<number>();
+		for (const t of ready) if (t.scale === target) have.add((t.y / TILE) * 65536 + t.x / TILE);
+		const k = S / target;
+		const out: { x: number; y: number; w: number; h: number }[] = [];
+		for (let ty = Math.floor(ly0 / TILE); ty * TILE < ly1; ty++) {
+			for (let tx = Math.floor(lx0 / TILE); tx * TILE < lx1; tx++) {
+				if (have.has(ty * 65536 + tx)) continue;
+				const x = tx * TILE;
+				const y = ty * TILE;
+				out.push({ x: sx + x * k, y: sy + y * k, w: Math.min(TILE, pw - x) * k, h: Math.min(TILE, ph - y) * k });
+			}
+		}
+		return out;
+	}
+
+	/** Index in `ready` (coarse to fine) of the first tile of the finest scale whose tiles cover the page's visible part. */
+	private firstCovering(page: number, ready: Tile[]) {
+		const r = this.layout[page]!;
+		const view = this.viewRect();
+		const x0 = Math.max(0, view.x0 - r.x);
+		const y0 = Math.max(0, view.y0 - r.y);
+		const x1 = Math.min(r.w, view.x1 - r.x);
+		const y1 = Math.min(r.h, view.y1 - r.y);
+		const need = Math.max(0, x1 - x0) * Math.max(0, y1 - y0) * 0.999;
+		let area = 0;
+		for (let i = ready.length - 1; i >= 0; i--) {
+			const t = ready[i]!;
+			const s = t.scale;
+			area += Math.max(0, Math.min(x1, (t.x + t.w) / s) - Math.max(x0, t.x / s)) * Math.max(0, Math.min(y1, (t.y + t.h) / s) - Math.max(y0, t.y / s));
+			if (i === 0 || ready[i - 1]!.scale !== s) {
+				if (area >= need) return i;
+				area = 0;
+			}
+		}
+		return 0;
 	}
 
 	private coveredByTarget(page: number, ready: Tile[], target: number) {
@@ -2983,6 +3153,7 @@ export class ViewerCore {
 				targetScale: this.targetScale,
 				workers: this.pool.workers,
 				workerMB: this.pool.heapBytes / 1048576,
+				compositor: this.gl.kind,
 			},
 		});
 		this.frameTimes = [];
