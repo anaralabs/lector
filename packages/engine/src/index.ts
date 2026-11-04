@@ -1,4 +1,5 @@
 export { defaultOptions } from "./core";
+export { createPageRenderer, type PageRenderer, type PageRendererOptions, type Region, type RenderedRegion, type RenderRequest } from "./renderer";
 export { createViewer, preloadPdfium, type RevealOptions, type Viewer, type ViewerOptions, type ViewerSource } from "./viewer";
 export type { Camera, Color, Command, CoreEvent, CoreOptions, Cursor, FlightCause, Highlight, InitialTarget, LoadTimings, PulseKind, RevealAlign, SearchHit, SearchResults, SelectionInfo, Stats } from "./core";
 export type { SearchOptions } from "./search";

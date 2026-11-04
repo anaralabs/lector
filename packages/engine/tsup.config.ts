@@ -9,10 +9,10 @@ export const browserTarget = ["chrome80", "edge80", "firefox114", "safari15", "i
 const workerUrlsToJs: NonNullable<Options["esbuildPlugins"]>[number] = {
 	name: "worker-urls-to-js",
 	setup(build) {
-		build.onLoad({ filter: /[\\/]src[\\/]viewer\.ts$/ }, async (args) => {
+		build.onLoad({ filter: /[\\/]src[\\/](viewer|renderer)\.ts$/ }, async (args) => {
 			const source = await readFile(args.path, "utf8");
 			const contents = source.replace(/new URL\("\.\/(raster|core)-worker\.ts", import\.meta\.url\)/g, 'new URL("./$1-worker.js", import.meta.url)');
-			if (contents === source) throw new Error("worker-urls-to-js: no worker URLs found in viewer.ts");
+			if (contents === source) throw new Error(`worker-urls-to-js: no worker URLs found in ${args.path}`);
 			return { contents, loader: "ts" };
 		});
 	},
