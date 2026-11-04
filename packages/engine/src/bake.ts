@@ -22,12 +22,21 @@ export function bakePixels(d: Uint8Array | Uint8ClampedArray, w: number, h: numb
 	const ar = ir * 255;
 	const ag = ig * 255;
 	const ab = ib * 255;
+	// Whole pixels: a fractional edge between x and x+1 left `end === x`, and the row never advanced.
+	const box: number[] = [];
+	for (let i = 0; i + 3 < boxes.length; i += 4) {
+		const x0 = Math.max(0, Math.floor(boxes[i]!));
+		const y0 = Math.max(0, Math.floor(boxes[i + 1]!));
+		const x1 = Math.min(w, Math.ceil(boxes[i + 2]!));
+		const y1 = Math.min(h, Math.ceil(boxes[i + 3]!));
+		if (x1 > x0 && y1 > y0) box.push(x0, y0, x1, y1);
+	}
 	for (let y = 0; y < h; y++) {
 		let skip: number[] | null = null;
-		for (let i = 0; i < boxes.length; i += 4) {
-			if (y < boxes[i + 1]! || y >= boxes[i + 3]!) continue;
+		for (let i = 0; i < box.length; i += 4) {
+			if (y < box[i + 1]! || y >= box[i + 3]!) continue;
 			skip ??= [];
-			skip.push(boxes[i]!, boxes[i + 2]!);
+			skip.push(box[i]!, box[i + 2]!);
 		}
 		let x = 0;
 		while (x < w) {
@@ -36,11 +45,11 @@ export function bakePixels(d: Uint8Array | Uint8ClampedArray, w: number, h: numb
 				let inside = false;
 				for (let i = 0; i < skip.length; i += 2) {
 					if (x >= skip[i]! && x < skip[i + 1]!) {
-						x = Math.min(w, Math.ceil(skip[i + 1]!));
+						x = skip[i + 1]!;
 						inside = true;
 						break;
 					}
-					if (skip[i]! > x) end = Math.min(end, Math.floor(skip[i]!));
+					if (skip[i]! > x) end = Math.min(end, skip[i]!);
 				}
 				if (inside) continue;
 			}

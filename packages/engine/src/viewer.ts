@@ -942,6 +942,8 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 		canvas.setAttribute("aria-hidden", "true");
 		container.appendChild(canvas);
 		cleanups.push(() => canvas.remove());
+		container.dataset.compositor = compositorNow;
+		cleanups.push(() => delete container.dataset.compositor);
 		const overlay = document.createElement("div");
 		overlay.className = "lector-overlay";
 		overlay.style.cssText = "position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:2;";
@@ -1077,7 +1079,10 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 				} else core?.swapCanvas(fresh);
 				return;
 			}
-			if (e.type === "compositor") compositorNow = e.kind;
+			if (e.type === "compositor") {
+				compositorNow = e.kind;
+				container.dataset.compositor = e.kind;
+			}
 			if (e.type === "resized") {
 				canvas.style.width = `${e.w}px`;
 				canvas.style.height = `${e.h}px`;
