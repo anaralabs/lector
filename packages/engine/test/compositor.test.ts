@@ -54,3 +54,16 @@ test("photo boxes keep their colours in dark mode", () => {
 	assert.equal(at(3, 0), 255);
 	assert.ok(at(1, 0) < 60 && at(4, 0) < 60 && at(2, 1) < 60);
 });
+
+test("photo boxes with fractional edges finish (a box edge inside a pixel used to loop forever)", () => {
+	const w = 8;
+	const px = new Uint8ClampedArray(w * 3 * 4).fill(255);
+	bakePixels(px, w, 3, 1, [0.1, 0.1, 0.1, 0.9, 0.9, 0.9], [2.4, 0.5, 4.6, 1.2, -3, 2.7, 1.1, 9, 7.5, -1, 20, 0.3]);
+	const at = (x: number, y: number) => px[(y * w + x) * 4]!;
+	assert.equal(at(3, 0), 255);
+	assert.equal(at(4, 1), 255);
+	assert.ok(at(6, 1) < 60);
+	assert.equal(at(0, 2), 255);
+	assert.equal(at(1, 2), 255);
+	assert.ok(at(3, 2) < 60);
+});
