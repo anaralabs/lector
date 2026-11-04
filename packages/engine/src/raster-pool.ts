@@ -87,6 +87,8 @@ export class RasterPool {
 	private inflight = new Map<number, Job>();
 	private costs = new Map<number, PageCost>();
 	private prior: PageCost = { content: DEFAULT_CONTENT, overhead: 0, warm: 0 };
+	/** what extracting a page's text takes once loaded (scans decode their image for dark mode) */
+	private textMs = TEXT_MS;
 	private nextId = 1;
 	/** in-flight tile jobs the last plan no longer wanted (cancelled when visible work waits) */
 	private unwanted = new Set<number>();
@@ -193,7 +195,7 @@ export class RasterPool {
 
 	private cost(job: Job, warm: boolean) {
 		const c = this.known(job.page);
-		const work = job.msg.t === "tile" ? c.content * job.frac : TEXT_MS;
+		const work = job.msg.t === "tile" ? c.content * job.frac : job.msg.t === "text" ? this.textMs : TEXT_MS;
 		if (warm) return work;
 		// Range loading: loading a page another worker has means downloading it again.
 		const elsewhere = this.affinity && job.page >= 0 && this.lanes.some((l) => l.pages.includes(job.page));
@@ -229,6 +231,14 @@ export class RasterPool {
 				}
 			}
 			if (best < 0) break;
+			// Selection waits on text: it never queues behind a busy worker while another sits idle (unless that means a download).
+			if (job.msg.t === "text" && (this.lanes[best]!.busy || taken.has(this.lanes[best]!))) {
+				const idle = this.affinity ? -1 : this.lanes.findIndex((l, i) => free[i] === 0 && !l.busy && !taken.has(l));
+				if (idle >= 0) {
+					best = idle;
+					bestAt = this.cost(job, pages[idle]!.has(job.page));
+				}
+			}
 			const lane = this.lanes[best]!;
 			free[best] = bestAt;
 			pages[best]!.add(job.page);
@@ -266,6 +276,10 @@ export class RasterPool {
 	}
 
 	private learn(job: Job, ms: number) {
+		if (job.msg.t === "text") {
+			this.textMs += (ms - this.textMs) * EMA;
+			return;
+		}
 		if (job.msg.t !== "tile") return;
 		const frac = Math.max(MIN_FRAC, job.frac);
 		const c = this.costs.get(job.page) ?? { content: 0, overhead: 0, warm: 0 };
@@ -323,7 +337,7 @@ export class RasterPool {
 			lane.busy = null;
 			lane.cancelling = false;
 		}
-		if (job && msg.t === "tile") this.learn(job, msg.ms);
+		if (job && (msg.t === "tile" || msg.t === "text")) this.learn(job, msg.ms);
 		this.pump();
 		// A cancelled tile is forgotten: the next plan requests it again if it is still wanted.
 		if (msg.t !== "cancelled") job?.onDone(msg);
