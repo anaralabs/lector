@@ -70,6 +70,8 @@ export interface Compositor {
 	/** gamma is baked in by backends that cannot apply it per draw */
 	upload(pixels: Uint8Array | ImageBitmap, w: number, h: number, gamma: number, baked?: boolean): unknown;
 	free(tex: unknown, w: number, h: number): void;
+	/** 2D: touch a bitmap as it arrives, so its first draw in a frame is a plain blit */
+	warm?(pixels: ImageBitmap): void;
 	begin(clear: [number, number, number]): void;
 	setTone(tone: Tone | null): void;
 	clip(r: { x: number; y: number; w: number; h: number } | null): void;

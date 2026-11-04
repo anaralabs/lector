@@ -5,10 +5,11 @@ import { chromium } from "playwright-core";
 
 const url = process.argv[2] ?? "http://127.0.0.1:5199/";
 const out = process.argv[3] ?? ".";
+// CHROME=<path>: a local Chromium (e.g. a GPU-less box, WebGL on SwiftShader)
 const browser = await chromium.launch({
-	channel: "chrome",
+	...(process.env.CHROME ? { executablePath: process.env.CHROME } : { channel: "chrome" }),
 	headless: process.env.HEADED !== "1",
-	args: process.env.HEADED === "1" ? [] : ["--enable-gpu", "--use-angle=metal", "--disable-frame-rate-limit"],
+	args: process.env.HEADED === "1" ? [] : process.env.CHROME ? ["--disable-frame-rate-limit"] : ["--enable-gpu", "--use-angle=metal", "--disable-frame-rate-limit"],
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 2 });
 const errors = [];

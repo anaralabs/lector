@@ -861,7 +861,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				viewH = e.h;
 			} else if (e.type === "camera") {
 				camera = e.camera;
-				textLayer?.setCamera(e.camera);
+				textLayer?.setCamera(e.camera, e.moving && compositorNow === "canvas2d");
 				forms?.update();
 			}
 			else if (e.type === "cursor") {

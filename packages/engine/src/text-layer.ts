@@ -67,9 +67,19 @@ export class TextLayer {
 		this.update();
 	}
 
-	setCamera(cam: Camera) {
+	private moving = false;
+
+	/** `moving` (2D compositor only): hide the transparent spans while the camera moves; blending them costs a CPU compositor a frame's budget */
+	setCamera(cam: Camera, moving = false) {
 		this.cam = cam;
 		const z = cam.zoom;
+		if (moving !== this.moving) {
+			this.moving = moving;
+			// opacity 0 keeps the spans in the a11y tree and their raster, but the compositor stops blending them
+			this.root.style.opacity = moving ? "0" : "";
+		}
+		// Hidden: catch up once the camera rests, so the main thread does no per-frame work meanwhile.
+		if (moving) return;
 		// The only per-frame write: a compositor-only transform.
 		this.root.style.transform = `matrix(${z},0,0,${z},${-cam.x * z},${-cam.y * z})`;
 		this.update();

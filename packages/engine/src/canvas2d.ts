@@ -98,6 +98,14 @@ export class Canvas2DCompositor implements Compositor {
 		return { w, h, src: plain, raw: !baked, toned: null, toneKey: "" };
 	}
 
+	private scratch: Ctx | null = null;
+
+	// A transferred bitmap is materialised on first use (~0.3ms per tile); a 1x1 draw does it between frames.
+	warm(pixels: ImageBitmap) {
+		this.scratch ??= context2d(surface(1, 1));
+		this.scratch.drawImage(pixels, 0, 0, 1, 1);
+	}
+
 	// ImageBitmaps are not closed here: the tile cache may still be encoding one, and GC frees them.
 	free(tex: unknown, w: number, h: number) {
 		const b = tex as Bitmap;

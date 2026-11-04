@@ -2401,6 +2401,7 @@ export class ViewerCore {
 			this.firstTileAt ||= epochNow();
 			this.cacheHits++;
 			tile.arrived = true;
+			if (tag) this.gl.warm?.(bitmap);
 			this.arrived.push({ tile, pixels: bitmap, baked: tag !== "" });
 			this.requestFrame();
 		});
@@ -2426,6 +2427,7 @@ export class ViewerCore {
 			if (this.cache && !this.dirt.any && r.ms >= CACHE_MIN_MS && scale === this.baseScale(page)) this.cache.put(page, scale, pixels, w, h, r.baked ? tag : "");
 			if (this.tiles.get(key) !== tile || tile.tex || tile.arrived) return;
 			tile.arrived = true;
+			if (r.bitmap && r.baked) this.gl.warm?.(r.bitmap);
 			this.arrived.push({ tile, pixels, baked: !!r.baked });
 			this.requestFrame();
 		}, Math.min(1, frac));
@@ -2787,7 +2789,7 @@ export class ViewerCore {
 		const zooming = !!this.flight || now - this.lastZoomChange < ZOOM_SETTLE_MS;
 		// 2D mid-zoom: a CPU's bilinear blits cost per pixel, so draw at most 1x and let the browser stretch it until the zoom settles.
 		const dpr = gl.kind === "canvas2d" && zooming && this.opts.motionResolution ? Math.min(this.dpr, 1) : this.dpr;
-		if (dpr !== this.drawnDpr) {
+		if (gl.kind === "canvas2d" && dpr !== this.drawnDpr) {
 			gl.resize(Math.round(this.vw * dpr), Math.round(this.vh * dpr));
 			this.drawnDpr = dpr;
 		}
@@ -2856,13 +2858,15 @@ export class ViewerCore {
 			if (!covered && !(target <= base && ready.some((t) => t.scale === base))) sharp = false;
 			// 2D, at rest: the target tiles go down first and the fallbacks only fill the target's holes, so no pixel is blitted twice.
 			const holes = this.gl.kind === "canvas2d" && !covered && !zooming ? this.targetHoles(p, ready, target, sx, sy, S) : null;
-			const order = holes ? [...ready.slice(start, end).filter((t) => t.scale === target), ...ready.slice(start, end).filter((t) => t.scale !== target)] : ready.slice(Math.max(0, start), end);
+			const order = holes ? [...ready.slice(start, end).filter((t) => t.scale === target), ...ready.slice(start, end).filter((t) => t.scale !== target)] : ready;
 			const firstFallback = holes ? order.findIndex((t) => t.scale !== target) : -1;
 			const drawTiles = (clipped = false) => {
-				const list = clipped ? ready.slice(Math.max(0, start), end) : order;
-				for (let i = 0; i < list.length; i++) {
+				const reordered = !!holes && !clipped;
+				const list = reordered ? order : ready;
+				const to = reordered ? order.length : end;
+				for (let i = reordered ? 0 : Math.max(0, start); i < to; i++) {
 					const t = list[i]!;
-					if (i === firstFallback && !clipped) {
+					if (reordered && i === firstFallback) {
 						if (!holes!.length) break;
 						gl.clipRects?.(holes);
 					}
@@ -2881,7 +2885,7 @@ export class ViewerCore {
 						this.emit({ type: "painted", page: p, timing: { firstTileAt: this.firstTileAt || epochNow(), paintedAt: epochNow(), cacheHits: this.cacheHits } });
 					}
 				}
-				if (firstFallback >= 0 && !clipped) gl.clipRects?.(null);
+				if (reordered && firstFallback >= 0) gl.clipRects?.(null);
 			};
 			const drawMarks = (dark: boolean) => {
 				const markBlend = dark ? "lighten" : "multiply";

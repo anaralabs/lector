@@ -1,5 +1,5 @@
 // Software-rendering bench: frame times of each compositor on a GPU-less box, per gesture.
-// Usage: node bench/softgl.mjs [dpr] [files,comma] [modes,comma]; DARK=1 dark mode, UNCAPPED=1 no vsync cap.
+// Usage: node bench/softgl.mjs [dpr] [files,comma] [modes,comma]; DARK=1 dark mode, UNCAPPED=1 no vsync cap, HZ=240 faster input (same gesture speed).
 import { chromium } from "playwright-core";
 
 const base = process.env.URL ?? "http://127.0.0.1:5199/";
@@ -14,6 +14,7 @@ const MODE = {
 	"2d-nogpu": { args: ["--disable-gpu", "--disable-webgl", "--disable-webgl2"], compositor: "auto" },
 };
 const extra = (process.env.DARK === "1" ? "&dark=1" : "") + (process.env.Q ?? "");
+const hz = Number(process.env.HZ ?? 120);
 const pct = (xs, p) => (xs.length ? xs[Math.min(xs.length - 1, Math.floor(xs.length * p))] : 0);
 
 for (const mode of modes) {
@@ -40,22 +41,23 @@ for (const mode of modes) {
 		const drive = async (frames, step) => {
 			await core("(__core.debugFrames = [], 1)");
 			const r = await page.evaluate(
-				async ({ frames, step }) => {
+				async ({ frames, step, hz }) => {
 					const el = document.getElementById("viewer");
-					const fn = new Function("i", "el", "wheel", step);
+					const fn = new Function("i", "el", "wheel", "k", step);
 					const wheel = (dx, dy, ctrl, x = 640, y = 430) =>
 						el.dispatchEvent(new WheelEvent("wheel", { deltaX: dx, deltaY: dy, ctrlKey: ctrl, clientX: x, clientY: y, bubbles: true, cancelable: true }));
 					window.__events.length = 0;
 					const t0 = performance.now();
-					// Input at a fixed 120Hz, so every compositor gets the same gesture whatever its frame rate.
-					for (let i = 0; i < frames; i++) {
-						fn(i, el, wheel);
-						const next = t0 + (i + 1) * (1000 / 120);
+					// Input at a fixed rate, so every compositor gets the same gesture whatever its frame rate.
+					const k = 120 / hz;
+					for (let i = 0; i < frames / k; i++) {
+						fn(i * k, el, wheel, k);
+						const next = t0 + (i + 1) * (1000 / hz);
 						while (performance.now() < next - 1) await new Promise((r) => setTimeout(r, Math.max(0, next - performance.now() - 1)));
 					}
-					return { ms: performance.now() - t0, cpu: window.__events.map((e) => e.stats.avgCpuMs) };
+					return { ms: performance.now() - t0, stats: window.__events.map((e) => e.stats) };
 				},
-				{ frames, step },
+				{ frames, step, hz },
 			);
 			const ends = (await core("__core.debugFrames.splice(0)")) ?? [];
 			// Only frames that moved the camera, back to back: a gesture past min/max zoom changes nothing.
@@ -64,7 +66,8 @@ for (const mode of modes) {
 			const ft = gaps.filter((d) => d < 250).sort((a, b) => a - b);
 			await core("(__core.debugFrames = null, 1)");
 			await page.waitForTimeout(700);
-			const cpu = r.cpu.filter((x) => x > 0);
+			const cpu = r.stats.map((s) => s.avgCpuMs).filter((x) => x > 0);
+			const tiles = r.stats.map((s) => s.avgTileMs).filter((x) => x > 0);
 			return {
 				fps: +((ends.filter((t) => t > 0).length * 1000) / r.ms).toFixed(1),
 				p50: +pct(ft, 0.5).toFixed(1),
@@ -72,13 +75,16 @@ for (const mode of modes) {
 				max: +(ft.at(-1) ?? 0).toFixed(0),
 				drops: +((100 * gaps.filter((g) => g > 25).length) / Math.max(1, gaps.length)).toFixed(1),
 				cpu: +(cpu.length ? Math.max(...cpu) : 0).toFixed(1),
+				tileMs: +(tiles.length ? tiles.reduce((a, b) => a + b, 0) / tiles.length : 0).toFixed(1),
+				gpuMB: +Math.max(0, ...r.stats.map((s) => s.textureMB)).toFixed(0),
+				workerMB: +Math.max(0, ...r.stats.map((s) => s.workerMB)).toFixed(0),
 			};
 		};
-		const scroll = await drive(360, "wheel(0, 15, false)");
-		const zoom = await drive(240, "wheel(0, -3, true, 400, 300)");
+		const scroll = await drive(360, "wheel(0, 15 * k, false)");
+		const zoom = await drive(240, "wheel(0, -3 * k, true, 400, 300)");
 		await page.waitForTimeout(800);
-		const pan = await drive(360, "wheel(Math.sin(i/40)*10, 12, false)");
-		const zoomOut = await drive(240, "wheel(0, 4, true)");
+		const pan = await drive(360, "wheel(Math.sin(i/40)*10*k, 12 * k, false)");
+		const zoomOut = await drive(240, "wheel(0, 4 * k, true)");
 		const comp = await page.evaluate(() => window.__viewer.compositor);
 		await page.screenshot({ path: `/tmp/softgl-${mode}-${file}-${dpr}${extra ? "-x" : ""}.png` });
 		console.log(JSON.stringify({ mode, comp, file, dpr, dark: process.env.DARK === "1", uncapped: !!uncapped.length, painted: Math.round(painted), scroll, zoom, pan, zoomOut, errors: errors.slice(0, 2) }));
