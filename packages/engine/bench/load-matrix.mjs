@@ -17,7 +17,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 const api = (path) => fetch(`${base}${path}`).then((r) => r.json().catch(() => null));
 const channel = process.env.CHANNEL ?? "chrome";
 const angle = process.env.ANGLE ?? (process.platform === "darwin" ? "metal" : "swiftshader");
-const browser = await chromium.launch({ ...(channel ? { channel } : {}), headless: true, args: ["--enable-gpu", `--use-angle=${angle}`, "--enable-unsafe-swiftshader", "--ignore-certificate-errors"] });
+const browser = await chromium.launch({ ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : channel ? { channel } : {}), headless: true, args: ["--enable-gpu", `--use-angle=${angle}`, "--enable-unsafe-swiftshader", "--ignore-certificate-errors"] });
 const med = (a) => {
 	const s = a.filter(Number.isFinite).sort((x, y) => x - y);
 	return s.length ? s[Math.floor(s.length / 2)] : Number.NaN;
@@ -41,8 +41,9 @@ for (const net of nets) {
 	for (const file of files) {
 		for (const v of variants) {
 			const samples = [];
-			for (let i = 0; i < runs; i++) {
+			for (let i = 0, tries = 0; i < runs; i++) {
 				const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 2, ignoreHTTPSErrors: true });
+				try {
 				const page = await ctx.newPage();
 				// warm the engine (scripts, wasm) unthrottled, as a host that preloads it
 				await api("/__config?mbit=0&rtt=0");
@@ -62,7 +63,12 @@ for (const net of nets) {
 					errors: at.errors,
 				});
 				await idle(page);
-				await ctx.close();
+				} catch (err) {
+					// a crashed page is measured again (twice at most per cell)
+					console.error(`retry ${v.name} ${file}: ${String(err).slice(0, 120)}`);
+					if (tries++ < 2) i--;
+				}
+				await ctx.close().catch(() => {});
 			}
 			const errs = samples.flatMap((s) => s.errors);
 			console.log(
