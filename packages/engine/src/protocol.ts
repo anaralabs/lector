@@ -1,6 +1,8 @@
 // Messages between the viewer core and the PDFium raster workers.
 // Coordinates sent to workers are in PDF points with a top-left origin.
 
+import type { FormOp, FormWidget } from "./forms";
+
 export interface PageSize {
 	w: number;
 	h: number;
@@ -71,7 +73,11 @@ export type ToRaster =
 	/** read these pages' sizes, stopping early after a few ms (the answer lists the ones read) */
 	| { t: "sizes"; id: number; page: number; pages: number[] }
 	/** stop the running tile job `id` (it answers `cancelled`; a job that already finished answers as usual) */
-	| { t: "cancel"; id: number };
+	| { t: "cancel"; id: number }
+	/** a form edit, sent to every worker in the same order; only `report` workers answer */
+	| { t: "form"; seq: number; op: FormOp; report: boolean }
+	/** the document bytes with their form edits */
+	| { t: "save"; id: number };
 
 /** Document metadata (Info dictionary), like pdf.js `getMetadata().info` and lector's `onDocumentLoad`. */
 export interface DocumentInfo {
@@ -88,7 +94,7 @@ export interface DocumentInfo {
 	/** e.g. 17 for PDF 1.7 */
 	pdfVersion?: number;
 	encrypted: boolean;
-	/** AcroForm fields present (rendered read-only) */
+	/** AcroForm fields present (fillable in the viewer) */
 	hasForm: boolean;
 }
 
@@ -156,8 +162,13 @@ export type FromRaster =
 			scans: number;
 			/** the page's size, which the core may only have estimated so far */
 			size: PageSize;
+			/** form field widgets (AcroForm documents) */
+			widgets: FormWidget[];
 			ms: number;
 			heap: number;
 	  }
 	| { t: "outline"; id: number; items: OutlineItem[] }
-	| { t: "cancelled"; id: number; heap: number };
+	| { t: "cancelled"; id: number; heap: number }
+	/** fields whose value a form edit changed; `reset`: a button that may have changed any field */
+	| { t: "form"; seq: number; changed: { name: string; value: string }[]; reset: boolean }
+	| { t: "saved"; id: number; buf?: ArrayBuffer; error?: string };

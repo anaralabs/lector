@@ -20,6 +20,7 @@ import {
 } from "./core";
 import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
+import { FormLayer, modifiers, type FormHit } from "./form-layer";
 import type { DocSource, DocumentInfo, OpenTiming, OutlineItem, PageSize, SizeHint, ToRaster } from "./protocol";
 import { rasterWorkerCount } from "./raster-pool";
 import { probeVerdict, RANGE_BLOCK, readLinearization } from "./range";
@@ -172,8 +173,10 @@ export interface Viewer {
 	rects(page: number, from: number, to: number): Promise<Rect[]>;
 	/** a rendered page at `width` device pixels, for thumbnails */
 	thumbnail(page: number, width: number): Promise<ImageBitmap | null>;
-	/** a copy of the document bytes */
+	/** a copy of the document bytes, as loaded (form edits not included; see `saveDocument`) */
 	getData(): Promise<Uint8Array>;
+	/** the document bytes with the form fields as filled in (an open field edit is committed first) */
+	saveDocument(): Promise<Uint8Array>;
 	setHighlights(items: Extract<Command, { type: "highlights" }>["items"]): void;
 	clearSelection(): void;
 	setOptions(options: Partial<CoreOptions>): void;
@@ -373,6 +376,10 @@ const WORKER_RETRY_MS = 400;
 /** presses closer than this (ms, css px) count as a double/triple click */
 const MULTI_CLICK_MS = 500;
 const MULTI_CLICK_PX = 6;
+
+/** a touch on a form field fills it in when it stays within this (css px, ms) */
+const FORM_TAP_SLOP = 10;
+const FORM_TAP_MS = 600;
 
 const NAV_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", "Home", "End", " ", "Escape"]);
 
@@ -693,6 +700,10 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		let layout: Rect[] = [];
 		let viewH = 0;
 		let textLayer: TextLayer | null = null;
+		let forms: FormLayer | null = null;
+		/** the cursor the core asked for (a widget under the mouse overrides it) */
+		let coreCursor = "default";
+		let overWidget = false;
 		const unlocks: ((ok: boolean) => void)[] = [];
 		/** requests waiting for a `response` event */
 		const pending = new Map<number, { resolve: (result: unknown) => void; reject: (err: Error) => void }>();
@@ -730,8 +741,15 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			} else if (e.type === "camera") {
 				camera = e.camera;
 				textLayer?.setCamera(e.camera);
+				forms?.update();
 			}
-			else if (e.type === "cursor") container.style.cursor = e.cursor;
+			else if (e.type === "cursor") {
+				coreCursor = e.cursor;
+				if (!overWidget) container.style.cursor = e.cursor;
+			}
+			else if (e.type === "form-widgets") forms?.setWidgets(e.page, e.widgets);
+			else if (e.type === "form-change") forms?.changed(e.name, e.value);
+			else if (e.type === "form-painted") forms?.painted(e.page);
 			else if (e.type === "selection") {
 				if (e.final) selectedText = e.selection?.text ?? "";
 			} else if (e.type === "link") {
@@ -773,6 +791,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			} else if (e.type === "layout") {
 				layout = e.layout;
 				textLayer?.setLayout(e.layout);
+				forms?.update();
 			} else if (e.type === "error" && e.code === "password" && e.phase === "document-load") {
 				for (const resolve of unlocks.splice(0)) resolve(false);
 			} else if (e.type === "error" && (e.phase === "document-load" || e.phase === "engine-load") && !opened) {
@@ -918,6 +937,14 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		}, () => {});
 		container.appendChild(overlay);
 		cleanups.push(() => overlay.remove());
+		const formLayer = new FormLayer(container, {
+			send: (op) => command({ type: "form", op }),
+			layout: () => layout,
+			camera: () => camera,
+			options: () => resolved,
+		});
+		forms = formLayer;
+		cleanups.push(() => formLayer.destroy());
 
 		// ------------------------------------------------------------ input
 		let rect = container.getBoundingClientRect();
@@ -982,12 +1009,57 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		// Pointer events report detail 0 on down/up (per spec; some engines count),
 		// so repeated presses are counted here: same pointer type, close in time and place.
 		let press = { t: -Infinity, x: 0, y: 0, kind: "", clicks: 1 };
+		/** a press that started on a form field: a tap or click there fills it in instead of selecting */
+		let formPress: { id: number; x: number; y: number; t: number; hit: FormHit } | null = null;
+		/** Routes form-field input; true when the event is consumed (the core never sees it). */
+		const formPointer = (phase: "down" | "move" | "up" | "cancel", e: PointerEvent, kind: PointerKind) => {
+			const p = local(e);
+			if (phase === "down") {
+				formPress = null;
+				const hit = e.button === 0 && e.isPrimary ? formLayer.hit(p.x, p.y) : null;
+				if (!hit) return false;
+				formPress = { id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp, hit };
+				if (kind === "touch") return false;
+				canvas.setPointerCapture(e.pointerId);
+				return true;
+			}
+			const own = formPress?.id === e.pointerId ? formPress : null;
+			if (phase === "move") {
+				if (own && Math.hypot(e.clientX - own.x, e.clientY - own.y) > (kind === "touch" ? FORM_TAP_SLOP : MULTI_CLICK_PX)) formPress = null;
+				if (kind === "touch") return false;
+				if (own) return true;
+				if (e.buttons) return false;
+				const hover = formLayer.hit(p.x, p.y);
+				if (hover) {
+					if (!overWidget) send({ type: "leave" });
+					overWidget = true;
+					container.style.cursor = formLayer.cursor(hover);
+					return true;
+				}
+				if (overWidget) {
+					overWidget = false;
+					container.style.cursor = coreCursor;
+				}
+				return false;
+			}
+			if (!own) return false;
+			formPress = null;
+			if (phase === "cancel") return kind !== "touch";
+			if (kind === "touch") {
+				if (touchCount > 0 || e.timeStamp - own.t > FORM_TAP_MS) return false;
+				// The core saw the touch start: end it without its tap behaviour (links, clearing a selection).
+				send({ type: "pointer", phase: "cancel", id: e.pointerId, x: p.x, y: p.y, buttons: 0, kind, clicks: 1, shift: false, primary: e.isPrimary });
+			}
+			formLayer.activate(own.hit, modifiers(e));
+			return true;
+		};
 		const pointer = (phase: "down" | "move" | "up" | "cancel") => (e: PointerEvent) => {
 			const kind = (e.pointerType || "mouse") as PointerKind;
 			if (kind === "touch") {
 				if (phase === "down") touchCount = e.isPrimary ? 1 : touchCount + 1;
 				if (phase === "up" || phase === "cancel") touchCount = Math.max(0, touchCount - 1);
 			}
+			if (formLayer.active && formPointer(phase, e, kind)) return;
 			if (phase === "down") {
 				container.focus({ preventScroll: true });
 				if (e.button === 0) {
@@ -1003,7 +1075,13 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		on(canvas, "pointermove", pointer("move"));
 		on(canvas, "pointerup", pointer("up"));
 		on(canvas, "pointercancel", pointer("cancel"));
-		on(canvas, "pointerleave", () => send({ type: "leave" }));
+		on(canvas, "pointerleave", () => {
+			if (overWidget) container.style.cursor = coreCursor;
+			overWidget = false;
+			send({ type: "leave" });
+		});
+		// A press on a field keeps focus where it is (an open field editor), instead of moving it to the container.
+		on(canvas, "mousedown", (e: MouseEvent) => formPress && e.preventDefault());
 		on(canvas, "touchstart", (e: TouchEvent) => e.preventDefault(), { passive: false });
 		// Android fires contextmenu on long-press; the engine handles that as selection.
 		on(canvas, "contextmenu", (e: Event) => touchCount > 0 && e.preventDefault());
@@ -1113,6 +1191,10 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			pageTextMap: (page) => request<{ text: string; chars: Int32Array }>({ type: "page-text-map", page }),
 			rects: (page, from, to) => request<Rect[]>({ type: "rects", page, from, to }),
 			getData: async () => new Uint8Array(await (await fetchAll()).arrayBuffer()),
+			saveDocument: () => {
+				formLayer.commit();
+				return request<Uint8Array>({ type: "save-document" });
+			},
 			thumbnail: async (page, width) => {
 				const res = await request<{ buf: ArrayBuffer; w: number; h: number } | null>({ type: "thumbnail", page, width });
 				if (!res) return null;

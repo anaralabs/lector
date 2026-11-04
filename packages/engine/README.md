@@ -180,7 +180,8 @@ interface Viewer {
 	// document
 	unlock(password: string): Promise<boolean>;
 	thumbnail(page: number, width: number): Promise<ImageBitmap | null>;
-	getData(): Promise<Uint8Array>;
+	getData(): Promise<Uint8Array>; // as loaded
+	saveDocument(): Promise<Uint8Array>; // with the form fields as filled in
 	setOptions(options: Partial<CoreOptions>): void;
 	destroy(): void;
 }
@@ -228,6 +229,8 @@ interface SearchHit {
 | `flight { id, landed, cause, coverage, waitMs, durationMs }` | a goto/reveal finished; when `landed` is false, `cause` is `"input"` (wheel, gesture, pointer down or key), `"command"` (a zoom/fit/scroll call), `"jump"` (a newer goto/reveal) or `"no-target"` (no such page, or a non-finite rect). `waitMs` includes the time a jump waited for the view to get a size |
 | `search-progress { id, results }` | partial `searchAsync` results |
 | `find` | Cmd/Ctrl+F with `interceptFind` |
+| `form-change { name, value }` | a form field's value was committed (see [Forms](#forms)) |
+| `form-widgets { page, widgets }`, `form-painted { page }` | a page's form widgets became known; a page shows its edited fields |
 | `stats` | frame and memory statistics (`workerMB`: PDFium heaps + block caches) |
 | `error { message, code, phase }` | see below |
 
@@ -274,7 +277,19 @@ It falls back to a full download when the server ignores `Range` (the 200 respon
 
 ### Forms
 
-Documents with an AcroForm get a PDFium form fill environment in each raster worker. Fields render through `FPDF_FFLDraw`, including filled fields that have no appearance streams (`NeedAppearances`). Field highlighting is off. **Interactive editing is not supported.** Every raster worker holds its own PDFium document, so edits would have to be replayed in every worker, keys and focus routed to PDFium, the caret animated, and the affected tiles re-rendered on each keystroke. Hosts that need editing should overlay their own inputs through `overlayElement`.
+Documents with an AcroForm get a PDFium form fill environment in each raster worker. Fields render through `FPDF_FFLDraw`, including filled fields that have no appearance streams (`NeedAppearances`). Field highlighting is off.
+
+Fields can be filled in:
+
+- **Text fields**: a click or tap opens a native `<input>` (`<textarea>` for multiline fields) laid over the field, so the caret, selection, IME, autocorrect, paste and the phone keyboard are the browser's. PDFium draws no caret, so typing is not forwarded key by key. Enter (single-line), Tab, Shift+Tab or a click elsewhere commits the value. Escape drops it. Tab moves to the next text field.
+- **Checkboxes, radio buttons, list boxes and push buttons**: the click goes to PDFium.
+- **Combo boxes**: a native `<select>` with the field's options (the system picker on phones). Free text in editable combo boxes is not supported.
+
+Each edit is applied by every raster worker in the same order, before any job sent after it, and leaves no field focused in PDFium. The workers' documents stay identical, so any of them can render any page. Only the tiles over the edited field (and the whole-page bitmaps) re-render; the old bitmap stays on screen until its replacement arrives. Widgets of the same field on other pages re-render too, including pages whose fields are read later. After the first edit, nothing more is written to the persistent tile cache (`tileCache`), and edited pages are not read from it.
+
+A press that starts on a field and moves (a swipe on a phone) pans as usual. Text selection and gestures off the fields are unchanged. Read-only fields and signature fields are not interactive. Form JavaScript does not run (field formatting, calculation and validation scripts included).
+
+The `form-change { name, value }` event reports each committed value. `viewer.saveDocument()` returns the document bytes with the edits (`FPDF_SaveAsCopy`); `getData()` still returns the bytes as loaded.
 
 ### Right-to-left and vertical text
 
@@ -311,6 +326,7 @@ pnpm test:unit         # node --test (block cache, range decisions, estimated la
 pnpm test:package      # pack; check exports, license notices, and boot the self-hosted workers in Chrome
 node bench/features.mjs   # search / outline / selection / dark mode against the demo
 node bench/compat.mjs     # emulated old browsers: compositor fallback and clean rejection
+node bench/forms.mjs      # fill in a form: text, checkbox, radio, dropdown, list box, touch, saveDocument
 node bench/clicks.mjs     # double/triple click in Chrome, Firefox, WebKit (npx playwright-core install firefox webkit)
 node bench/frames.mjs     # frame timing (HEADED=1 for a vsync'd window)
 node bench/memory.mjs [/big.pdf] ["&range=1"] [Mbit/s]   # ready/painted time and memory

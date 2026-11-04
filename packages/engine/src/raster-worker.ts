@@ -3,6 +3,7 @@
 // document, so workers never share memory and need no cross-origin isolation.
 
 import { BlockCache } from "./blocks";
+import { applyFormOp, type FormContext, readWidgets, saveDocument } from "./form-fill";
 import { init, type Pdfium } from "./pdfium/pdfium.js";
 import type { DocSource, DocumentInfo, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
 import { blockVerdict, openErrorCode, RANGE_BLOCK, retryableBlockStatus } from "./range";
@@ -176,6 +177,7 @@ async function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 
 type Xf = (x: number, y: number) => [number, number];
 const transforms = new Map<number, Xf>();
+const inverses = new Map<number, Xf>();
 
 /**
  * PDF user space -> page points with a top-left origin, as displayed: applies
@@ -203,7 +205,22 @@ function transformFor(index: number): Xf {
 	const d = (ay[1] - o[1]) / 1000;
 	const xf: Xf = (x, y) => [o[0] + a * x + c * y, o[1] + b * x + d * y];
 	transforms.set(index, xf);
+	const det = a * d - b * c || 1;
+	inverses.set(index, (x, y) => [(d * (x - o[0]) - c * (y - o[1])) / det, (a * (y - o[1]) - b * (x - o[0])) / det]);
 	return xf;
+}
+
+/** page points (top-left origin, as displayed) -> PDF user space */
+function inverseFor(index: number): Xf {
+	transformFor(index);
+	return inverses.get(index)!;
+}
+
+let formCtx: FormContext | null = null;
+function formContext(): FormContext | null {
+	if (!form) return null;
+	formCtx ??= { P, doc, form, heap, withPage, toPage: (i, x, y) => transformFor(i)(x, y), toUser: (i, x, y) => inverseFor(i)(x, y) };
+	return formCtx;
 }
 
 /** Axis-aligned box (l, t, r, b) in page points from a user-space rect. */
@@ -322,8 +339,10 @@ function extractPageText(msg: Extract<ToRaster, { t: "text" }>, page: number) {
 	P.FPDFText_ClosePage(tp);
 	const links = readLinks(page, xf);
 	const { images, scans } = readImages(page, msg.page, xf);
+	const ctx = formContext();
+	const widgets = ctx ? readWidgets(ctx, msg.page, page) : [];
 	send(
-		{ t: "text", id: msg.id, page: msg.page, codes, boxes, links, images, scans, size: sizeOf(msg.page), ms: performance.now() - t0, heap: heapBytes() },
+		{ t: "text", id: msg.id, page: msg.page, codes, boxes, links, images, scans, size: sizeOf(msg.page), widgets, ms: performance.now() - t0, heap: heapBytes() },
 		[codes.buffer, boxes.buffer, images.buffer],
 	);
 }
@@ -564,6 +583,18 @@ function loadFailureDetail(err: number): LoadFailureDetail {
 	return detail;
 }
 
+function formEdit(m: Extract<ToRaster, { t: "form" }>) {
+	const ctx = formContext();
+	const res = ctx && m.op.page >= 0 && m.op.page < pageCount ? applyFormOp(ctx, m.op, m.report) : { changed: [], reset: false };
+	if (m.report) send({ t: "form", seq: m.seq, ...res });
+}
+
+function save(id: number) {
+	const ctx = formContext() ?? { P, doc, form: 0, heap, withPage, toPage: (_: number, x: number, y: number): [number, number] => [x, y], toUser: (_: number, x: number, y: number): [number, number] => [x, y] };
+	const bytes = saveDocument(ctx);
+	send({ t: "saved", id, buf: bytes.buffer as ArrayBuffer }, [bytes.buffer as ArrayBuffer]);
+}
+
 // ---------------------------------------------------------------- byte source
 // PDFium pulls bytes through FPDF_LoadCustomDocument's synchronous GetBlock
 // callback. Blocks come from a Blob shared by all workers (FileReaderSync) or
@@ -661,7 +692,7 @@ function loadDocument(password: string | undefined) {
 	if (P.FPDF_GetFormType(doc) !== FORMTYPE_NONE) {
 		const info = P.PDFiumExt_OpenFormFillInfo();
 		form = P.PDFiumExt_InitFormFillEnvironment(doc, info);
-		// Read-only viewing: no blue field tint.
+		// No blue field tint: pages look as they print.
 		if (form) P.FPDF_SetFormFieldHighlightAlpha(form, 0);
 	}
 	pageCount = P.FPDF_GetPageCount(doc);
@@ -795,7 +826,16 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 				else if (m.t === "outline") send({ t: "outline", id: m.id, items: readOutline(0, 0) });
 				else if (m.t === "sizes") readSizes(m);
 				else if (m.t === "unlock" && P && !doc && fileAccess) loadDocument(m.password);
+				else if (m.t === "form") formEdit(m);
+				else if (m.t === "save") save(m.id);
 			} catch (err) {
+				// A failed edit is not a failed job: the pool would blame whatever job this worker is running.
+				if (m.t === "form" || m.t === "save") {
+					console.error(err);
+					if (m.t === "form" && m.report) send({ t: "form", seq: m.seq, changed: [], reset: false });
+					else if (m.t === "save") send({ t: "saved", id: m.id, error: String((err as Error)?.message ?? err) });
+					continue;
+				}
 				const id = "id" in m ? m.id : undefined;
 				send({ t: "error", message: String((err as Error)?.stack ?? err), code: "unknown", phase: m.t === "tile" ? "render" : "text", id });
 			}
