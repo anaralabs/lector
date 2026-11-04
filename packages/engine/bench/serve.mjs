@@ -161,23 +161,27 @@ const server = http2.createSecureServer({ key: readFileSync(join(certDir, "key.p
 		return;
 	}
 	const fh = await open(file, "r");
-	let closed = false;
+	// a client that cancelled during the round-trip sleep closed the stream before any listener was attached
+	const closed = () => res.destroyed || res.stream?.destroyed || res.stream?.closed;
 	active++;
-	res.on("close", () => (closed = true));
 	try {
-		for (let pos = start; pos < end && !closed; pos += CHUNK) {
+		for (let pos = start; pos < end && !closed(); pos += CHUNK) {
 			const n = Math.min(CHUNK, end - pos);
 			await take(n);
 			const buf = Buffer.alloc(n);
 			await fh.read(buf, 0, n, pos);
-			if (closed) break;
-			if (!res.write(buf)) await new Promise((r) => res.once("drain", r));
+			if (closed()) break;
+			if (!res.write(buf))
+				await new Promise((r) => {
+					res.once("drain", r);
+					res.once("close", r);
+				});
 			if (isPdf) log.push([Date.now(), n, url.split("?")[0], id]);
 		}
 	} finally {
 		active--;
 		await fh.close();
-		if (!closed) res.end();
+		if (!closed()) res.end();
 	}
 });
 server.listen(port, "127.0.0.1", () => console.log(`bench server https://127.0.0.1:${port} root=${root} ${JSON.stringify(cfg)}`));
