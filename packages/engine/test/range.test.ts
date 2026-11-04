@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { blockVerdict, openErrorCode, probeVerdict, readLinearization, retryableBlockStatus, totalFromContentRange } from "../src/range.ts";
+import { blockVerdict, openErrorCode, probeReadBytes, probeVerdict, RANGE_BLOCK, readLinearization, retryableBlockStatus, totalFromContentRange, WHOLE_FILE_MAX } from "../src/range.ts";
 
 test("Content-Range total, including when CORS hides it", () => {
 	assert.equal(totalFromContentRange("bytes 0-1023/52428800"), 52428800);
@@ -8,17 +8,41 @@ test("Content-Range total, including when CORS hides it", () => {
 	assert.equal(totalFromContentRange(null), null);
 });
 
+const MB = 1024 * 1024;
+
 test("probe: 206 with a readable total ranges; hidden total asks for the length", () => {
-	assert.deepEqual(probeVerdict({ status: 206, contentRange: "bytes 0-65535/9000000", contentEncoding: null }), { kind: "range", length: 9000000 });
-	assert.deepEqual(probeVerdict({ status: 206, contentRange: null, contentEncoding: null }), { kind: "need-length" });
+	assert.deepEqual(probeVerdict({ status: 206, contentRange: `bytes 0-${8 * MB - 1}/9000000`, contentEncoding: null }, 8 * MB), { kind: "range", length: 9000000 });
+	assert.deepEqual(probeVerdict({ status: 206, contentRange: null, contentEncoding: null, contentLength: String(8 * MB) }, 8 * MB), { kind: "need-length" });
+	assert.deepEqual(probeVerdict({ status: 206, contentRange: null, contentEncoding: null }, 8 * MB), { kind: "need-length" });
+});
+
+test("probe: a file that fits in the probed range is the whole response", () => {
+	assert.deepEqual(probeVerdict({ status: 206, contentRange: "bytes 0-2097151/2097152", contentEncoding: null }, 8 * MB), { kind: "whole", length: 2 * MB });
+	// exactly the probed size: still all there
+	assert.deepEqual(probeVerdict({ status: 206, contentRange: `bytes 0-${8 * MB - 1}/${8 * MB}`, contentEncoding: null }, 8 * MB), { kind: "whole", length: 8 * MB });
+	// CORS hides Content-Range: a clipped Content-Length says the same
+	assert.deepEqual(probeVerdict({ status: 206, contentRange: null, contentEncoding: null, contentLength: "1500000" }, 8 * MB), { kind: "whole", length: 1500000 });
+	// encoded bytes are never used as the file
+	assert.deepEqual(probeVerdict({ status: 206, contentRange: "bytes 0-999/1000", contentEncoding: "br" }, 8 * MB), { kind: "download" });
+});
+
+test("probe read: the head block, or through page 1's section for a linearized file opening there", () => {
+	assert.equal(probeReadBytes(null, true, 50 * MB), RANGE_BLOCK);
+	assert.equal(probeReadBytes(null, true, 1000), 1000);
+	const lin = { firstPageEnd: 300_000 };
+	assert.equal(probeReadBytes(lin, true, 50 * MB), Math.ceil(300_000 / RANGE_BLOCK) * RANGE_BLOCK);
+	assert.equal(probeReadBytes(lin, false, 50 * MB), RANGE_BLOCK);
+	// never past the file or the probed range
+	assert.equal(probeReadBytes({ firstPageEnd: 20 * MB }, true, 50 * MB), WHOLE_FILE_MAX);
+	assert.equal(probeReadBytes({ firstPageEnd: 9_000_100 }, true, 9_000_200), Math.min(9_000_200, WHOLE_FILE_MAX));
 });
 
 test("probe: servers without range support fall back to the full download", () => {
 	// Range ignored: the body is the whole file and is used as is.
-	assert.deepEqual(probeVerdict({ status: 200, contentRange: null, contentEncoding: null }), { kind: "full-body" });
+	assert.deepEqual(probeVerdict({ status: 200, contentRange: null, contentEncoding: null }, 8 * MB), { kind: "full-body" });
 	// Compressed ranges point into compressed bytes.
-	assert.deepEqual(probeVerdict({ status: 206, contentRange: "bytes 0-1023/5000", contentEncoding: "gzip" }), { kind: "download" });
-	assert.deepEqual(probeVerdict({ status: 416, contentRange: null, contentEncoding: null }), { kind: "download" });
+	assert.deepEqual(probeVerdict({ status: 206, contentRange: "bytes 0-1023/50000000", contentEncoding: "gzip" }, 8 * MB), { kind: "download" });
+	assert.deepEqual(probeVerdict({ status: 416, contentRange: null, contentEncoding: null }, 8 * MB), { kind: "download" });
 });
 
 test("block: a 200 with the whole file switches to it; anything else short fails", () => {

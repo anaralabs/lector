@@ -137,3 +137,23 @@ test("fetched blocks are reported for sharing, seeded ones are not", () => {
 	read(cache, 0, 2 * K);
 	assert.deepEqual(shared, [K]);
 });
+
+test("each request's first shared block is marked, so the host can count requests", () => {
+	const firsts: number[] = [];
+	const cache = new BlockCache(file.length, { size: () => K, fetch: (s, e) => file.slice(s, e) }, { onFetched: (s, _d, first) => first && firsts.push(s) });
+	read(cache, 0, 3 * K);
+	read(cache, 8 * K, 1);
+	assert.deepEqual(firsts, [0, 8 * K]);
+	assert.equal(cache.requests, 2);
+});
+
+test("read-ahead stops at maxRun blocks", () => {
+	const calls: [number, number][] = [];
+	const fetch = (s: number, e: number) => {
+		calls.push([s, e]);
+		return file.slice(s, e);
+	};
+	const cache = new BlockCache(file.length, { size: () => K, fetch }, { maxRun: 2 });
+	for (let pos = 0; pos < 8 * K; pos += K) read(cache, pos, K);
+	assert.ok(calls.every(([s, e]) => e - s <= 2 * K));
+});

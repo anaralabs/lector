@@ -15,8 +15,8 @@ export interface BlockCacheOptions {
 	max?: number;
 	/** largest single request, in blocks (read-ahead grows up to it) */
 	maxRun?: number;
-	/** called with every block fetched (not seeded), e.g. to share it */
-	onFetched?: (start: number, data: Uint8Array) => void;
+	/** called with every block fetched (not seeded), e.g. to share it; `first` marks a request's first block */
+	onFetched?: (start: number, data: Uint8Array, first: boolean) => void;
 }
 
 export class BlockCache {
@@ -30,7 +30,7 @@ export class BlockCache {
 	private source: BlockFetch;
 	private max: number;
 	private maxRun: number;
-	private onFetched?: (start: number, data: Uint8Array) => void;
+	private onFetched?: (start: number, data: Uint8Array, first: boolean) => void;
 	/** where the last fetch ended, and how many blocks the next miss there reads */
 	private nextSequential = -1;
 	private ahead = 0;
@@ -125,7 +125,7 @@ export class BlockCache {
 				for (let s = start; s < end; s += size) {
 					const block = data.subarray(s - start, Math.min(end, s + size) - start);
 					this.put(s, block);
-					this.onFetched?.(s, block);
+					this.onFetched?.(s, block, s === start);
 				}
 				this.trim();
 			}

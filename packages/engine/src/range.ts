@@ -8,7 +8,12 @@ export function totalFromContentRange(header: string | null): number | null {
 	return total > 0 ? total : null;
 }
 
+/** files up to this size open from one request instead of range reads */
+export const WHOLE_FILE_MAX = 8 * 1024 * 1024;
+
 export type ProbeVerdict =
+	/** the 206 body is the entire file (it fits in the probed range): read it to the end */
+	| { kind: "whole"; length: number }
 	/** ranges work: read blocks on demand */
 	| { kind: "range"; length: number }
 	/** ranges work but the total is hidden (CORS without `Content-Range` exposed): ask with HEAD */
@@ -19,17 +24,34 @@ export type ProbeVerdict =
 	| { kind: "download" };
 
 /**
- * What a `Range: bytes=0-N` probe says. Encoded (compressed) responses cannot be
- * range-read: offsets would point into compressed bytes. `Content-Encoding` is
- * not visible cross-origin unless exposed, so a body longer than asked for also
- * counts as "not ranged".
+ * What a `Range: bytes=0-(asked - 1)` probe says. Encoded (compressed)
+ * responses cannot be range-read: offsets would point into compressed bytes.
+ * `Content-Encoding` is not visible cross-origin unless exposed, so a body
+ * longer than asked for also counts as "not ranged". `Content-Length` is always
+ * readable: shorter than asked means the range was clipped to the whole file.
  */
-export function probeVerdict(res: { status: number; contentRange: string | null; contentEncoding: string | null }): ProbeVerdict {
+export function probeVerdict(
+	res: { status: number; contentRange: string | null; contentEncoding: string | null; contentLength?: string | null },
+	asked: number,
+): ProbeVerdict {
 	if (res.status === 200) return { kind: "full-body" };
 	if (res.status !== 206) return { kind: "download" };
 	if ((res.contentEncoding ?? "identity") !== "identity") return { kind: "download" };
 	const total = totalFromContentRange(res.contentRange);
-	return total ? { kind: "range", length: total } : { kind: "need-length" };
+	if (total) return total <= asked ? { kind: "whole", length: total } : { kind: "range", length: total };
+	const sent = Number(res.contentLength ?? 0);
+	if (sent > 0 && sent < asked) return { kind: "whole", length: sent };
+	return { kind: "need-length" };
+}
+
+/**
+ * How much of the probe's body to read before cancelling it: the head block,
+ * or for a linearized file opening on page 1, through that page's section.
+ */
+export function probeReadBytes(lin: { firstPageEnd: number } | null, firstPage: boolean, length: number, block = RANGE_BLOCK): number {
+	const head = Math.min(length, block);
+	if (!lin || !firstPage) return head;
+	return Math.max(head, Math.min(length, WHOLE_FILE_MAX, Math.ceil(lin.firstPageEnd / block) * block));
 }
 
 export type BlockVerdict = "ok" | "full" | "error";
@@ -78,4 +100,6 @@ export function readLinearization(head: Uint8Array, fileLen: number): { firstPag
 }
 
 /** block size for range reads (a worker's cache and the main thread's seeds align to it) */
-export const RANGE_BLOCK = 16 * 1024;
+export const RANGE_BLOCK = 64 * 1024;
+/** the most one range read fetches as read-ahead grows */
+export const RANGE_MAX_RUN = 1024 * 1024;

@@ -22,7 +22,7 @@ import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
 import type { DocSource, DocumentInfo, OpenTiming, OutlineItem, PageSize, SizeHint, ToRaster } from "./protocol";
 import { rasterWorkerCount } from "./raster-pool";
-import { probeVerdict, RANGE_BLOCK, readLinearization } from "./range";
+import { probeReadBytes, probeVerdict, RANGE_BLOCK, readLinearization, WHOLE_FILE_MAX } from "./range";
 import { findStartxref, pagePathObjects, parseXref } from "./xref";
 import { getEngineSupport } from "./support";
 import { documentKey } from "./tile-cache";
@@ -217,14 +217,20 @@ async function readBlob(res: Response, url: string): Promise<Blob> {
 	}
 }
 
-/** bytes read from each end of the file before the workers start: header and linearization dict, trailer and xref */
-const HEAD_BYTES = 64 * 1024;
+/** bytes read from the end of the file before the workers start: trailer and xref */
 const TAIL_BYTES = 64 * 1024;
 
-type Opened = { blob: Blob } | { length: number; seeds: [number, Uint8Array][] };
+type Opened = { blob: Blob; mode: "download" | "whole" } | { length: number; seeds: [number, Uint8Array][] };
 
-async function rangeBytes(url: string, start: number, end: number, signal?: AbortSignal): Promise<Uint8Array | null> {
+/** PDF requests the main thread made while opening, and when the first answered */
+interface NetCount {
+	requests: number;
+	firstByteAt: number;
+}
+
+async function rangeBytes(url: string, start: number, end: number, net: NetCount, signal?: AbortSignal): Promise<Uint8Array | null> {
 	try {
+		net.requests++;
 		// no-store: the HTTP cache lets one request per URL through at a time, which would serialise these
 		const res = await fetch(url, { credentials: "same-origin", cache: "no-store", headers: { Range: `bytes=${start}-${end - 1}` }, signal });
 		if (res.status !== 206) return null;
@@ -235,20 +241,37 @@ async function rangeBytes(url: string, start: number, end: number, signal?: Abor
 	}
 }
 
-/**
- * Probes for range support while reading the file's first 64KB. A 206 with a
- * total length means range loading works; then the last 64KB (trailer, xref)
- * and, for a linearized file opening on its first page, that page's section
- * are read too, and every worker starts with them. A 200 means the server
- * sent the whole file, which is used as is (nothing is downloaded twice).
- * Servers that hide `Content-Range` from CORS get a HEAD for the length.
- */
+/** Reads a body until `need(bytesSoFar)` bytes have arrived (or it ends), then stops the rest. */
+async function readPrefix(res: Response, need: (bytes: Uint8Array) => number): Promise<Uint8Array | null> {
+	const reader = res.body?.getReader();
+	if (!reader) return null;
+	let buf = new Uint8Array(0);
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (value) {
+				const next = new Uint8Array(buf.length + value.length);
+				next.set(buf);
+				next.set(value, buf.length);
+				buf = next;
+			}
+			if (done || buf.length >= need(buf)) break;
+		}
+	} catch {
+		return null;
+	} finally {
+		void reader.cancel().catch(() => {});
+	}
+	return buf;
+}
+
 /** Aligned blocks the main thread fetched, handed to every worker as seeds. */
 class SeedBlocks {
 	blocks = new Map<number, Uint8Array>();
 	constructor(
 		private url: string,
 		private length: number,
+		private net: NetCount,
 		private signal?: AbortSignal,
 	) {}
 
@@ -272,7 +295,7 @@ class SeedBlocks {
 			if (last && last[1] === s) last[1] = Math.min(this.length, s + RANGE_BLOCK);
 			else runs.push([s, Math.min(this.length, s + RANGE_BLOCK)]);
 		}
-		await Promise.all(runs.map(([s, e]) => rangeBytes(this.url, s, e, this.signal).then((b) => b && this.add(s, b))));
+		await Promise.all(runs.map(([s, e]) => rangeBytes(this.url, s, e, this.net, this.signal).then((b) => b && this.add(s, b))));
 	}
 
 	bytes(start: number, end: number): Uint8Array | null {
@@ -332,36 +355,66 @@ async function prefetchPagePath(store: SeedBlocks, tailStart: number, target: nu
 	if (path) await store.ensure(path.map((o) => [o, o + OBJECT_BYTES]));
 }
 
-async function openUrl(url: string, range: boolean, firstPage: boolean, target: number | ((count: number) => number), signal: AbortSignal): Promise<Opened> {
-	const download = async () => ({ blob: await readBlob(await fetchPdf(url, { signal }), url) });
+/**
+ * Probes with `Range: bytes=0-(WHOLE_FILE_MAX - 1)`. A file that fits comes
+ * back whole in that one response (a range round trip per block costs more
+ * than downloading a small file). For a larger one only the head is read
+ * (through page 1's section for a linearized file) and the rest is cancelled;
+ * the tail (trailer, xref) is fetched as soon as the length is known, and every
+ * worker starts with those blocks. A 200 means the server sent the whole file,
+ * which is used as is. Servers that hide `Content-Range` from CORS get a HEAD.
+ */
+async function openUrl(
+	url: string,
+	range: boolean,
+	firstPage: boolean,
+	target: number | ((count: number) => number),
+	signal: AbortSignal,
+	net: NetCount,
+): Promise<Opened> {
+	const answered = (res: Response) => {
+		net.requests++;
+		net.firstByteAt ||= epochNow();
+		return res;
+	};
+	const download = async (): Promise<Opened> => ({ blob: await readBlob(answered(await fetchPdf(url, { signal })), url), mode: "download" });
 	if (!range) return download();
 	// A server that refuses the ranged request (e.g. a CORS preflight for `Range`) still serves the plain one.
-	const res = await fetchPdf(url, { headers: { Range: `bytes=0-${HEAD_BYTES - 1}` }, signal }).catch(() => null);
+	const res = await fetchPdf(url, { headers: { Range: `bytes=0-${WHOLE_FILE_MAX - 1}` }, signal }).then(answered, () => null);
 	if (!res) return download();
-	const verdict = probeVerdict({ status: res.status, contentRange: res.headers.get("Content-Range"), contentEncoding: res.headers.get("Content-Encoding") });
-	if (verdict.kind === "full-body") return { blob: await readBlob(res, url) };
+	const header = (name: string) => res.headers.get(name);
+	const verdict = probeVerdict({ status: res.status, contentRange: header("Content-Range"), contentEncoding: header("Content-Encoding"), contentLength: header("Content-Length") }, WHOLE_FILE_MAX);
+	if (verdict.kind === "full-body") return { blob: await readBlob(res, url), mode: "download" };
+	if (verdict.kind === "whole") return wholeBody(res, url, verdict.length, download);
 	let length = verdict.kind === "range" ? verdict.length : 0;
 	if (verdict.kind === "need-length") {
+		net.requests++;
 		const head = await fetch(url, { method: "HEAD", credentials: "same-origin", signal }).catch(() => null);
 		length = Number(head?.ok ? head.headers.get("Content-Length") : 0) || 0;
+		if (length > 0 && length <= WHOLE_FILE_MAX) return wholeBody(res, url, length, download);
 	}
-	const headBytes = length > 0 ? await res.arrayBuffer().then((b) => new Uint8Array(b)).catch(() => null) : null;
-	if (!headBytes || headBytes.length !== Math.min(HEAD_BYTES, length)) {
+	if (!length) {
 		void res.body?.cancel().catch(() => {});
 		return download();
 	}
-	const store = new SeedBlocks(url, length, signal);
+	const store = new SeedBlocks(url, length, net, signal);
+	const tailStart = Math.floor(Math.max(0, length - TAIL_BYTES) / RANGE_BLOCK) * RANGE_BLOCK;
+	const tail = store.ensure([[tailStart, length]]);
+	const headBytes = await readPrefix(res, (bytes) => probeReadBytes(bytes.length >= RANGE_BLOCK ? readLinearization(bytes, length) : null, firstPage, length));
+	await tail;
+	if (!headBytes || headBytes.length < Math.min(RANGE_BLOCK, length)) return download();
 	store.add(0, headBytes);
 	const lin = readLinearization(headBytes, length);
-	const tailStart = Math.floor(Math.max(0, length - TAIL_BYTES) / RANGE_BLOCK) * RANGE_BLOCK;
-	const firstPageEnd = lin && firstPage ? Math.min(length, Math.ceil(lin.firstPageEnd / RANGE_BLOCK) * RANGE_BLOCK) : 0;
-	await store.ensure([
-		[tailStart, length],
-		[headBytes.length, firstPageEnd],
-	]);
 	// A linearized file opening on its first page has it all in the head section already.
-	if (!firstPageEnd) await prefetchPagePath(store, tailStart, target).catch(() => {});
+	if (lin && firstPage) await store.ensure([[headBytes.length, probeReadBytes(lin, true, length)]]);
+	else await prefetchPagePath(store, tailStart, target).catch(() => {});
 	return { length, seeds: store.seeds() };
+}
+
+/** The probe's body is the whole file; a body of the wrong size is downloaded again. */
+async function wholeBody(res: Response, url: string, length: number, download: () => Promise<Opened>): Promise<Opened> {
+	const blob = await readBlob(res, url);
+	return blob.size === length ? { blob, mode: "whole" } : download();
 }
 
 /** the other raster workers wait at most this long for the first one to open the document */
@@ -441,6 +494,9 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	let docSource: DocSource | null = null;
 	let fetchMs = 0;
 	let fetchBytes = 0;
+	let loadMode: LoadTimings["loadMode"] = "memory";
+	let fileBytes = 0;
+	const net: NetCount = { requests: 0, firstByteAt: 0 };
 	const target = coreOptions.initialTarget;
 	const targetPage = target && "page" in target ? target.page : (coreOptions.initialPage ?? 0);
 	const targetFraction = target && "fraction" in target ? target.fraction : undefined;
@@ -452,16 +508,19 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		const absolute = new URL(source, location.href).href;
 		const firstPage = targetFraction === undefined && !coreOptions.initialOffset && !coreOptions.initialCamera && !targetPage;
 		const pathTarget = targetFraction !== undefined ? (count: number) => targetFraction * count : targetPage;
-		opening = openUrl(absolute, rangeLoading, firstPage, pathTarget, network.signal).then((opened) => {
+		opening = openUrl(absolute, rangeLoading, firstPage, pathTarget, network.signal, net).then((opened) => {
 			if ("blob" in opened) blob = opened.blob;
+			loadMode = "blob" in opened ? opened.mode : "range";
 			fetchMs = epochNow() - startedAt;
 			fetchBytes = blob?.size ?? (opened as { seeds: [number, Uint8Array][] }).seeds.reduce((sum, [, b]) => sum + b.length, 0);
+			fileBytes = blob?.size ?? (opened as { length: number }).length;
 			docSource = blob
 				? { kind: "blob", blob }
 				: { kind: "url", url: absolute, length: (opened as { length: number }).length, credentials: new URL(absolute).origin === location.origin, seeds: (opened as { seeds: [number, Uint8Array][] }).seeds };
 		});
 	} else {
 		blob = new Blob([(source instanceof Uint8Array ? source : new Uint8Array(source)) as Uint8Array<ArrayBuffer>], { type: "application/pdf" });
+		fileBytes = blob.size;
 		docSource = { kind: "blob", blob };
 		opening = Promise.resolve();
 	}
@@ -644,8 +703,12 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 		const relay = (ev: MessageEvent<ToRaster | { t: "opened" }>) => {
 			if (ev.data?.t === "opened") resolveFirstOpened();
 			if (ev.data?.t !== "block") return;
+			if (ev.data.request) workerRequests++;
+			workerBytes += ev.data.data.length;
 			for (const w of rasterWorkers) if (w() !== ev.target) w().postMessage(ev.data);
 		};
+		let workerRequests = 0;
+		let workerBytes = 0;
 		const buildAt = epochNow();
 		let wasmWaitMs = 0;
 		let workerBootMs = 0;
@@ -756,6 +819,11 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 						firstPaintMs: paintedAt - startedAt,
 						tileCacheHits: e.timing?.cacheHits ?? 0,
 						rangeLoading: docSource?.kind === "url",
+						loadMode,
+						fileKB: Math.round(fileBytes / 1024),
+						requestsBeforePaint: net.requests + workerRequests,
+						kbBeforePaint: Math.round((loadMode === "range" ? fetchBytes + workerBytes : loadMode === "memory" ? 0 : fileBytes) / 1024),
+						ttfbMs: net.firstByteAt ? net.firstByteAt - startedAt : 0,
 					};
 					if (onEvent) {
 						const load: CoreEvent = { type: "load", timings: loadTimings };
