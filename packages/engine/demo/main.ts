@@ -41,6 +41,7 @@ const track = { first: Number.NaN, min: Infinity, max: -Infinity, samples: 0 };
 (window as unknown as { __track: typeof track }).__track = track;
 
 const onEvent = (e: CoreEvent) => {
+	(w as unknown as { __editEvent?: (e: CoreEvent) => void }).__editEvent?.(e);
 	if (e.type === "ready" || e.type === "layout") trackLayout = e.layout;
 	if (tracked >= 0 && e.type === "camera" && trackLayout[tracked] && w.__viewer) {
 		const rel = w.__viewer.camera.y - trackLayout[tracked]!.y;
@@ -81,7 +82,7 @@ const onEvent = (e: CoreEvent) => {
 		if (e.code === "password") console.warn(e.message);
 		else console.error(e.message);
 	}
-	hud.textContent = Object.values(info).filter(Boolean).join("\n");
+	hud.textContent = [...Object.values(info), hud.dataset.edit].filter(Boolean).join("\n");
 };
 
 async function open(source: string | ArrayBuffer) {
@@ -110,6 +111,7 @@ async function open(source: string | ArrayBuffer) {
 	return viewer;
 }
 
+if (params.get("edit") === "1") await import("./edit");
 let viewer = await open(src);
 document.getElementById("zin")!.onclick = () => viewer.zoomTo(zoom * 1.25);
 document.getElementById("zout")!.onclick = () => viewer.zoomTo(zoom / 1.25);

@@ -3,6 +3,7 @@
 // document, so workers never share memory and need no cross-origin isolation.
 
 import { BlockCache } from "./blocks";
+import { Editor } from "./edit";
 import { applyFormOp, type FormContext, readWidgets, saveDocument } from "./form-fill";
 import { init, type Pdfium } from "./pdfium/pdfium.js";
 import type { DocSource, DocumentInfo, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
@@ -68,8 +69,8 @@ function loadPage(index: number): number {
 
 function trimPages() {
 	for (const [oldIndex, oldPage] of pages) {
-		if (pages.size <= PAGE_CACHE) return;
-		if (pinned.has(oldIndex)) continue;
+		if (pages.size <= PAGE_CACHE + (editor?.edited.size ?? 0)) return;
+		if (pinned.has(oldIndex) || editor?.edited.has(oldIndex)) continue;
 		pages.delete(oldIndex);
 		if (form) P.FORM_OnBeforeClosePage(oldPage, form);
 		P.FPDF_ClosePage(oldPage);
@@ -590,6 +591,11 @@ function formEdit(m: Extract<ToRaster, { t: "form" }>) {
 }
 
 function save(id: number) {
+	if (editor) {
+		const edited = editor.save(false);
+		send({ t: "saved", id, buf: edited.buffer as ArrayBuffer }, [edited.buffer as ArrayBuffer]);
+		return;
+	}
 	const ctx = formContext() ?? { P, doc, form: 0, heap, withPage, toPage: (_: number, x: number, y: number): [number, number] => [x, y], toUser: (_: number, x: number, y: number): [number, number] => [x, y] };
 	const bytes = saveDocument(ctx);
 	send({ t: "saved", id, buf: bytes.buffer as ArrayBuffer }, [bytes.buffer as ArrayBuffer]);
@@ -662,6 +668,91 @@ function getBlock(_param: number, position: number, buf: number, size: number): 
 	}
 }
 
+// ---------------------------------------------------------------- editing
+let editor: Editor | null = null;
+let openPassword: string | undefined;
+
+function closePage(page: number) {
+	if (form) P.FORM_OnBeforeClosePage(page, form);
+	P.FPDF_ClosePage(page);
+}
+
+function openDoc(password: string | undefined): boolean {
+	readFailure = null;
+	doc = P.FPDF_LoadCustomDocument(fileAccess, password ?? "");
+	if (!doc) return false;
+	if (P.FPDF_GetFormType(doc) !== FORMTYPE_NONE) {
+		const info = P.PDFiumExt_OpenFormFillInfo();
+		form = P.PDFiumExt_InitFormFillEnvironment(doc, info);
+		// No blue field tint: pages look as they print.
+		if (form) P.FPDF_SetFormFieldHighlightAlpha(form, 0);
+	}
+	pageCount = P.FPDF_GetPageCount(doc);
+	return true;
+}
+
+function makeEditor() {
+	editor ??= new Editor({
+		P: P as never,
+		doc: () => doc,
+		pageCount: () => pageCount,
+		page: (i) => loadPage(i),
+		toPage: (i, x, y) => transformFor(i)(x, y),
+		toUser: (i, x, y) => inverseFor(i)(x, y),
+		resized: (i) => {
+			delete pageSizes[i];
+			transforms.delete(i);
+			inverses.delete(i);
+		},
+		removed: (i) => {
+			const next = new Map<number, number>();
+			for (const [k, v] of pages) {
+				if (k === i) closePage(v);
+				else next.set(k > i ? k - 1 : k, v);
+			}
+			pages.clear();
+			for (const [k, v] of next) pages.set(k, v);
+			pageSizes.splice(i, 1);
+			transforms.clear();
+			inverses.clear();
+		},
+		reopen: () => {
+			for (const page of pages.values()) closePage(page);
+			pages.clear();
+			transforms.clear();
+			inverses.clear();
+			pageSizes.length = 0;
+			if (form) P.PDFiumExt_ExitFormFillEnvironment(form);
+			form = 0;
+			formCtx = null;
+			P.FPDF_CloseDocument(doc);
+			if (!openDoc(openPassword)) throw new Error("could not reopen the document to replay edits");
+		},
+	});
+	return editor;
+}
+
+function runEdit(m: Extract<ToRaster, { t: "edit" | "undo" | "redo" }>) {
+	const t0 = performance.now();
+	const ed = makeEditor();
+	let outcome = null;
+	let error: string | undefined;
+	try {
+		outcome = m.t === "edit" ? ed.apply(m.op) : m.t === "undo" ? ed.undo() : ed.redo();
+	} catch (err) {
+		error = String((err as Error)?.message ?? err);
+	}
+	pageCount = P.FPDF_GetPageCount(doc);
+	const sizes: SizeEntry[] = [];
+	if (outcome && (outcome.structure || outcome.resized)) {
+		for (let i = 0; i < pageCount; i++) {
+			const { w, h } = sizeOf(i);
+			sizes.push([i, w, h]);
+		}
+	}
+	send({ t: "edited", id: m.id, outcome, error, pageCount, sizes, ms: performance.now() - t0, heap: heapBytes() });
+}
+
 function loadDocument(password: string | undefined) {
 	const t0 = performance.now();
 	if (!fileAccess) {
@@ -673,9 +764,7 @@ function loadDocument(password: string | undefined) {
 		view[1] = fn;
 		view[2] = 0;
 	}
-	readFailure = null;
-	doc = P.FPDF_LoadCustomDocument(fileAccess, password ?? "");
-	if (!doc) {
+	if (!openDoc(password)) {
 		const err = P.FPDF_GetLastError();
 		const code = openErrorCode(err, readFailure !== null);
 		const message =
@@ -689,13 +778,7 @@ function loadDocument(password: string | undefined) {
 		send({ t: "error", message, code, phase: "document-load", detail: loadFailureDetail(err) });
 		return;
 	}
-	if (P.FPDF_GetFormType(doc) !== FORMTYPE_NONE) {
-		const info = P.PDFiumExt_OpenFormFillInfo();
-		form = P.PDFiumExt_InitFormFillEnvironment(doc, info);
-		// No blue field tint: pages look as they print.
-		if (form) P.FPDF_SetFormFieldHighlightAlpha(form, 0);
-	}
-	pageCount = P.FPDF_GetPageCount(doc);
+	openPassword = password;
 	// Sizes come from the page tree without parsing page content.
 	const sizes: SizeEntry[] = [];
 	for (const i of hintedPages()) {
@@ -825,6 +908,8 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 				else if (m.t === "text") extractText(m);
 				else if (m.t === "outline") send({ t: "outline", id: m.id, items: readOutline(0, 0) });
 				else if (m.t === "sizes") readSizes(m);
+				else if (m.t === "edit" || m.t === "undo" || m.t === "redo") runEdit(m);
+				else if (m.t === "objects") send({ t: "objects", id: m.id, page: m.page, objects: makeEditor().objects(m.page), heap: heapBytes() });
 				else if (m.t === "unlock" && P && !doc && fileAccess) loadDocument(m.password);
 				else if (m.t === "form") formEdit(m);
 				else if (m.t === "save") save(m.id);
@@ -837,7 +922,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 					continue;
 				}
 				const id = "id" in m ? m.id : undefined;
-				send({ t: "error", message: String((err as Error)?.stack ?? err), code: "unknown", phase: m.t === "tile" ? "render" : "text", id });
+				send({ t: "error", message: String((err as Error)?.stack ?? err), code: "unknown", phase: m.t === "tile" ? "render" : m.t === "objects" ? "request" : "text", id });
 			}
 		}
 		running = false;
