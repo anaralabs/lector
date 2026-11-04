@@ -3,6 +3,7 @@
 // code runs on the main thread or inside a worker with an OffscreenCanvas.
 
 import { markColor } from "./colors";
+import { type Box, FormDirt, type FormOp, type FormWidget, widgetAt } from "./forms";
 import { Compositor } from "./gl";
 import { anchoredY, buildLayout, estimateSizes } from "./layout";
 import { uploadRank } from "./upload-rank";
@@ -205,7 +206,9 @@ export type Request =
 	| { type: "rects"; page: number; from: number; to: number }
 	/** lines of text with their boxes, for the hidden DOM text layer */
 	| { type: "text-layer"; page: number }
-	| { type: "thumbnail"; page: number; width: number };
+	| { type: "thumbnail"; page: number; width: number }
+	/** the document bytes with the form edits made so far */
+	| { type: "save-document" };
 
 export type Command =
 	| { type: "zoom"; zoom: number; x?: number; y?: number }
@@ -243,7 +246,9 @@ export type Command =
 	| { type: "unlock"; password: string }
 	| { type: "options"; options: Partial<CoreOptions> }
 	/** keep base page bitmaps in a persistent cache under this document key (see the viewer's `tileCache` option) */
-	| { type: "tile-cache"; key: string; budgetMB: number };
+	| { type: "tile-cache"; key: string; budgetMB: number }
+	/** a form field edit (applied in every raster worker; the edited tiles re-render) */
+	| { type: "form"; op: FormOp };
 
 /**
  * Frame statistics over the last ~500ms. A frame is "wanted" when something
@@ -343,7 +348,13 @@ export type CoreEvent =
 	/** emitted by the viewer once, right after the first `painted` */
 	| { type: "load"; timings: LoadTimings }
 	/** `code`/`phase` say what failed and when (see ErrorCode, ErrorPhase) */
-	| { type: "error"; message: string; code: ErrorCode; phase: ErrorPhase; detail?: LoadFailureDetail };
+	| { type: "error"; message: string; code: ErrorCode; phase: ErrorPhase; detail?: LoadFailureDetail }
+	/** a page's form field widgets became known (AcroForm documents; pages with fields only) */
+	| { type: "form-widgets"; page: number; widgets: FormWidget[] }
+	/** an edit changed a field's value (`name` is the field's full name; every widget of it shows `value`) */
+	| { type: "form-change"; name: string; value: string }
+	/** the page shows its edited fields: no bitmap from before the edit is drawn any more */
+	| { type: "form-painted"; page: number };
 
 /** epoch ms (timeOrigin + now), comparable across the main thread and workers */
 export const epochNow = () => performance.timeOrigin + performance.now();
@@ -536,6 +547,13 @@ export class ViewerCore {
 	/** raster image boxes per page (l, t, r, b in points), kept in original colours in dark mode */
 	private images = new Map<number, Float32Array>();
 	private links = new Map<number, Link[]>();
+	private widgets = new Map<number, FormWidget[]>();
+	/** edited regions: tiles over them are keyed by edit version, so they re-render */
+	private dirt = new FormDirt();
+	/** values form edits set, by field name (applied to widgets read later) */
+	private fieldValues = new Map<string, string>();
+	/** pages with an edit whose re-rendered bitmaps have not all been drawn yet */
+	private settling = new Set<number>();
 	private textWaiters = new Map<number, (() => void)[]>();
 
 	// selection
@@ -1725,6 +1743,9 @@ export class ViewerCore {
 				});
 				return;
 			}
+			case "form":
+				this.formEdit(cmd.op);
+				return;
 			case "options": {
 				const copyChanged = "copyOptions" in cmd.options && JSON.stringify(cmd.options.copyOptions) !== JSON.stringify(this.opts.copyOptions);
 				this.opts = { ...this.opts, ...cmd.options };
@@ -1734,6 +1755,59 @@ export class ViewerCore {
 				return;
 			}
 		}
+	}
+
+	// ---------------------------------------------------------------- forms
+
+	private formEdit(op: FormOp) {
+		const list = this.widgets.get(op.page);
+		const target = op.k === "click" ? widgetAt(list, op.x, op.y) : (list?.find((w) => w.index === op.index) ?? null);
+		this.markEdited(op.page, target?.rect ?? null);
+		this.requestFrame();
+		void this.pool.form(op).then((res) => {
+			if (this.disposed) return;
+			if (res.reset) {
+				this.dirt.bumpAll();
+				for (const page of this.widgets.keys()) this.settling.add(page);
+			}
+			for (const { name, value } of res.changed) {
+				this.fieldValues.set(name, value);
+				for (const [page, ws] of this.widgets) {
+					for (const w of ws) {
+						if (w.name !== name) continue;
+						w.value = value;
+						this.markEdited(page, w.rect);
+					}
+				}
+				this.emit({ type: "form-change", name, value });
+			}
+			this.requestFrame();
+		});
+	}
+
+	/** Re-renders the tiles over `box` (null: the whole page) from the edited document. */
+	private markEdited(page: number, box: Box | null) {
+		// a little past the widget: borders and focus marks are drawn on its edge
+		this.dirt.bump(page, box && [box[0] - 2, box[1] - 2, box[2] + 2, box[3] + 2]);
+		this.settling.add(page);
+	}
+
+	private widgetsArrived(page: number, widgets: FormWidget[]) {
+		if (!widgets.length) return;
+		for (const w of widgets) {
+			const value = this.fieldValues.get(w.name);
+			if (value === undefined) continue;
+			w.value = value;
+			// Drawn before the edit reached this page's fields (e.g. from the persistent cache).
+			this.markEdited(page, w.rect);
+		}
+		this.widgets.set(page, widgets);
+		this.emit({ type: "form-widgets", page, widgets });
+	}
+
+	/** a drawn tile from before an edit to its region */
+	private isStale(tile: Tile) {
+		return this.dirt.edited(tile.page) && tile.key !== this.tileKey(tile.page, tile.scale, tile.x, tile.y);
 	}
 
 	// ---------------------------------------------------------------- queries
@@ -1924,6 +1998,8 @@ export class ViewerCore {
 				}
 				return job;
 			}
+			case "save-document":
+				return new Uint8Array(await this.pool.save());
 			case "outline":
 				this.outline ??= new Promise((resolve) => {
 					this.pool.request("outline", 400, { t: "outline", page: -1 }, (res) => resolve(res.t === "outline" ? res.items : []));
@@ -2163,6 +2239,7 @@ export class ViewerCore {
 			if (this.estimated[page]) this.applySizes([[page, r.size.w, r.size.h]]);
 			this.texts.set(page, new PageText(r.codes, r.boxes));
 			this.links.set(page, r.links);
+			if (r.widgets?.length) this.widgetsArrived(page, r.widgets);
 			if (r.images.length) {
 				this.images.set(page, r.images);
 				if (this.opts.dark) this.requestFrame();
@@ -2202,7 +2279,11 @@ export class ViewerCore {
 	}
 
 	private tileKey(page: number, scale: number, x: number, y: number) {
-		return `${page}:${scale}:${x}:${y}`;
+		const key = `${page}:${scale}:${x}:${y}`;
+		if (!this.dirt.edited(page)) return key;
+		const box: Box | null = scale <= this.baseScale(page) ? null : [x / scale, y / scale, (x + TILE) / scale, (y + TILE) / scale];
+		const v = this.dirt.version(page, box);
+		return v ? `${key}#${v}` : key;
 	}
 
 	private ensureTile(page: number, scale: number, x: number, y: number, w: number, h: number, priority: number, keep: Set<string>, pin = false) {
@@ -2220,7 +2301,7 @@ export class ViewerCore {
 			set.add(tile);
 		}
 		// Not kept for the pool while it loads from the cache: a queued raster job for it is dropped.
-		if (scale === this.baseScale(page) && this.cache?.has(page, scale, w, h)) {
+		if (scale === this.baseScale(page) && !this.dirt.edited(page) && this.cache?.has(page, scale, w, h)) {
 			this.loadCached(tile);
 			return;
 		}
@@ -2260,7 +2341,8 @@ export class ViewerCore {
 			if (this.tileLog.length < 5000) this.tileLog.push({ page, base: scale <= this.baseScale(page), ms: r.ms, waitMs: performance.now() - asked });
 			const pixels = new Uint8Array(r.buf);
 			// Slow pages are worth keeping for the next open; cheap ones render faster than they decode.
-			if (this.cache && r.ms >= CACHE_MIN_MS && scale === this.baseScale(page)) this.cache.put(page, scale, pixels, w, h);
+			// Never after an edit: the cache holds the document as it was opened.
+			if (this.cache && !this.dirt.any && r.ms >= CACHE_MIN_MS && scale === this.baseScale(page)) this.cache.put(page, scale, pixels, w, h);
 			if (this.tiles.get(key) !== tile || tile.tex || tile.arrived) return;
 			tile.arrived = true;
 			this.arrived.push({ tile, pixels });
@@ -2389,6 +2471,16 @@ export class ViewerCore {
 		return visible;
 	}
 
+	/** Frees the pre-edit bitmaps a fresh tile replaces (a whole-page bitmap replaces the coarser preview too). */
+	private dropReplaced(fresh: Tile) {
+		if (this.isStale(fresh)) return;
+		const whole = fresh.scale === this.baseScale(fresh.page);
+		for (const t of this.tilesByPage.get(fresh.page) ?? []) {
+			if (t === fresh || !t.tex || !this.isStale(t)) continue;
+			if ((t.scale === fresh.scale && t.x === fresh.x && t.y === fresh.y) || (whole && t.scale < fresh.scale)) this.dropTile(t);
+		}
+	}
+
 	private dropTile(tile: Tile) {
 		this.tiles.delete(tile.key);
 		this.tilesByPage.get(tile.page)?.delete(tile);
@@ -2429,6 +2521,7 @@ export class ViewerCore {
 			if (!(pixels instanceof Uint8Array)) pixels.close();
 			// Lost mid-frame: fetch it again after the restore.
 			if (!tile.tex) break;
+			if (this.dirt.edited(tile.page)) this.dropReplaced(tile);
 			bytes += tile.w * tile.h * 4;
 		}
 		this.uploadedLast = bytes;
@@ -2631,17 +2724,28 @@ export class ViewerCore {
 			const vx1 = view.x1 - r.x;
 			const vy1 = view.y1 - r.y;
 			const ready: Tile[] = [];
+			const edited = this.dirt.edited(p);
+			const stale = new Set<Tile>();
+			const base = this.baseScale(p);
 			for (const t of this.tilesByPage.get(p) ?? []) {
 				if (!t.tex) continue;
 				if (t.x / t.scale > vx1 || (t.x + t.w) / t.scale < vx0 || t.y / t.scale > vy1 || (t.y + t.h) / t.scale < vy0) continue;
+				if (edited && this.isStale(t)) {
+					// A pre-edit tile only stands in for its own replacement, never from another zoom level.
+					if (t.scale !== target && t.scale > base) continue;
+					stale.add(t);
+				}
 				ready.push(t);
 			}
-			// Coarse first, the target scale last so it ends up on top.
-			ready.sort((a, b) => (a.scale === target ? 1 : 0) - (b.scale === target ? 1 : 0) || a.scale - b.scale);
+			if (this.settling.has(p) && stale.size === 0) {
+				this.settling.delete(p);
+				this.emit({ type: "form-painted", page: p });
+			}
+			// Coarse first, the target scale last so it ends up on top; a pre-edit tile under its replacement.
+			ready.sort((a, b) => (a.scale === target ? 1 : 0) - (b.scale === target ? 1 : 0) || a.scale - b.scale || (stale.has(a) ? 0 : 1) - (stale.has(b) ? 0 : 1));
 			// If the target scale fully covers the view, skip the fallbacks.
 			const covered = this.coveredByTarget(p, ready, target);
 			const start = covered ? ready.findIndex((t) => t.scale === target) : 0;
-			const base = this.baseScale(p);
 			if (!covered && !(target <= base && ready.some((t) => t.scale === base))) sharp = false;
 			const drawTiles = () => {
 				for (let i = Math.max(0, start); i < ready.length; i++) {
@@ -2800,9 +2904,10 @@ export class ViewerCore {
 		if (lx1 <= lx0 || ly1 <= ly0) return true;
 		let need = 0;
 		for (let ty = Math.floor(ly0 / TILE); ty * TILE < ly1; ty++) for (let tx = Math.floor(lx0 / TILE); tx * TILE < lx1; tx++) need++;
-		let have = 0;
-		for (const t of ready) if (t.scale === target) have++;
-		return have >= need;
+		// a pre-edit tile and its replacement cover the same spot once
+		const have = new Set<string>();
+		for (const t of ready) if (t.scale === target) have.add(`${t.x}:${t.y}`);
+		return have.size >= need;
 	}
 
 	private lastCam: Camera = { x: 0, y: 0, zoom: 0 };

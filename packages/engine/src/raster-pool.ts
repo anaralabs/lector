@@ -4,11 +4,13 @@
 // worker expected to finish it soonest: a worker that already has the page
 // loaded skips the parse and image decode, which dominate scanned pages.
 
+import type { FormOp } from "./forms";
 import type { DocumentInfo, ErrorCode, ErrorPhase, FromRaster, LoadFailureDetail, OpenTiming, SizeEntry, ToRaster } from "./protocol";
 
 export type TileResult = Extract<FromRaster, { t: "tile" }>;
 export type TextResult = Extract<FromRaster, { t: "text" }>;
 export type SizesResult = Extract<FromRaster, { t: "sizes" }>;
+export type FormResult = Omit<Extract<FromRaster, { t: "form" }>, "t" | "seq">;
 
 type JobMsg = Extract<ToRaster, { t: "tile" } | { t: "text" } | { t: "outline" }>;
 
@@ -36,6 +38,8 @@ interface Lane {
 	cancelling: boolean;
 	/** last reported WASM heap + block cache bytes */
 	heap: number;
+	/** form edits made before this worker opened the document, replayed once it has */
+	backlog: ToRaster[];
 }
 
 /**
@@ -103,7 +107,7 @@ export class RasterPool {
 	now: () => number = () => performance.now();
 
 	constructor(ports: MessagePort[]) {
-		this.lanes = ports.map((port) => ({ port, ready: false, busy: null, pages: [], cancelling: false, heap: 0 }));
+		this.lanes = ports.map((port) => ({ port, ready: false, busy: null, pages: [], cancelling: false, heap: 0, backlog: [] }));
 		this.lanes.forEach((lane, i) => {
 			lane.port.onmessage = (ev: MessageEvent<FromRaster>) => this.receive(lane, i, ev.data);
 		});
@@ -186,6 +190,38 @@ export class RasterPool {
 		this.lanes = [];
 		this.queue.clear();
 		this.inflight.clear();
+	}
+
+	private formSeq = 0;
+	private formWaiters = new Map<number, (res: FormResult) => void>();
+	private saveWaiters = new Map<number, (res: Extract<FromRaster, { t: "saved" }>) => void>();
+
+	/**
+	 * Applies a form edit in every worker, in order with their jobs: a job sent
+	 * after this renders the edited document. The first worker reports what changed.
+	 */
+	form(op: FormOp): Promise<FormResult> {
+		const seq = ++this.formSeq;
+		const done = new Promise<FormResult>((resolve) => this.formWaiters.set(seq, resolve));
+		this.lanes.forEach((lane, i) => {
+			const msg: ToRaster = { t: "form", seq, op, report: i === 0 };
+			if (lane.ready) lane.port.postMessage(msg);
+			else lane.backlog.push(msg);
+		});
+		return done;
+	}
+
+	/** The document bytes with every form edit, from the first worker. */
+	save(): Promise<ArrayBuffer> {
+		const id = this.nextId++;
+		const lane = this.lanes[0];
+		if (!lane) return Promise.reject(new Error("no raster worker"));
+		const msg: ToRaster = { t: "save", id };
+		return new Promise((resolve, reject) => {
+			this.saveWaiters.set(id, (res) => (res.buf ? resolve(res.buf) : reject(new Error(res.error ?? "save failed"))));
+			if (lane.ready) lane.port.postMessage(msg);
+			else lane.backlog.push(msg);
+		});
 	}
 
 	/** Retry opening the document with a password in every worker that has not opened it. */
@@ -307,8 +343,19 @@ export class RasterPool {
 	}
 
 	private receive(lane: Lane, index: number, msg: FromRaster) {
+		if (msg.t === "form") {
+			this.formWaiters.get(msg.seq)?.(msg);
+			this.formWaiters.delete(msg.seq);
+			return;
+		}
+		if (msg.t === "saved") {
+			this.saveWaiters.get(msg.id)?.(msg);
+			this.saveWaiters.delete(msg.id);
+			return;
+		}
 		if (msg.t === "opened") {
 			lane.ready = true;
+			for (const m of lane.backlog.splice(0)) lane.port.postMessage(m);
 			const { wasmMs, wasmShared = false, openMs } = msg;
 			if (index === 0) this.onOpened(msg.pageCount, msg.sizes, msg.info, wasmMs !== undefined && openMs !== undefined ? { wasmMs, wasmShared, openMs } : undefined);
 			this.pump();
