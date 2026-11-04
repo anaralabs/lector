@@ -310,7 +310,11 @@ export interface SelectionInfo {
 	pages: { page: number; rects: Rect[] }[];
 	/** bounding box of the selection's last line, in viewport css px (for tooltips) */
 	anchor: Rect | null;
+	/** the unit a multi-click or long-press snaps to (absent for plain drags and programmatic selections) */
+	unit?: SelectionUnit;
 }
+
+export type SelectionUnit = "word" | "sentence" | "paragraph";
 
 export type Cursor = "default" | "text" | "pointer";
 
@@ -577,7 +581,9 @@ export class ViewerCore {
 	// selection
 	private selAnchor: [TextPoint, TextPoint] | null = null;
 	private selRange: [TextPoint, TextPoint] | null = null;
-	private selUnit: "char" | "word" | "line" = "char";
+	private selUnit: "char" | SelectionUnit = "char";
+	/** set by unit gestures (multi-click, long-press, handles): drags keep to this column */
+	private selFlow: { page: number; column: number } | null = null;
 	/**
 	 * Bumped by every selection change: programmatic selections that wait for
 	 * text give up if the selection changed meanwhile (newer intent wins).
@@ -1390,6 +1396,7 @@ export class ViewerCore {
 		this.press = null;
 		this.velocity = { x: 0, y: 0 };
 		this.selUnit = "word";
+		this.selFlow = this.flowAt(hit);
 		this.selAnchor = this.expand(hit);
 		this.setFocus(hit);
 		this.handles = true;
@@ -1413,7 +1420,8 @@ export class ViewerCore {
 		this.selGen++;
 		const moving = de <= ds ? end : start;
 		const fixed = de <= ds ? this.selRange[0] : this.selRange[1];
-		this.selUnit = "char";
+		this.selUnit = "word";
+		this.selFlow = this.flowAt(fixed);
 		this.selAnchor = [fixed, fixed];
 		// Hit-test at the line the handle marks, not under the finger.
 		this.grab = { dx: moving.x - x, dy: moving.y + moving.h / 2 - y };
@@ -1517,11 +1525,13 @@ export class ViewerCore {
 		this.emit({ type: "selection", selection: null, final: false });
 		if (shift && this.selRange) {
 			this.selUnit = "char";
+			this.selFlow = null;
 			this.selAnchor = [this.selRange[0], this.selRange[0]];
 			this.setFocus(hit);
 			return;
 		}
-		this.selUnit = clicks >= 3 ? "line" : clicks === 2 ? "word" : "char";
+		this.selUnit = clicks >= 4 ? "paragraph" : clicks === 3 ? "sentence" : clicks === 2 ? "word" : "char";
+		this.selFlow = this.selUnit === "char" ? null : this.flowAt(hit);
 		this.selAnchor = this.expand(hit);
 		if (this.selUnit === "char") this.setRange(null);
 		else this.setFocus(hit);
@@ -1667,6 +1677,7 @@ export class ViewerCore {
 		const texts = await Promise.all(this.pages.map((_, i) => this.loadText(i)));
 		if (gen !== this.selGen) return;
 		this.handles = false;
+		this.selFlow = null;
 		this.selAnchor = [
 			{ page: 0, index: 0 },
 			{ page: 0, index: 0 },
@@ -2109,11 +2120,44 @@ export class ViewerCore {
 	private expand(p: TextPoint): [TextPoint, TextPoint] {
 		const text = this.texts.get(p.page);
 		if (!text || this.selUnit === "char") return [p, p];
-		const [a, z] = this.selUnit === "word" ? text.wordAt(p.index) : text.lineAt(p.index);
-		return [
-			{ page: p.page, index: a },
-			{ page: p.page, index: z },
-		];
+		const at = (index: number, page = p.page): TextPoint => ({ page, index });
+		if (this.selUnit === "word") {
+			const [a, z] = text.wordAt(p.index);
+			return [at(a), at(z)];
+		}
+		const layout = text.layout();
+		if (this.selUnit === "paragraph") {
+			const [a, z] = layout.paragraph(p.index);
+			return [at(a), at(z)];
+		}
+		const s = layout.sentence(p.index);
+		let start = at(s.start);
+		let end = at(s.end);
+		const next = s.openEnd ? this.texts.get(p.page + 1)?.layout().edgeSentence("first") : null;
+		if (next?.openStart) end = at(next.end, p.page + 1);
+		const prev = s.openStart ? this.texts.get(p.page - 1)?.layout().edgeSentence("last") : null;
+		if (prev?.openEnd) start = at(prev.start, p.page - 1);
+		return [start, end];
+	}
+
+	private flowAt(p: TextPoint) {
+		const text = this.texts.get(p.page);
+		return text ? { page: p.page, column: text.layout().columnAt(p.index) } : null;
+	}
+
+	/** Drag hit-test for unit selections (see PageText.flowHit). */
+	private hitFlow(sx: number, sy: number): TextPoint | null {
+		const { x, y } = this.toDoc(sx, sy);
+		if (this.layout.length === 0) return null;
+		const page = this.pageAtDocY(y);
+		const r = this.layout[page]!;
+		const text = this.texts.get(page);
+		if (!text) {
+			this.requestText(page, 0);
+			return null;
+		}
+		const column = this.selFlow?.page === page ? this.selFlow.column : -1;
+		return { page, index: text.flowHit(x - r.x, y - r.y, column) };
 	}
 
 	private setFocus(p: TextPoint) {
@@ -2126,7 +2170,7 @@ export class ViewerCore {
 	}
 
 	private updateDrag() {
-		const hit = this.hitPoint(this.pointer.x, this.pointer.y);
+		const hit = this.selFlow ? this.hitFlow(this.pointer.x, this.pointer.y) : this.hitPoint(this.pointer.x, this.pointer.y);
 		if (hit) this.setFocus(hit);
 		this.requestFrame();
 	}
@@ -2149,6 +2193,7 @@ export class ViewerCore {
 		const start = { page: s0, index: clamp(s0, s.index) };
 		const end = { page: e0, index: clamp(e0, e.index) };
 		this.handles = false;
+		this.selFlow = null;
 		this.selAnchor = [start, start];
 		// Recompute rects even if the range is unchanged (text may have loaded since).
 		this.setRange(comparePoints(start, end) === 0 ? null : [start, end], true);
@@ -2157,6 +2202,7 @@ export class ViewerCore {
 
 	/** Programmatic selection of chars [from, to) on one page (text must be loaded). */
 	selectRange(page: number, from: number, to: number) {
+		this.selFlow = null;
 		this.selAnchor = [
 			{ page, index: from },
 			{ page, index: from },
@@ -2183,16 +2229,34 @@ export class ViewerCore {
 				if (!text) continue;
 				const from = page === s.page ? s.index : 0;
 				const to = page === e.page ? e.index : text.length;
-				this.selRects.push({ page, rects: text.rects(from, to) });
+				this.selRects.push({ page, rects: this.selPieces(page, text, from, to).flatMap(([a, z]) => text.rects(a, z)) });
 			}
 		}
 		this.requestFrame();
+	}
+
+	/** Chars [from, to) minus header/footer rows a unit selection only passes over. */
+	private selPieces(page: number, text: PageText, from: number, to: number): [number, number][] {
+		const range = this.selRange;
+		if (!this.selFlow || !range) return [[from, to]];
+		const out: [number, number][] = [];
+		let a = from;
+		for (const [ms, me] of text.layout().marginSpans()) {
+			if (me <= a || ms >= to) continue;
+			const holds = (p: TextPoint) => p.page === page && p.index >= ms && p.index <= me;
+			if (holds(range[0]) || holds(range[1])) continue;
+			if (ms > a) out.push([a, ms]);
+			a = me;
+		}
+		if (a < to) out.push([a, to]);
+		return out;
 	}
 
 	private clearSelection() {
 		this.selGen++;
 		const had = this.selRange !== null;
 		this.selAnchor = null;
+		this.selFlow = null;
 		this.dragging = false;
 		this.touchSelect = false;
 		this.handles = false;
@@ -2219,6 +2283,7 @@ export class ViewerCore {
 				range: { start: { ...this.selRange[0] }, end: { ...this.selRange[1] } },
 				pages: this.selRects.map((p) => ({ page: p.page, rects: p.rects.map((r) => ({ ...r })) })),
 				anchor: this.selectionScreenAnchor(),
+				...(this.selUnit !== "char" && this.selFlow && { unit: this.selUnit }),
 			},
 		});
 	}
@@ -2231,7 +2296,8 @@ export class ViewerCore {
 		for (let page = s.page; page <= e.page; page++) {
 			const text = this.texts.get(page);
 			if (!text) continue;
-			parts.push(text.text(page === s.page ? s.index : 0, page === e.page ? e.index : text.length, copy));
+			const pieces = this.selPieces(page, text, page === s.page ? s.index : 0, page === e.page ? e.index : text.length);
+			parts.push(pieces.map(([a, z]) => text.text(a, z, copy)).join(""));
 		}
 		return parts.join(copy.lineBreaks === "space" ? " " : "\n");
 	}
@@ -2291,7 +2357,7 @@ export class ViewerCore {
 			}
 			const r = res as TextResult;
 			if (this.estimated[page]) this.applySizes([[page, r.size.w, r.size.h]]);
-			this.texts.set(page, new PageText(r.codes, r.boxes));
+			this.texts.set(page, new PageText(r.codes, r.boxes, r.size.h));
 			this.links.set(page, r.links);
 			if (r.widgets?.length) this.widgetsArrived(page, r.widgets);
 			if (r.images.length) {

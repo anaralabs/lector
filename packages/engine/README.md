@@ -212,7 +212,9 @@ interface SearchHit {
 
 ### Selection and copy
 
-`selection` events carry `SelectionInfo { text, range: { start, end }, pages: { page, rects }[], anchor }`. `text` follows `copyOptions` (default like lector: line breaks kept, a word hyphenated at a line end copies as `-` + newline). Persist `range` and restore it with `setSelection(range)`; pages whose text was never loaded are loaded first. Cmd/Ctrl+A selects the page in view, and pressing it again selects the whole document. Keys and copy events from inputs, `contenteditable` elements and anything in `overlayElement` are left to the host.
+`selection` events carry `SelectionInfo { text, range: { start, end }, pages: { page, rects }[], anchor, unit? }`. `text` follows `copyOptions` (default like lector: line breaks kept, a word hyphenated at a line end copies as `-` + newline). Persist `range` and restore it with `setSelection(range)`; pages whose text was never loaded are loaded first. Cmd/Ctrl+A selects the page in view, and pressing it again selects the whole document. Keys and copy events from inputs, `contenteditable` elements and anything in `overlayElement` are left to the host.
+
+Multi-click selection snaps like a text editor: a double click selects the word, a triple click the sentence, a fourth click the paragraph, and dragging after the last click extends by that unit (`unit` is `"word"`, `"sentence"` or `"paragraph"`). On touch, a long-press selects the word and the handles extend by word. Units come from the page's geometry, built on the first multi-click and cached per page: lines that share a band form visual rows; rows are cut into columns along their gutters; running headers and footers are rows in the page's outer 8% set apart by a gap; paragraphs break at larger gaps, first-line indents, short lines after a full stop and font-size changes. Words follow the Unicode rules (`Intl.Segmenter`, dictionary-based for Chinese and Japanese), with a word hyphenated across a line break kept whole. Sentences follow the Unicode rules repaired for scholarly prose: no break after abbreviations (et al., Fig., Eq., i.e., e.g., initials), decimals or before a lowercase word, a citation after a full stop stays with its sentence. A sentence or paragraph never crosses a column; a sentence cut by a page break continues onto the next page. A unit drag stays in the column it started in until the pointer is clearly inside another one, and the header/footer rows it passes over are left out of the selection. Plain click-and-drag is unchanged. OCR text layers on scans work the same way.
 
 ### Events (`CoreEvent`)
 
@@ -266,7 +268,7 @@ const { bitmap, page, rect, scale } = await renderer.render(url, {
 - `isEngineSupported()`, `getEngineSupport()`, also available alone from `@anaralabs/lector-engine/support`.
 - `defaultOptions`.
 - `toneMap(rgb, paper, ink, gamma?)`: the dark-mode page colour mapping. `markColor(rgba, paper?)`: the opaque fill the compositor paints for a highlight or selection colour in light mode, or in dark mode when you pass `paper`. Hosts can use these to match swatches and legends.
-- Types: `Camera`, `CoreEvent`, `CoreOptions`, `DocumentInfo`, `EngineError`, `ErrorCode`, `ErrorPhase`, `Highlight`, `Link`, `OutlineItem`, `PageSize`, `Rect`, `SearchHit`, `SearchOptions`, `SearchResults`, `SelectionInfo`, `SelectionTextOptions`, `Stats`, `TextLayerLine`, `TextPoint`.
+- Types: `Camera`, `CoreEvent`, `CoreOptions`, `DocumentInfo`, `EngineError`, `ErrorCode`, `ErrorPhase`, `Highlight`, `Link`, `OutlineItem`, `PageSize`, `Rect`, `SearchHit`, `SearchOptions`, `SearchResults`, `SelectionInfo`, `SelectionTextOptions`, `SelectionUnit`, `Stats`, `TextLayerLine`, `TextPoint`.
 
 `<LectorView>` (from `/react`, a client component) takes `source`, `options` (live `CoreOptions`), `onEvent`, `onViewer`, `className`, `style` and every creation option (`wasmUrl`, `workers`, `offscreen`, `onLink`, `createWorker`, `workerUrls`, `password`, `textLayer`, `interceptFind`, `rangeLoading`, `autoFetch`, `tileCache`). Its ref is the `Viewer`. Changing any of those except the callbacks recreates the viewer.
 
@@ -348,12 +350,13 @@ The worker compositor needs WebGL2 on an `OffscreenCanvas`. Safari 16.4–16.x h
 pnpm dev               # demo at http://127.0.0.1:5199 (?offscreen=0, ?dark=1, ?file=…, ?page=, ?top=, ?topFraction=, ?fraction=, ?zoom=fit-page, ?range=1, ?password=, ?interceptFind=1, ?textLayer=0)
 pnpm build             # dist/ via tsup + scripts/postbuild.mjs
 pnpm typecheck
-pnpm test:unit         # node --test (block cache, range decisions, estimated layout)
+pnpm test:unit         # node --test (block cache, range decisions, estimated layout, selection units)
 pnpm test:package      # pack; check exports, license notices, and boot the self-hosted workers in Chrome
 node bench/features.mjs   # search / outline / selection / dark mode against the demo
 node bench/compat.mjs     # emulated old browsers: compositor fallback and clean rejection
 node bench/forms.mjs      # fill in a form: text, checkbox, radio, dropdown, list box, touch, saveDocument
-node bench/clicks.mjs     # double/triple click in Chrome, Firefox, WebKit (npx playwright-core install firefox webkit)
+node bench/clicks.mjs     # double/triple/quadruple click in Chrome, Firefox, WebKit (npx playwright-core install firefox webkit)
+node bench/smart-select.mjs   # word/sentence/paragraph snapping, column-aware drags, page breaks, OCR scan (paper.pdf, scan-ocr.pdf)
 node bench/frames.mjs     # frame timing (HEADED=1 for a vsync'd window)
 node bench/memory.mjs [/big.pdf] ["&range=1"] [Mbit/s]   # ready/painted time and memory
 node bench/serve.mjs demo/dist   # HTTP/2 + ranges + server-side throttling, for open-at.mjs
@@ -361,7 +364,7 @@ MBIT=10 RTT=40 SETTLE=1 node bench/open-at.mjs https://127.0.0.1:5300 "file=/sca
 node bench/load-matrix.mjs https://127.0.0.1:5300 3 full:main:range=0 range:main:range=1 -- /pdf/small.pdf -- 10/50 50/150   # first paint per build × file × Mbit/RTT (builds under /<name>/, see the header)
 ```
 
-Fixtures other than `cadbots.pdf` are generated, not committed: `node bench/fixtures/make-{scan,password,form,rtl,links,big,scan-big}.mjs`. They need `pdf-lib` (and `mupdf` for the password fixture). Point `PDF_LIB` / `MUPDF` at those packages. `features.mjs` skips checks whose fixture is missing.
+Fixtures other than `cadbots.pdf` are generated, not committed: `node bench/fixtures/make-{scan,password,form,rtl,links,big,scan-big,paper,scan-ocr}.mjs`. They need `pdf-lib` (and `mupdf` for the password fixture). Point `PDF_LIB` / `MUPDF` at those packages. `features.mjs` skips checks whose fixture is missing.
 
 The demo sets `globalThis.__lectorEngineDebug = true`, which exposes the core as `window.__core` (main-thread compositor) or `self.__core` (compositor worker) for the benches. Hosts should not set it.
 
