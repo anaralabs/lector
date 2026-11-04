@@ -97,6 +97,8 @@ test("a Zotero highlight across two columns keeps one rect per quad, its comment
 	assert.equal(zotero!.rects.length, 3);
 	ZOTERO_RECTS.forEach((r: number[], i: number) => assert.ok(sameRect(zotero!.rects[i]!, r), `quad ${i}: ${JSON.stringify(zotero!.rects[i])}`));
 	assert.ok(zotero!.rects[2]!.x > W / 2, "the last line is in the right column");
+	assert.match(zotero!.text ?? "", /^Sleep after training consolidates decla.* participants recalled more word pairs the next consolidates declarative/);
+	assert.doesNotMatch(zotero!.text ?? "", /day Sleep/, "the lines above and below stay out");
 	assert.equal(underline!.kind, "underline");
 	assert.equal(underline!.contents, undefined);
 });

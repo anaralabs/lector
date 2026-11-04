@@ -54,6 +54,8 @@ export interface PdfAnnotation {
 	subject?: string;
 	/** /Contents: the comment (FreeText: the text shown) */
 	contents?: string;
+	/** text markup: the page text under the quads */
+	text?: string;
 	/** ISO 8601, from /M and /CreationDate */
 	modified?: string;
 	created?: string;
@@ -219,15 +221,43 @@ function mapPoints(ctx: AnnotContext, xy: ArrayLike<number>): number[] {
 	return out;
 }
 
+/** One rect per quad in page points, and the same quads' bounds in user space (for text lookup). */
 function readQuads(ctx: AnnotContext, annot: number, mem: number) {
 	const n = Math.min(MAX_QUADS, ctx.P.FPDFAnnot_CountAttachmentPoints(annot));
 	const rects = [];
+	const user = [];
 	for (let i = 0; i < n; i++) {
 		if (!ctx.P.FPDFAnnot_GetAttachmentPoints(annot, i, mem)) continue;
-		const r = boundsOf(mapPoints(ctx, new Float32Array(ctx.heap().buffer, mem, 8)));
-		if (r.w > 0 && r.h > 0) rects.push(r);
+		const q = new Float32Array(ctx.heap().buffer, mem, 8);
+		const r = boundsOf(mapPoints(ctx, q));
+		if (r.w <= 0 || r.h <= 0) continue;
+		rects.push(r);
+		user.push(boundsOf(q));
 	}
-	return rects;
+	return { rects, user };
+}
+
+/** Text inside user-space quads, each trimmed to its middle half so neighbouring lines stay out. */
+function quadText(ctx: AnnotContext, textPage: number, quads: Rect[]): string | undefined {
+	const { P } = ctx;
+	const parts: string[] = [];
+	for (const q of quads) {
+		const vertical = q.h > q.w * 2;
+		const dx = vertical ? q.w / 4 : 0;
+		const dy = vertical ? 0 : q.h / 4;
+		const args = [q.x + dx, q.y + q.h - dy, q.x + q.w - dx, q.y + dy] as const;
+		const n = P.FPDFText_GetBoundedText(textPage, ...args, 0, 0);
+		if (n <= 0) continue;
+		const buf = P.pdfium.wasmExports.malloc((n + 1) * 2);
+		try {
+			const got = P.FPDFText_GetBoundedText(textPage, ...args, buf, n + 1);
+			parts.push(new TextDecoder("utf-16le").decode(ctx.heap().slice(buf, buf + Math.max(0, got) * 2)).replace(/\0+$/, ""));
+		} finally {
+			P.pdfium.wasmExports.free(buf);
+		}
+	}
+	const text = parts.join(" ").replace(/-\s+(?=\p{Ll})/gu, "").replace(/\s+/g, " ").trim();
+	return text || undefined;
 }
 
 function readInk(ctx: AnnotContext, annot: number): number[][] | undefined {
@@ -251,7 +281,7 @@ function readInk(ctx: AnnotContext, annot: number): number[][] | undefined {
 	return strokes.length ? strokes : undefined;
 }
 
-function readOne(ctx: AnnotContext, page: number, pageIndex: number, index: number, annot: number, mem: number): RawAnnotation | null {
+function readOne(ctx: AnnotContext, page: number, pageIndex: number, index: number, annot: number, mem: number, textPage: () => number): RawAnnotation | null {
 	const { P } = ctx;
 	const kind = annotationKind(P.FPDFAnnot_GetSubtype(annot));
 	if (!kind) return null;
@@ -269,7 +299,7 @@ function readOne(ctx: AnnotContext, page: number, pageIndex: number, index: numb
 	const [ax, ay] = ctx.toPage(f[0]!, f[1]!);
 	const [bx, by] = ctx.toPage(f[2]!, f[3]!);
 	const rect = boundsOf([ax, ay, bx, by]);
-	const quads = isTextMarkup(kind) ? readQuads(ctx, annot, mem) : [];
+	const { rects: quads, user } = isTextMarkup(kind) ? readQuads(ctx, annot, mem) : { rects: [], user: [] };
 	const nm = str(ctx, annot, "NM");
 	const objectNumber = P.EPDFAnnot_GetObjectNumber(annot);
 	return {
@@ -285,6 +315,7 @@ function readOne(ctx: AnnotContext, page: number, pageIndex: number, index: numb
 		author: str(ctx, annot, "T"),
 		subject: str(ctx, annot, "Subj"),
 		contents: str(ctx, annot, "Contents")?.replace(/\r\n?/g, "\n"),
+		text: user.length ? quadText(ctx, textPage(), user) : undefined,
 		modified: parsePdfDate(str(ctx, annot, "M")),
 		created: parsePdfDate(str(ctx, annot, "CreationDate")),
 		replies: [],
@@ -299,12 +330,14 @@ export function readAnnotations(ctx: AnnotContext, pageIndex: number, page: numb
 	if (n <= 0) return [];
 	const raw: RawAnnotation[] = [];
 	const mem = P.pdfium.wasmExports.malloc(32);
+	let tp = 0;
+	const textPage = () => (tp ||= P.FPDFText_LoadPage(page));
 	try {
 		for (let i = 0; i < n; i++) {
 			const annot = P.FPDFPage_GetAnnot(page, i);
 			if (!annot) continue;
 			try {
-				const a = readOne(ctx, page, pageIndex, i, annot, mem);
+				const a = readOne(ctx, page, pageIndex, i, annot, mem, textPage);
 				if (a) raw.push(a);
 			} finally {
 				P.FPDFPage_CloseAnnot(annot);
@@ -312,6 +345,7 @@ export function readAnnotations(ctx: AnnotContext, pageIndex: number, page: numb
 		}
 	} finally {
 		P.pdfium.wasmExports.free(mem);
+		if (tp) P.FPDFText_ClosePage(tp);
 	}
 	return threadReplies(raw);
 }
