@@ -68,12 +68,14 @@ export interface Compositor {
 	dispose(): void;
 	resize(w: number, h: number): void;
 	/** gamma is baked in by backends that cannot apply it per draw */
-	upload(pixels: Uint8Array | ImageBitmap, w: number, h: number, gamma: number): unknown;
+	upload(pixels: Uint8Array | ImageBitmap, w: number, h: number, gamma: number, baked?: boolean): unknown;
 	free(tex: unknown, w: number, h: number): void;
 	begin(clear: [number, number, number]): void;
 	setTone(tone: Tone | null): void;
 	clip(r: { x: number; y: number; w: number; h: number } | null): void;
 	resetState(): void;
+	/** limit drawing to these device-pixel rects (2D: fallbacks only where the target scale has holes); null lifts it */
+	clipRects?(rects: { x: number; y: number; w: number; h: number }[] | null): void;
 	drawTexture(tex: unknown, x: number, y: number, w: number, h: number, gamma: number): void;
 	drawRect(x: number, y: number, w: number, h: number, color: readonly [number, number, number, number], blend?: Blend): void;
 	drawCircle(cx: number, cy: number, r: number, color: readonly [number, number, number, number]): void;

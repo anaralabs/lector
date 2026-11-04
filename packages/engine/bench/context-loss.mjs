@@ -4,7 +4,7 @@ const exe = process.env.CHROME ?? `${process.env.HOME}/.cache/ms-playwright/chro
 const browser = await chromium.launch({ executablePath: exe, headless: true });
 for (const offscreen of ["0", "1"]) {
 	const page = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 1 });
-	await page.goto(`http://127.0.0.1:5199/?file=/text.pdf&compositor=webgl2&offscreen=${offscreen}`);
+	await page.goto(`${process.env.URL ?? "http://127.0.0.1:5199/"}?file=/text.pdf&compositor=webgl2&offscreen=${offscreen}`);
 	await page.waitForFunction(() => window.__paintedMs !== undefined);
 	await page.waitForTimeout(800);
 	const before = await page.evaluate(() => window.__viewer.compositor);

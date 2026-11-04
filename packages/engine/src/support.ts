@@ -73,6 +73,12 @@ function canvas2d(canvas: HTMLCanvasElement | OffscreenCanvas): boolean {
 	}
 }
 
+/** WebGL2 on a hardware GPU composites with WebGL2; no WebGL2 or a CPU rasteriser behind it gets Canvas 2D. */
+export function classifyCompositor(webgl2: boolean, renderer: string | null): { compositor: CompositorKind; softwareGL: boolean } {
+	const softwareGL = webgl2 && !!renderer && SOFTWARE_GL.test(renderer);
+	return { compositor: webgl2 && !softwareGL ? "webgl2" : "canvas2d", softwareGL };
+}
+
 /**
  * What this browser supports. Synchronous and cached; the only work it does is
  * create (and immediately release) a throwaway WebGL2 context or two.
@@ -89,8 +95,7 @@ export function getEngineSupport(): EngineSupport {
 	if (typeof MessageChannel === "undefined") missing.push("message-channel");
 	if (typeof ResizeObserver === "undefined") missing.push("resize-observer");
 	if (typeof PointerEvent === "undefined") missing.push("pointer-events");
-	const softwareGL = gl.ok && !!gl.renderer && SOFTWARE_GL.test(gl.renderer);
-	const compositor: CompositorKind = gl.ok && !softwareGL ? "webgl2" : "canvas2d";
+	const { compositor, softwareGL } = classifyCompositor(gl.ok, gl.renderer);
 	// Safari 16.4-16.x has OffscreenCanvas and transferControlToOffscreen but
 	// no WebGL on it, so probe the context rather than the constructor.
 	const transferable =

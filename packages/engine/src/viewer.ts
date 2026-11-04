@@ -529,7 +529,7 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 	} = options;
 	const compositor = wantCompositor === "auto" ? support.compositor : wantCompositor;
 	let compositorNow: CompositorKind = compositor;
-	const coreOptions = { ...rest, compositor };
+	const coreOptions = { ...rest, compositor, compositorFallback: wantCompositor === "auto" };
 	const startedAt = epochNow();
 	// Workers may run from blob: URLs (host loaders), where relative URLs don't resolve.
 	const wasmUrl = new URL(wasmUrlOption, location.href).href;

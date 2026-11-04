@@ -67,6 +67,8 @@ export type ToRaster =
 			y: number;
 			w: number;
 			h: number;
+			/** 2D compositor: apply gamma and the dark tone here (photos keep their colours) and answer with an ImageBitmap */
+			bake?: { gamma: number; tone: number[] | null };
 	  }
 	| { t: "text"; id: number; page: number }
 	| { t: "outline"; id: number; page: -1 }
@@ -146,7 +148,7 @@ export type FromRaster =
 	| { t: "sizes"; id: number; sizes: SizeEntry[]; heap: number }
 	| { t: "error"; message: string; code: ErrorCode; phase: ErrorPhase; id?: number; detail?: LoadFailureDetail }
 	/** heap: the worker's WASM heap plus its block cache, in bytes */
-	| { t: "tile"; id: number; buf: ArrayBuffer; w: number; h: number; ms: number; heap: number }
+	| { t: "tile"; id: number; buf?: ArrayBuffer; bitmap?: ImageBitmap; baked?: boolean; w: number; h: number; ms: number; heap: number }
 	| {
 			t: "text";
 			id: number;

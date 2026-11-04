@@ -1,36 +1,45 @@
-// Software-rendering bench: current WebGL2 compositor on SwiftShader vs the Canvas 2D compositor
-// (on the same machine, and with WebGL disabled outright). Prints one JSON line per run.
-// Usage: node bench/softgl.mjs [dpr] [files,comma] [modes,comma]
+// Software-rendering bench: frame times of each compositor on a GPU-less box, per gesture.
+// Usage: node bench/softgl.mjs [dpr] [files,comma] [modes,comma]; DARK=1 dark mode, UNCAPPED=1 no vsync cap.
 import { chromium } from "playwright-core";
 
 const base = process.env.URL ?? "http://127.0.0.1:5199/";
 const dpr = Number(process.argv[2] ?? 1);
 const files = (process.argv[3] ?? "text.pdf,heavy-vector.pdf,heavy-scan.pdf").split(",");
-const modes = (process.argv[4] ?? "gl-swiftshader,2d-swiftshader,2d-nogpu").split(",");
+const modes = (process.argv[4] ?? "gl-swiftshader,2d-nogpu").split(",");
 const exe = process.env.CHROME ?? `${process.env.HOME}/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome`;
+const uncapped = process.env.UNCAPPED === "1" ? ["--disable-frame-rate-limit", "--disable-gpu-vsync"] : [];
 const MODE = {
 	"gl-swiftshader": { args: [], compositor: "webgl2" },
 	"2d-swiftshader": { args: [], compositor: "canvas2d" },
 	"2d-nogpu": { args: ["--disable-gpu", "--disable-webgl", "--disable-webgl2"], compositor: "auto" },
 };
-const extra = process.env.DARK === "1" ? "&dark=1" : "";
+const extra = (process.env.DARK === "1" ? "&dark=1" : "") + (process.env.Q ?? "");
+const pct = (xs, p) => (xs.length ? xs[Math.min(xs.length - 1, Math.floor(xs.length * p))] : 0);
 
 for (const mode of modes) {
 	const m = MODE[mode];
-	const browser = await chromium.launch({ executablePath: exe, headless: true, args: m.args });
+	const browser = await chromium.launch({ executablePath: exe, headless: true, args: [...m.args, ...uncapped] });
 	for (const file of files) {
 		const page = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: dpr });
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
 		page.on("console", (msg) => msg.type() === "error" && !msg.text().includes("404") && errors.push(msg.text()));
-		const t0 = Date.now();
 		await page.goto(`${base}?file=/${file}&compositor=${m.compositor}${extra}`);
 		await page.waitForFunction(() => window.__paintedMs !== undefined, null, { timeout: 60000 });
 		const painted = await page.evaluate(() => window.__paintedMs);
-		const ready = await page.evaluate(() => window.__firstPaintMs);
 		await page.waitForTimeout(1500);
-		const drive = (frames, step) =>
-			page.evaluate(
+		// The core runs on the main thread or in the compositor worker.
+		let home = null;
+		const within = (p) => Promise.race([p, new Promise((r) => setTimeout(() => r(undefined), 3000))]);
+		const core = async (expr) => {
+			if (home) return within(home.evaluate(`(${expr})`).catch(() => undefined));
+			if (await page.evaluate("!!globalThis.__core")) home = page;
+			else for (const w of page.workers()) if (await within(w.evaluate("!!self.__core").catch(() => false))) home = w;
+			return home ? within(home.evaluate(`(${expr})`).catch(() => undefined)) : undefined;
+		};
+		const drive = async (frames, step) => {
+			await core("(__core.debugFrames = [], 1)");
+			const r = await page.evaluate(
 				async ({ frames, step }) => {
 					const el = document.getElementById("viewer");
 					const fn = new Function("i", "el", "wheel", step);
@@ -38,41 +47,41 @@ for (const mode of modes) {
 						el.dispatchEvent(new WheelEvent("wheel", { deltaX: dx, deltaY: dy, ctrlKey: ctrl, clientX: x, clientY: y, bubbles: true, cancelable: true }));
 					window.__events.length = 0;
 					const t0 = performance.now();
+					// Input at a fixed 120Hz, so every compositor gets the same gesture whatever its frame rate.
 					for (let i = 0; i < frames; i++) {
 						fn(i, el, wheel);
-						await new Promise((r) => requestAnimationFrame(r));
+						const next = t0 + (i + 1) * (1000 / 120);
+						while (performance.now() < next - 1) await new Promise((r) => setTimeout(r, Math.max(0, next - performance.now() - 1)));
 					}
-					const ms = performance.now() - t0;
-					const during = window.__events.length;
-					await new Promise((r) => setTimeout(r, 700));
-					return { ms, during, stats: window.__events.map((e) => e.stats) };
+					return { ms: performance.now() - t0, cpu: window.__events.map((e) => e.stats.avgCpuMs) };
 				},
 				{ frames, step },
-			).then(({ ms, during, stats: ev }) => {
-				const busy = ev.slice(0, during + 1).filter((s) => s.frames > 0);
-				const drawn = ev.slice(0, during + 1).reduce((a, s) => a + s.frames, 0);
-				const sum = (k) => busy.reduce((a, s) => a + s[k], 0);
-				const frames = sum("frames");
-				const wavg = (k) => (frames ? busy.reduce((a, s) => a + s[k] * s.frames, 0) / frames : 0);
-				return {
-					eff: +((drawn * 1000) / ms).toFixed(1),
-					fps: +wavg("fps").toFixed(1),
-					p95: +Math.max(0, ...busy.map((s) => s.p95FrameMs)).toFixed(1),
-					worst: +Math.max(0, ...busy.map((s) => s.worstFrameMs)).toFixed(0),
-					over33: sum("framesOver33"),
-					frames,
-					cpu: +wavg("avgCpuMs").toFixed(2),
-					mb: +Math.max(0, ...busy.map((s) => s.textureMB)).toFixed(0),
-					comp: busy[0]?.compositor,
-				};
-			});
-		const scroll = await drive(300, "wheel(0, 30, false)");
-		const zoom = await drive(150, "wheel(0, -6, true, 400, 300)");
+			);
+			const ends = (await core("__core.debugFrames.splice(0)")) ?? [];
+			// Only frames that moved the camera, back to back: a gesture past min/max zoom changes nothing.
+			const gaps = [];
+			for (let i = 1; i < ends.length; i++) if (ends[i] > 0 && ends[i - 1] > 0) gaps.push(ends[i] - ends[i - 1]);
+			const ft = gaps.filter((d) => d < 250).sort((a, b) => a - b);
+			await core("(__core.debugFrames = null, 1)");
+			await page.waitForTimeout(700);
+			const cpu = r.cpu.filter((x) => x > 0);
+			return {
+				fps: +((ends.filter((t) => t > 0).length * 1000) / r.ms).toFixed(1),
+				p50: +pct(ft, 0.5).toFixed(1),
+				p95: +pct(ft, 0.95).toFixed(1),
+				max: +(ft.at(-1) ?? 0).toFixed(0),
+				drops: +((100 * gaps.filter((g) => g > 25).length) / Math.max(1, gaps.length)).toFixed(1),
+				cpu: +(cpu.length ? Math.max(...cpu) : 0).toFixed(1),
+			};
+		};
+		const scroll = await drive(360, "wheel(0, 15, false)");
+		const zoom = await drive(240, "wheel(0, -3, true, 400, 300)");
 		await page.waitForTimeout(800);
-		const pan = await drive(240, "wheel(Math.sin(i/20)*20, 25, false)");
-		const zoomOut = await drive(150, "wheel(0, 8, true)");
-		await page.screenshot({ path: `/tmp/softgl-${mode}-${file}-${dpr}${extra ? "-dark" : ""}.png` });
-		console.log(JSON.stringify({ mode, file, dpr, dark: !!extra, painted: Math.round(painted), ready: Math.round(ready), scroll, zoom, pan, zoomOut, errors: errors.slice(0, 2), wall: Date.now() - t0 }));
+		const pan = await drive(360, "wheel(Math.sin(i/40)*10, 12, false)");
+		const zoomOut = await drive(240, "wheel(0, 4, true)");
+		const comp = await page.evaluate(() => window.__viewer.compositor);
+		await page.screenshot({ path: `/tmp/softgl-${mode}-${file}-${dpr}${extra ? "-x" : ""}.png` });
+		console.log(JSON.stringify({ mode, comp, file, dpr, dark: process.env.DARK === "1", uncapped: !!uncapped.length, painted: Math.round(painted), scroll, zoom, pan, zoomOut, errors: errors.slice(0, 2) }));
 		await page.close();
 	}
 	await browser.close();

@@ -6,7 +6,7 @@ const shots = {};
 for (const dark of ["0", "1"]) {
 	for (const comp of ["webgl2", "canvas2d"]) {
 		const page = await browser.newPage({ viewport: { width: 1000, height: 800 }, deviceScaleFactor: 1 });
-		await page.goto(`http://127.0.0.1:5199/?file=/text.pdf&compositor=${comp}&dark=${dark}&page=1`);
+		await page.goto(`${process.env.URL ?? "http://127.0.0.1:5199/"}?file=/text.pdf&compositor=${comp}&dark=${dark}&page=1`);
 		await page.waitForFunction(() => window.__paintedMs !== undefined);
 		await page.evaluate(() => {
 			const v = window.__viewer;
