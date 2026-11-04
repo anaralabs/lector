@@ -2,12 +2,13 @@
 import { chromium } from "playwright-core";
 const url = process.argv[2] ?? "http://127.0.0.1:5199/";
 const out = process.argv[3] ?? ".";
-const browser = await chromium.launch({ channel: "chrome", headless: true, args: ["--enable-gpu", "--use-angle=metal"] });
+// CHROME=<path> runs a local Chromium (e.g. on a GPU-less box); COMPOSITOR=canvas2d checks the 2D compositor.
+const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME, headless: true } : { channel: "chrome", headless: true, args: ["--enable-gpu", "--use-angle=metal"] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 2 });
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e.stack || e)));
 page.on("console", (m) => m.type() === "error" && !m.text().includes("404") && errors.push(m.text()));
-await page.goto(url);
+await page.goto(process.env.COMPOSITOR ? `${url}?compositor=${process.env.COMPOSITOR}` : url);
 await page.waitForFunction(() => window.__firstPaintMs !== undefined);
 await page.waitForTimeout(800);
 const check = (name, ok, detail = "") => console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? "  — " + detail : ""}`);
@@ -163,7 +164,8 @@ const pixels = async (points) => {
 	);
 };
 const base = new URL(url);
-const fixture = (file, extra = "") => `${base.origin}${base.pathname}?file=/${file}${extra}`;
+const forced = process.env.COMPOSITOR ? `&compositor=${process.env.COMPOSITOR}` : "";
+const fixture = (file, extra = "") => `${base.origin}${base.pathname}?file=/${file}${extra}${forced}`;
 // Fixtures are generated (demo/public/*.pdf is gitignored): bench/fixtures/make-*.mjs.
 const has = async (file) => (await fetch(`${base.origin}/${file}`, { method: "HEAD" })).headers.get("content-type")?.includes("pdf");
 const skip = (name, file) => console.log(`SKIP  ${name}  — ${file} missing; run node bench/fixtures/make-${file.replace(".pdf", "")}.mjs`);

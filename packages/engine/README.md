@@ -3,7 +3,7 @@
 A PDF viewer engine built for 120fps scroll and pinch:
 
 - **PDFium (WASM)** rasterizes 512px tiles in a pool of workers. The workers read the document from one shared `Blob` (or HTTP range requests), so no `SharedArrayBuffer` or cross-origin isolation is needed.
-- A **WebGL2 compositor** draws the tiles under one camera (scroll and pinch at the same time, no DOM per page). Where WebGL2 works on an `OffscreenCanvas`, the compositor runs in a worker, so host-page work never delays a frame.
+- A **WebGL2 compositor** draws the tiles under one camera (scroll and pinch at the same time, no DOM per page). Where WebGL2 works on an `OffscreenCanvas`, the compositor runs in a worker, so host-page work never delays a frame. Without a usable GPU (no WebGL2, or a software rasteriser such as SwiftShader, WARP or llvmpipe) a **Canvas 2D compositor** draws the same tiles, highlights and selection instead.
 - **Selection, search, links, outline and highlights** come from PDFium's character boxes and are drawn on the GPU.
 
 The framework-agnostic core is `createViewer`; `@anaralabs/lector-engine/react` wraps it as `<LectorView>`. For a DOM/pdf.js-based headless viewer, use [`@anaralabs/lector`](../lector).
@@ -238,7 +238,7 @@ interface SearchHit {
 
 `error` events and `EngineError` (rejections of `createViewer` and `viewer.loaded`) carry a `code` and a `phase`, like lector's `onError({ error, phase, source })`:
 
-- `code`: `password` (encrypted: pass `password` or call `viewer.unlock(password)`, which resolves `false` for a wrong one), `parse` (not a PDF or damaged), `security` (unsupported encryption), `file`, `fetch`, `unsupported` (browser), `wasm` (pdfium.wasm failed to load), `gpu` (no WebGL2 context; with phase `render`, the context was lost: drawing stops and resumes on its own if the browser restores it), `worker` (a worker script failed to load or crashed; the viewer tears down), `destroyed` (a request was still waiting when the viewer was destroyed), `unknown`.
+- `code`: `password` (encrypted: pass `password` or call `viewer.unlock(password)`, which resolves `false` for a wrong one), `parse` (not a PDF or damaged), `security` (unsupported encryption), `file`, `fetch`, `unsupported` (browser), `wasm` (pdfium.wasm failed to load), `gpu` (no WebGL2 context; with phase `render`, the context was lost: drawing resumes when the browser restores it, and if it does not within 1.5s, or the context is lost a second time, the viewer moves to the Canvas 2D compositor on a fresh canvas and emits `compositor`), `worker` (a worker script failed to load or crashed; the viewer tears down), `destroyed` (a request was still waiting when the viewer was destroyed), `unknown`.
 - `phase`: `engine-load`, `document-load`, `render`, `text`, `request` (a viewer request such as `pageText`).
 
 ### Other exports
@@ -310,11 +310,11 @@ The minimums are set by **module workers** (Firefox 114, Safari 15) and dynamic 
 
 Below the minimum, nothing is half-rendered:
 
-- `isEngineSupported()` returns `false`. `getEngineSupport()` also lists what is missing (`webgl2`, `wasm`, `module-workers`, `message-channel`, `resize-observer`, `pointer-events`). Both functions are synchronous and cached.
+- `isEngineSupported()` returns `false`. `getEngineSupport()` also lists what is missing (`canvas2d`, `wasm`, `module-workers`, `message-channel`, `resize-observer`, `pointer-events`), the compositor `auto` picks (`compositor`), the WebGL `renderer` string and whether it is a software rasteriser (`softwareGL`). Both functions are synchronous and cached.
 - `createViewer` (and `<LectorView>`, through `onEvent`) rejects with `lector-engine is not supported in this browser (missing: …)`.
 - If a worker script fails to load, an `{ type: "error" }` event names the worker.
 
-There is no WebGL1 fallback, because the shaders are GLSL ES 3.00 and tiles use immutable `texStorage2D` textures. Every browser that has module workers also has WebGL2. A device without it (for example, a blocklisted GPU) should use the host's fallback viewer.
+There is no WebGL1 path: a device without WebGL2 (a blocklisted or very old GPU, a VM without a driver) gets the Canvas 2D compositor, which also replaces WebGL2 on software rasterisers, where it is faster. Force one with `compositor: "webgl2" | "canvas2d"` (default `auto`); `viewer.compositor` and the `compositor` field of `stats` say which one runs.
 
 The worker compositor needs WebGL2 on an `OffscreenCanvas`. Safari 16.4–16.x has `transferControlToOffscreen` but no WebGL on `OffscreenCanvas`, so the engine checks for a working context instead of testing for the API, and uses the main-thread compositor there. You can force the main-thread compositor with `offscreen: false`.
 

@@ -9,7 +9,9 @@ type Msg =
 	| { t: "input"; msg: InputMsg }
 	| { t: "command"; cmd: Command }
 	/** the viewer is destroyed: free GPU resources and ports, then exit */
-	| { t: "dispose" };
+	| { t: "dispose" }
+	/** a fresh canvas after the WebGL context was lost for good */
+	| { t: "canvas"; canvas: OffscreenCanvas };
 
 let core: ViewerCore | null = null;
 const pending: Msg[] = [];
@@ -47,6 +49,7 @@ self.onmessage = (ev: MessageEvent<Msg>) => {
 };
 
 function dispatch(m: Msg) {
-	if (m.t === "input") core!.handle(m.msg);
+	if (m.t === "canvas") core!.swapCanvas(m.canvas);
+	else if (m.t === "input") core!.handle(m.msg);
 	else if (m.t === "command") core!.command(m.cmd);
 }

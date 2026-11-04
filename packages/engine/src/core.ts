@@ -4,7 +4,9 @@
 
 import { markColor } from "./colors";
 import { type Box, FormDirt, type FormOp, type FormWidget, widgetAt } from "./forms";
-import { Compositor } from "./gl";
+import { Canvas2DCompositor } from "./canvas2d";
+import { createCompositor } from "./compositor";
+import type { Compositor, CompositorKind } from "./gl";
 import { anchoredY, buildLayout, estimateSizes } from "./layout";
 import { uploadRank } from "./upload-rank";
 import type { DocumentInfo, ErrorCode, ErrorPhase, Link, LoadFailureDetail, OpenTiming, OutlineItem, PageSize, SizeEntry } from "./protocol";
@@ -67,6 +69,8 @@ export interface CoreOptions {
 	reducedMotion: boolean;
 	/** how selected text is copied (lector's `copyOptions`); false leaves Cmd/Ctrl+C to the browser */
 	copyOptions: false | SelectionTextOptions;
+	/** canvas2d draws without WebGL (no GPU, software GL); auto tries WebGL2 first */
+	compositor: CompositorKind | "auto";
 }
 
 /** Every option's default (hosts can read `pageGap`, colours, ... from here or `viewer.options`). */
@@ -91,6 +95,7 @@ export const defaultOptions: CoreOptions = {
 	ink: [0.88, 0.88, 0.86],
 	reducedMotion: false,
 	copyOptions: {},
+	compositor: "auto",
 };
 
 /** `units: "fraction"`: the rect is 0-1 of the page (its size is not known before the document opens) */
@@ -280,6 +285,7 @@ export interface Stats {
 	workers: number;
 	/** PDFium memory across raster workers (WASM heaps + block caches) */
 	workerMB: number;
+	compositor: CompositorKind;
 }
 
 export interface Camera {
@@ -330,6 +336,10 @@ export type CoreEvent =
 	| { type: "find" }
 	/** the browser restored a lost WebGL context (after a `gpu`/`render` error); tiles are redrawing */
 	| { type: "restored" }
+	/** WebGL did not come back after a context loss: the host shell hands the core a fresh canvas (`swapCanvas`) */
+	| { type: "need-canvas"; reason: "context-lost" }
+	/** the core now composites with `kind` (after a swap) */
+	| { type: "compositor"; kind: CompositorKind; reason: "context-lost" }
 	/**
 	 * An animated (or instant) reveal/goto finished. `landed: false` comes with a
 	 * `cause` (see FlightCause). `coverage`: share of the landing view already
@@ -400,7 +410,7 @@ interface Tile {
 	y: number;
 	w: number;
 	h: number;
-	tex: WebGLTexture | null;
+	tex: unknown;
 	/** pixels have arrived from a worker and are waiting for upload */
 	arrived: boolean;
 	lastUsed: number;
@@ -430,6 +440,7 @@ const PREVIEW_MS = 50;
 /** preview scale = base scale / PREVIEW_DIV (1/16 of the pixels) */
 const PREVIEW_DIV = 4;
 const ZOOM_SETTLE_MS = 180;
+const RESTORE_WAIT_MS = 1500;
 const UPLOAD_BUDGET_MS = 2.5;
 /** per-frame texture upload budget (bytes): halves after a late frame, grows while frames are on time */
 const UPLOAD_MIN = TILE * TILE * 4;
@@ -646,12 +657,45 @@ export class ViewerCore {
 		options: Partial<CoreOptions> = {},
 	) {
 		this.opts = { ...defaultOptions, ...options };
-		this.gl = new Compositor(canvas);
+		this.gl = createCompositor(canvas, this.opts.compositor);
 		this.pool = new RasterPool(ports);
 		this.pool.onOpened = (pageCount, sizes, info, timing) => this.opened(pageCount, sizes, info, timing);
 		this.pool.onError = (message, code, phase, detail) => this.emit({ type: "error", message, code, phase, ...(detail && { detail }) });
-		this.gl.onLost = () => this.emit({ type: "error", message: "lector-engine: the WebGL context was lost; waiting for the browser to restore it", code: "gpu", phase: "render" });
-		this.gl.onRestored = () => this.contextRestored();
+		this.bindCompositor();
+	}
+
+	private losses = 0;
+	private lossTimer: ReturnType<typeof setTimeout> | null = null;
+
+	private bindCompositor() {
+		this.gl.onLost = () => {
+			this.emit({ type: "error", message: "lector-engine: the WebGL context was lost; waiting for the browser to restore it", code: "gpu", phase: "render" });
+			if (this.gl.kind !== "webgl2") return;
+			// A second loss, or one the browser does not undo quickly, means this GPU is not dependable: move to 2D.
+			this.losses++;
+			if (this.lossTimer) clearTimeout(this.lossTimer);
+			this.lossTimer = setTimeout(() => this.emit({ type: "need-canvas", reason: "context-lost" }), this.losses > 1 ? 0 : RESTORE_WAIT_MS);
+		};
+		this.gl.onRestored = () => {
+			if (this.lossTimer) clearTimeout(this.lossTimer);
+			this.lossTimer = null;
+			this.contextRestored();
+		};
+	}
+
+	/** Continues on a fresh canvas with the 2D compositor; tiles are fetched again. */
+	swapCanvas(canvas: HTMLCanvasElement | OffscreenCanvas) {
+		if (this.disposed) return;
+		if (this.lossTimer) clearTimeout(this.lossTimer);
+		this.lossTimer = null;
+		for (const tile of this.tiles.values()) tile.tex = null;
+		this.gl.dispose();
+		this.gl = new Canvas2DCompositor(canvas);
+		this.bindCompositor();
+		this.gl.resize(Math.round(this.vw * this.dpr), Math.round(this.vh * this.dpr));
+		this.dirty = true;
+		this.requestFrame();
+		this.emit({ type: "compositor", kind: "canvas2d", reason: "context-lost" });
 	}
 
 	private disposed = false;
@@ -667,7 +711,7 @@ export class ViewerCore {
 		this.pending = null;
 		this.dragging = false;
 		this.velocity = { x: 0, y: 0 };
-		for (const timer of [this.settleTimer, this.idleTimer, this.cacheTimer, this.press?.timer]) if (timer) clearTimeout(timer);
+		for (const timer of [this.settleTimer, this.idleTimer, this.cacheTimer, this.press?.timer, this.lossTimer]) if (timer) clearTimeout(timer);
 		this.settleTimer = this.idleTimer = this.cacheTimer = null;
 		this.press = null;
 		this.pool.dispose();
@@ -2517,7 +2561,7 @@ export class ViewerCore {
 				if (!(pixels instanceof Uint8Array)) pixels.close();
 				continue;
 			}
-			tile.tex = this.gl.upload(pixels, tile.w, tile.h);
+			tile.tex = this.gl.upload(pixels, tile.w, tile.h, this.opts.gamma);
 			if (!(pixels instanceof Uint8Array)) pixels.close();
 			// Lost mid-frame: fetch it again after the restore.
 			if (!tile.tex) break;
@@ -2983,6 +3027,7 @@ export class ViewerCore {
 				targetScale: this.targetScale,
 				workers: this.pool.workers,
 				workerMB: this.pool.heapBytes / 1048576,
+				compositor: this.gl.kind,
 			},
 		});
 		this.frameTimes = [];
