@@ -10,6 +10,8 @@ export function totalFromContentRange(header: string | null): number | null {
 
 /** files up to this size open from one request instead of range reads */
 export const WHOLE_FILE_MAX = 8 * 1024 * 1024;
+/** files up to this size keep downloading whole while range reads open them: whichever has the first page first wins */
+export const RACE_FILE_MAX = 32 * 1024 * 1024;
 
 export type ProbeVerdict =
 	/** the 206 body is the entire file (it fits in the probed range): read it to the end */
@@ -96,6 +98,8 @@ export function readLinearization(head: Uint8Array, fileLen: number): { firstPag
 	return { firstPageEnd: E, pages: N };
 }
 
+/** a whole-file download that would take this many times longer than range reads stops early (300ms on) */
+const EARLY_ABANDON_RATIO = 3;
 /** a whole-file download is reconsidered once it has run this long */
 export const WHOLE_PATIENCE_MS = 1500;
 /** what opening from range reads costs before the first paint, roughly (benchmarks with 256KB reads: 3-15 requests, 0.3-2.5MB) */
@@ -104,9 +108,24 @@ const RANGE_OPEN_BYTES = 1024 * 1024;
 
 /** The rest of a whole-file download at its rate so far would take clearly longer than range reads need (slow start makes the rate err low, towards ranges). */
 export function abandonWhole(s: { elapsedMs: number; received: number; length: number; rttMs: number }): boolean {
-	if (s.elapsedMs < WHOLE_PATIENCE_MS || s.received <= 0 || s.received >= s.length) return false;
+	if (s.elapsedMs < RANGES_BESIDE_AFTER_MS || s.received <= 0 || s.received >= s.length) return false;
 	const perMs = s.received / s.elapsedMs;
-	return (s.length - s.received) / perMs > 1.25 * (RANGE_OPEN_TRIPS * s.rttMs + RANGE_OPEN_BYTES / perMs);
+	const ratio = (s.length - s.received) / perMs / (RANGE_OPEN_TRIPS * s.rttMs + RANGE_OPEN_BYTES / perMs);
+	// before WHOLE_PATIENCE_MS only a download several times too slow stops
+	return ratio > (s.elapsedMs < WHOLE_PATIENCE_MS ? EARLY_ABANDON_RATIO : 1.25);
+}
+
+/** a small file's download is judged this long before range reads may start beside it */
+export const RANGES_BESIDE_AFTER_MS = 300;
+/** what range reads need before the first paint while a download shares the link, roughly */
+const BESIDE_TRIPS = 4;
+const BESIDE_BYTES = 512 * 1024;
+
+/** The rest of a small file's download looks slower than opening from range reads: start them beside it (it keeps going). */
+export function rangesBeside(s: { elapsedMs: number; received: number; length: number; rttMs: number }): boolean {
+	if (s.elapsedMs < RANGES_BESIDE_AFTER_MS || s.received <= 0 || s.received >= s.length) return false;
+	const perMs = s.received / s.elapsedMs;
+	return (s.length - s.received) / perMs > BESIDE_TRIPS * s.rttMs + BESIDE_BYTES / perMs;
 }
 
 /** the least a worker's range read fetches (fewer round trips; costs some bytes on slow links) */

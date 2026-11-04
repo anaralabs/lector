@@ -374,10 +374,10 @@ export interface LoadTimings extends Partial<OpenTiming> {
 	firstPaintMs: number;
 	/** tiles served from the `tileCache` by the first paint (0 without one) */
 	tileCacheHits: number;
-	/** the document opened from range requests (`loadMode: "range"`) */
+	/** the document opened from range requests (`loadMode: "range"` or `"race"`) */
 	rangeLoading: boolean;
-	/** memory: ArrayBuffer source; download: one plain GET; whole: the range probe found a small file and read it in that one response; range: block reads */
-	loadMode: "memory" | "download" | "whole" | "range";
+	/** memory: ArrayBuffer source; download: one plain GET; whole: the range probe's response was read to the end (a small file, or a mid-size one that won the race); range: block reads; race: block reads while the probe kept downloading the whole file (mid-size files), seeding them */
+	loadMode: "memory" | "download" | "whole" | "range" | "race";
 	/** document size (0 when unknown) */
 	fileKB: number;
 	/** PDF requests before the first paint: probe, HEAD, seeds and the workers' range reads */
