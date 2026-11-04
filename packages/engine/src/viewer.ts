@@ -280,7 +280,7 @@ const STREAM_FORWARD_BYTES = 256 * 1024;
 
 /** The probe's body, read to the end in the background: its prefix seeds range reads, and once complete it is the file. */
 class FileStream {
-	readonly buf: Uint8Array<ArrayBuffer>;
+	buf: Uint8Array<ArrayBuffer>;
 	received = 0;
 	/** stopped before the end: slower than range reads, failed, or no longer wanted */
 	stopped = false;
@@ -332,13 +332,16 @@ class FileStream {
 			return this.stop();
 		}
 		if (this.received !== this.length) return this.stop();
-		return new Blob([this.buf], { type: "application/pdf" });
+		const blob = new Blob([this.buf], { type: "application/pdf" });
+		this.buf = new Uint8Array(0);
+		return blob;
 	}
 
 	stop(): null {
 		if (!this.stopped) {
 			this.stopped = true;
 			void this.reader?.cancel().catch(() => {});
+			if (this.buf.length > this.received) this.buf = this.buf.slice(0, this.received);
 		}
 		for (const w of this.waiters.splice(0)) w.resolve(this.received >= w.pos);
 		this.onData = undefined;
