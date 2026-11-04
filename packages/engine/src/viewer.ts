@@ -234,7 +234,7 @@ const RACE_TAIL_BYTES = 1024 * 1024;
 type Opened = { blob: Blob; mode: "download" | "whole" } | { length: number; seeds: [number, Uint8Array][]; stream?: FileStream; late?: Promise<[number, Uint8Array][]> };
 
 /** PDF requests the main thread made while opening, and when the first answered */
-interface NetCount {
+export interface NetCount {
 	requests: number;
 	firstByteAt: number;
 	/** PDF bytes the main thread received */
@@ -497,7 +497,7 @@ async function prefetchPagePath(store: SeedBlocks, tailStart: number, target: nu
 }
 
 // Small files come back whole from the probe (one request beats a round trip per block); larger ones open from range reads.
-async function openUrl(
+export async function openUrl(
 	url: string,
 	range: boolean,
 	firstPage: boolean,

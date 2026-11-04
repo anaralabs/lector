@@ -241,6 +241,26 @@ interface SearchHit {
 - `code`: `password` (encrypted: pass `password` or call `viewer.unlock(password)`, which resolves `false` for a wrong one), `parse` (not a PDF or damaged), `security` (unsupported encryption), `file`, `fetch`, `unsupported` (browser), `wasm` (pdfium.wasm failed to load), `gpu` (no WebGL2 context; with phase `render`, the context was lost: drawing resumes when the browser restores it, and if it does not within 1.5s, or the context is lost a second time, the viewer moves to the Canvas 2D compositor on a fresh canvas and emits `compositor`), `worker` (a worker script failed to load or crashed; the viewer tears down), `destroyed` (a request was still waiting when the viewer was destroyed), `unknown`.
 - `phase`: `engine-load`, `document-load`, `render`, `text`, `request` (a viewer request such as `pageText`).
 
+### Rendering a region without a viewer
+
+`createPageRenderer({ wasmUrl, workerUrl?, createWorker?, maxDocuments?, idleMs? })` renders part of a page to an `ImageBitmap` with no canvas, viewer or WebGL (hover previews, thumbnails, citation crops):
+
+```ts
+const renderer = createPageRenderer({ wasmUrl, workerUrl: workerUrls.raster });
+const { bitmap, page, rect, scale } = await renderer.render(url, {
+  page: 2,
+  region: (size) => ({ x: 72, y: 100, w: size.w - 144, h: 80 }),
+  width: 360 * devicePixelRatio,
+  key: documentId,
+  signal,
+});
+```
+
+- Each open document is one raster worker reading the file as a viewer does: small files in one request, larger ones through range reads. It shares the pdfium module `preloadPdfium` compiled.
+- `region` is in page points (top-left origin), or a function of the page's size; omitted, the whole page. `width` is the output width in device pixels; the height follows the region.
+- At most `maxDocuments` (default 2) stay open, least recently used closed first; a document unused for `idleMs` (default 30s) closes. `key` names the document across renders (signed URLs rotate).
+- `signal` stops the wait and cancels a render already running. A page outside the document rejects with a `RangeError`; load failures reject with an `EngineError`.
+
 ### Other exports
 
 - `isEngineSupported()`, `getEngineSupport()`, also available alone from `@anaralabs/lector-engine/support`.
