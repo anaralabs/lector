@@ -109,15 +109,26 @@ export class BlockCache {
 				n -= k;
 				continue;
 			}
-			// One request from the block's start (or the last cached granule before this one) through what this read needs, plus read-ahead.
+			// One request through what this read needs (a few cached granules in the way cost less than a round trip), plus read-ahead.
 			const size = this.source.size();
 			const blockStart = Math.floor(pos / size) * size;
-			let start = granule;
-			while (start - g >= blockStart && !this.blocks.has(start - g)) start -= g;
+			let start = blockStart;
+			while (start < granule && this.blocks.has(start)) start += g;
 			this.ahead = start === this.nextSequential ? Math.min(this.maxRun, Math.max(2, this.ahead * 2)) : 1;
+			const needed = Math.min(this.length, Math.ceil((pos + n) / g) * g);
 			const limit = Math.min(this.length, Math.max(Math.ceil((pos + n) / size) * size, blockStart + this.ahead * size));
 			let end = start + g;
-			while (end < limit && !this.blocks.has(end)) end += g;
+			while (end < limit) {
+				if (!this.blocks.has(end)) {
+					end += g;
+					continue;
+				}
+				if (end >= needed) break;
+				let cached = end;
+				while (cached < needed && this.blocks.has(cached) && cached - end < size) cached += g;
+				if (cached - end >= size) break;
+				end = cached;
+			}
 			end = Math.min(end, this.length);
 			const data = this.source.fetch(start, end);
 			this.requests++;

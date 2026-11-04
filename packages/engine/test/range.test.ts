@@ -84,7 +84,9 @@ test("whole download: kept while it is quick, abandoned for ranges once it is cl
 	assert.equal(abandonWhole({ elapsedMs: 1500, received: 6 * MB, length: len, rttMs: 150 }), false);
 	// a 2MB file at 10 Mbit/s is almost there by then
 	assert.equal(abandonWhole({ elapsedMs: 1500, received: 1.875 * MB, length: 2.1 * MB, rttMs: 50 }), false);
-	// very slow links: ranges cost bytes too, so a small file stays whole
-	assert.equal(abandonWhole({ elapsedMs: 1500, received: 60_000, length: 1.5 * MB, rttMs: 300 }), false);
+	// 10 Mbit/s, 150ms: still worth switching
+	assert.equal(abandonWhole({ elapsedMs: 1500, received: 1.875 * MB, length: len, rttMs: 150 }), true);
+	// very slow links: ranges cost about a megabyte too, so a file not much bigger stays whole
+	assert.equal(abandonWhole({ elapsedMs: 1500, received: 60_000, length: 1.1 * MB, rttMs: 300 }), false);
 	assert.equal(abandonWhole({ elapsedMs: 1500, received: len, length: len, rttMs: 50 }), false);
 });

@@ -98,15 +98,15 @@ export function readLinearization(head: Uint8Array, fileLen: number): { firstPag
 
 /** a whole-file download is reconsidered once it has run this long */
 export const WHOLE_PATIENCE_MS = 1500;
-/** what opening from range reads costs before the first paint, roughly (benchmarks: 5-23 requests, 0.4-2.5MB) */
-const RANGE_OPEN_TRIPS = 12;
+/** what opening from range reads costs before the first paint, roughly (benchmarks with 256KB reads: 3-15 requests, 0.3-2.5MB) */
+const RANGE_OPEN_TRIPS = 8;
 const RANGE_OPEN_BYTES = 1024 * 1024;
 
-/** The rest of a whole-file download at its rate so far would take over twice what range reads need (slow start makes the rate err low, towards ranges). */
+/** The rest of a whole-file download at its rate so far would take clearly longer than range reads need (slow start makes the rate err low, towards ranges). */
 export function abandonWhole(s: { elapsedMs: number; received: number; length: number; rttMs: number }): boolean {
 	if (s.elapsedMs < WHOLE_PATIENCE_MS || s.received <= 0 || s.received >= s.length) return false;
 	const perMs = s.received / s.elapsedMs;
-	return (s.length - s.received) / perMs > 2 * (RANGE_OPEN_TRIPS * s.rttMs + RANGE_OPEN_BYTES / perMs);
+	return (s.length - s.received) / perMs > 1.25 * (RANGE_OPEN_TRIPS * s.rttMs + RANGE_OPEN_BYTES / perMs);
 }
 
 /** the least a worker's range read fetches (fewer round trips; costs some bytes on slow links) */
