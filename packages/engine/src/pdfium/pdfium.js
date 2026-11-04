@@ -28,7 +28,7 @@ var readyPromise = new Promise((resolve, reject) => {
   readyPromiseResolve = resolve;
   readyPromiseReject = reject;
 });
-["_FORM_ForceToKillFocus","_FORM_OnAfterLoadPage","_FORM_OnBeforeClosePage","_FORM_OnChar","_FORM_OnLButtonDown","_FORM_OnLButtonUp","_FORM_OnMouseMove","_FORM_ReplaceSelection","_FORM_SelectAllText","_FORM_SetFocusedAnnot","_FORM_SetIndexSelected","_FPDF_ClosePage","_FPDF_FFLDraw","_FPDF_GetFileVersion","_FPDF_GetFormType","_FPDF_GetLastError","_FPDF_GetMetaText","_FPDF_GetPageCount","_FPDF_GetPageSizeByIndexF","_FPDF_GetSecurityHandlerRevision","_FPDF_LoadCustomDocument","_FPDF_LoadPage","_FPDF_PageToDevice","_FPDF_RenderPage_Close","_FPDF_RenderPage_Continue","_FPDF_RenderPageBitmap_Start","_FPDF_SetFormFieldHighlightAlpha","_FPDFAction_GetDest","_FPDFAction_GetType","_FPDFAction_GetURIPath","_FPDFAnnot_GetFlags","_FPDFAnnot_GetFontSize","_FPDFAnnot_GetFormFieldAtPoint","_FPDFAnnot_GetFormFieldFlags","_FPDFAnnot_GetFormFieldName","_FPDFAnnot_GetFormFieldType","_FPDFAnnot_GetFormFieldValue","_FPDFAnnot_GetOptionCount","_FPDFAnnot_GetOptionLabel","_FPDFAnnot_GetRect","_FPDFAnnot_GetSubtype","_FPDFBitmap_Create","_FPDFBitmap_Destroy","_FPDFBitmap_FillRect","_FPDFBitmap_GetBuffer","_FPDFBitmap_GetFormat","_FPDFBitmap_GetHeight","_FPDFBitmap_GetStride","_FPDFBitmap_GetWidth","_FPDFBookmark_GetAction","_FPDFBookmark_GetDest","_FPDFBookmark_GetFirstChild","_FPDFBookmark_GetNextSibling","_FPDFBookmark_GetTitle","_FPDFDest_GetDestPageIndex","_FPDFDest_GetLocationInPage","_FPDFFormObj_CountObjects","_FPDFFormObj_GetObject","_FPDFImageObj_GetBitmap","_FPDFImageObj_GetImageMetadata","_FPDFImageObj_GetRenderedBitmap","_FPDFLink_Enumerate","_FPDFLink_GetAction","_FPDFLink_GetAnnotRect","_FPDFLink_GetDest","_FPDFPage_CloseAnnot","_FPDFPage_CountObjects","_FPDFPage_GetAnnot","_FPDFPage_GetAnnotCount","_FPDFPage_GetAnnotIndex","_FPDFPage_GetObject","_FPDFPageObj_GetBounds","_FPDFPageObj_GetMatrix","_FPDFPageObj_GetType","_FPDFText_ClosePage","_FPDFText_CountChars","_FPDFText_GetLooseCharBox","_FPDFText_GetUnicode","_FPDFText_IsGenerated","_FPDFText_LoadPage","_PDFiumExt_CloseFileWriter","_PDFiumExt_GetFileWriterData","_PDFiumExt_GetFileWriterSize","_PDFiumExt_Init","_PDFiumExt_InitFormFillEnvironment","_PDFiumExt_OpenFileWriter","_PDFiumExt_OpenFormFillInfo","_PDFiumExt_SaveAsCopy","_malloc","_free","_memory","___indirect_function_table","onRuntimeInitialized"].forEach((prop) => {
+["_EPDFPage_ApplyRedactions","_FORM_ForceToKillFocus","_FORM_OnAfterLoadPage","_FORM_OnBeforeClosePage","_FORM_OnChar","_FORM_OnLButtonDown","_FORM_OnLButtonUp","_FORM_OnMouseMove","_FORM_ReplaceSelection","_FORM_SelectAllText","_FORM_SetFocusedAnnot","_FORM_SetIndexSelected","_FPDF_CloseDocument","_FPDF_ClosePage","_FPDF_FFLDraw","_FPDF_GetFileVersion","_FPDF_GetFormType","_FPDF_GetLastError","_FPDF_GetMetaText","_FPDF_GetPageCount","_FPDF_GetPageSizeByIndexF","_FPDF_GetSecurityHandlerRevision","_FPDF_LoadCustomDocument","_FPDF_LoadPage","_FPDF_PageToDevice","_FPDF_RenderPage_Close","_FPDF_RenderPage_Continue","_FPDF_RenderPageBitmap_Start","_FPDF_SaveAsCopy","_FPDF_SetFormFieldHighlightAlpha","_FPDFAction_GetDest","_FPDFAction_GetType","_FPDFAction_GetURIPath","_FPDFAnnot_GetFlags","_FPDFAnnot_GetFontSize","_FPDFAnnot_GetFormFieldAtPoint","_FPDFAnnot_GetFormFieldFlags","_FPDFAnnot_GetFormFieldName","_FPDFAnnot_GetFormFieldType","_FPDFAnnot_GetFormFieldValue","_FPDFAnnot_GetOptionCount","_FPDFAnnot_GetOptionLabel","_FPDFAnnot_GetRect","_FPDFAnnot_GetSubtype","_FPDFAnnot_SetRect","_FPDFBitmap_Create","_FPDFBitmap_Destroy","_FPDFBitmap_FillRect","_FPDFBitmap_GetBuffer","_FPDFBitmap_GetFormat","_FPDFBitmap_GetHeight","_FPDFBitmap_GetStride","_FPDFBitmap_GetWidth","_FPDFBookmark_GetAction","_FPDFBookmark_GetDest","_FPDFBookmark_GetFirstChild","_FPDFBookmark_GetNextSibling","_FPDFBookmark_GetTitle","_FPDFDest_GetDestPageIndex","_FPDFDest_GetLocationInPage","_FPDFFont_GetBaseFontName","_FPDFFont_GetFlags","_FPDFFont_GetIsEmbedded","_FPDFFont_GetWeight","_FPDFFormObj_CountObjects","_FPDFFormObj_GetObject","_FPDFImageObj_GetBitmap","_FPDFImageObj_GetImageMetadata","_FPDFImageObj_GetRenderedBitmap","_FPDFLink_Enumerate","_FPDFLink_GetAction","_FPDFLink_GetAnnotRect","_FPDFLink_GetDest","_FPDFPage_CloseAnnot","_FPDFPage_CountObjects","_FPDFPage_CreateAnnot","_FPDFPage_Delete","_FPDFPage_GenerateContent","_FPDFPage_GetAnnot","_FPDFPage_GetAnnotCount","_FPDFPage_GetAnnotIndex","_FPDFPage_GetObject","_FPDFPage_GetRotation","_FPDFPage_InsertObject","_FPDFPage_InsertObjectAtIndex","_FPDFPage_New","_FPDFPage_RemoveObject","_FPDFPage_SetRotation","_FPDFPageObj_CreateNewRect","_FPDFPageObj_CreateTextObj","_FPDFPageObj_Destroy","_FPDFPageObj_GetBounds","_FPDFPageObj_GetFillColor","_FPDFPageObj_GetMatrix","_FPDFPageObj_GetType","_FPDFPageObj_SetFillColor","_FPDFPageObj_SetMatrix","_FPDFPageObj_Transform","_FPDFPath_SetDrawMode","_FPDFText_ClosePage","_FPDFText_CountChars","_FPDFText_GetCharBox","_FPDFText_GetLooseCharBox","_FPDFText_GetTextObject","_FPDFText_GetUnicode","_FPDFText_IsGenerated","_FPDFText_LoadPage","_FPDFText_LoadStandardFont","_FPDFText_SetText","_FPDFTextObj_GetFont","_FPDFTextObj_GetFontSize","_FPDFTextObj_GetText","_FPDFTextObj_GetTextRenderMode","_FPDFTextObj_SetTextRenderMode","_PDFiumExt_CloseFileWriter","_PDFiumExt_ExitFormFillEnvironment","_PDFiumExt_GetFileWriterData","_PDFiumExt_GetFileWriterSize","_PDFiumExt_Init","_PDFiumExt_InitFormFillEnvironment","_PDFiumExt_OpenFileWriter","_PDFiumExt_OpenFormFillInfo","_PDFiumExt_SaveAsCopy","_malloc","_free","_memory","___indirect_function_table","onRuntimeInitialized"].forEach((prop) => {
   if (!Object.getOwnPropertyDescriptor(readyPromise, prop)) {
     Object.defineProperty(readyPromise, prop, {
       get: () => abort('You are getting ' + prop + ' on the Promise object, instead of the instance. Use .then() to get called back with the instance, see the MODULARIZE docs in src/settings.js'),
@@ -4723,13 +4723,17 @@ Module['_PDFiumExt_GetFileWriterSize'] = createExportWrapper('PDFiumExt_GetFileW
 Module['_PDFiumExt_GetFileWriterData'] = createExportWrapper('PDFiumExt_GetFileWriterData', 3);
 Module['_PDFiumExt_CloseFileWriter'] = createExportWrapper('PDFiumExt_CloseFileWriter', 1);
 Module['_PDFiumExt_SaveAsCopy'] = createExportWrapper('PDFiumExt_SaveAsCopy', 2);
+Module['_FPDF_SaveAsCopy'] = createExportWrapper('FPDF_SaveAsCopy', 3);
 Module['_PDFiumExt_OpenFormFillInfo'] = createExportWrapper('PDFiumExt_OpenFormFillInfo', 0);
 Module['_PDFiumExt_InitFormFillEnvironment'] = createExportWrapper('PDFiumExt_InitFormFillEnvironment', 2);
+Module['_PDFiumExt_ExitFormFillEnvironment'] = createExportWrapper('PDFiumExt_ExitFormFillEnvironment', 1);
+Module['_FPDFPage_CreateAnnot'] = createExportWrapper('FPDFPage_CreateAnnot', 2);
 Module['_FPDFPage_GetAnnotCount'] = createExportWrapper('FPDFPage_GetAnnotCount', 1);
 Module['_FPDFPage_GetAnnot'] = createExportWrapper('FPDFPage_GetAnnot', 2);
 Module['_FPDFPage_GetAnnotIndex'] = createExportWrapper('FPDFPage_GetAnnotIndex', 2);
 Module['_FPDFPage_CloseAnnot'] = createExportWrapper('FPDFPage_CloseAnnot', 1);
 Module['_FPDFAnnot_GetSubtype'] = createExportWrapper('FPDFAnnot_GetSubtype', 1);
+Module['_FPDFAnnot_SetRect'] = createExportWrapper('FPDFAnnot_SetRect', 2);
 Module['_FPDFAnnot_GetRect'] = createExportWrapper('FPDFAnnot_GetRect', 2);
 Module['_FPDFAnnot_GetFlags'] = createExportWrapper('FPDFAnnot_GetFlags', 1);
 Module['_FPDFAnnot_GetFormFieldFlags'] = createExportWrapper('FPDFAnnot_GetFormFieldFlags', 2);
@@ -4740,6 +4744,7 @@ Module['_FPDFAnnot_GetFormFieldValue'] = createExportWrapper('FPDFAnnot_GetFormF
 Module['_FPDFAnnot_GetOptionCount'] = createExportWrapper('FPDFAnnot_GetOptionCount', 2);
 Module['_FPDFAnnot_GetOptionLabel'] = createExportWrapper('FPDFAnnot_GetOptionLabel', 5);
 Module['_FPDFAnnot_GetFontSize'] = createExportWrapper('FPDFAnnot_GetFontSize', 3);
+Module['_EPDFPage_ApplyRedactions'] = createExportWrapper('EPDFPage_ApplyRedactions', 1);
 Module['_FPDFBookmark_GetFirstChild'] = createExportWrapper('FPDFBookmark_GetFirstChild', 2);
 Module['_FPDFBookmark_GetNextSibling'] = createExportWrapper('FPDFBookmark_GetNextSibling', 2);
 Module['_FPDFBookmark_GetTitle'] = createExportWrapper('FPDFBookmark_GetTitle', 3);
@@ -4758,13 +4763,40 @@ Module['_FPDF_GetMetaText'] = createExportWrapper('FPDF_GetMetaText', 4);
 Module['_FPDFImageObj_GetBitmap'] = createExportWrapper('FPDFImageObj_GetBitmap', 1);
 Module['_FPDFImageObj_GetRenderedBitmap'] = createExportWrapper('FPDFImageObj_GetRenderedBitmap', 3);
 Module['_FPDFImageObj_GetImageMetadata'] = createExportWrapper('FPDFImageObj_GetImageMetadata', 3);
+Module['_FPDFPage_Delete'] = createExportWrapper('FPDFPage_Delete', 2);
+Module['_FPDFPage_New'] = createExportWrapper('FPDFPage_New', 4);
+Module['_FPDFPage_GetRotation'] = createExportWrapper('FPDFPage_GetRotation', 1);
+Module['_FPDFPage_InsertObject'] = createExportWrapper('FPDFPage_InsertObject', 2);
+Module['_FPDFPage_InsertObjectAtIndex'] = createExportWrapper('FPDFPage_InsertObjectAtIndex', 3);
+Module['_FPDFPage_RemoveObject'] = createExportWrapper('FPDFPage_RemoveObject', 2);
 Module['_FPDFPage_CountObjects'] = createExportWrapper('FPDFPage_CountObjects', 1);
 Module['_FPDFPage_GetObject'] = createExportWrapper('FPDFPage_GetObject', 2);
+Module['_FPDFPageObj_Destroy'] = createExportWrapper('FPDFPageObj_Destroy', 1);
 Module['_FPDFPageObj_GetType'] = createExportWrapper('FPDFPageObj_GetType', 1);
+Module['_FPDFPage_GenerateContent'] = createExportWrapper('FPDFPage_GenerateContent', 1);
+Module['_FPDFPageObj_Transform'] = createExportWrapper('FPDFPageObj_Transform', 7);
 Module['_FPDFPageObj_GetMatrix'] = createExportWrapper('FPDFPageObj_GetMatrix', 2);
+Module['_FPDFPageObj_SetMatrix'] = createExportWrapper('FPDFPageObj_SetMatrix', 2);
+Module['_FPDFPage_SetRotation'] = createExportWrapper('FPDFPage_SetRotation', 2);
+Module['_FPDFPageObj_SetFillColor'] = createExportWrapper('FPDFPageObj_SetFillColor', 5);
+Module['_FPDFPageObj_GetFillColor'] = createExportWrapper('FPDFPageObj_GetFillColor', 5);
 Module['_FPDFPageObj_GetBounds'] = createExportWrapper('FPDFPageObj_GetBounds', 5);
 Module['_FPDFFormObj_CountObjects'] = createExportWrapper('FPDFFormObj_CountObjects', 1);
 Module['_FPDFFormObj_GetObject'] = createExportWrapper('FPDFFormObj_GetObject', 2);
+Module['_FPDFPageObj_CreateNewRect'] = createExportWrapper('FPDFPageObj_CreateNewRect', 4);
+Module['_FPDFPath_SetDrawMode'] = createExportWrapper('FPDFPath_SetDrawMode', 3);
+Module['_FPDFText_SetText'] = createExportWrapper('FPDFText_SetText', 2);
+Module['_FPDFText_LoadStandardFont'] = createExportWrapper('FPDFText_LoadStandardFont', 2);
+Module['_FPDFTextObj_GetFontSize'] = createExportWrapper('FPDFTextObj_GetFontSize', 2);
+Module['_FPDFTextObj_GetText'] = createExportWrapper('FPDFTextObj_GetText', 4);
+Module['_FPDFPageObj_CreateTextObj'] = createExportWrapper('FPDFPageObj_CreateTextObj', 3);
+Module['_FPDFTextObj_GetTextRenderMode'] = createExportWrapper('FPDFTextObj_GetTextRenderMode', 1);
+Module['_FPDFTextObj_SetTextRenderMode'] = createExportWrapper('FPDFTextObj_SetTextRenderMode', 2);
+Module['_FPDFTextObj_GetFont'] = createExportWrapper('FPDFTextObj_GetFont', 1);
+Module['_FPDFFont_GetBaseFontName'] = createExportWrapper('FPDFFont_GetBaseFontName', 3);
+Module['_FPDFFont_GetIsEmbedded'] = createExportWrapper('FPDFFont_GetIsEmbedded', 1);
+Module['_FPDFFont_GetFlags'] = createExportWrapper('FPDFFont_GetFlags', 1);
+Module['_FPDFFont_GetWeight'] = createExportWrapper('FPDFFont_GetWeight', 1);
 Module['_malloc'] = createExportWrapper('malloc', 1);
 Module['_free'] = createExportWrapper('free', 1);
 Module['_FORM_OnMouseMove'] = createExportWrapper('FORM_OnMouseMove', 5);
@@ -4787,7 +4819,9 @@ Module['_FPDFText_LoadPage'] = createExportWrapper('FPDFText_LoadPage', 1);
 Module['_FPDFText_ClosePage'] = createExportWrapper('FPDFText_ClosePage', 1);
 Module['_FPDFText_CountChars'] = createExportWrapper('FPDFText_CountChars', 1);
 Module['_FPDFText_GetUnicode'] = createExportWrapper('FPDFText_GetUnicode', 2);
+Module['_FPDFText_GetTextObject'] = createExportWrapper('FPDFText_GetTextObject', 2);
 Module['_FPDFText_IsGenerated'] = createExportWrapper('FPDFText_IsGenerated', 2);
+Module['_FPDFText_GetCharBox'] = createExportWrapper('FPDFText_GetCharBox', 6);
 Module['_FPDFText_GetLooseCharBox'] = createExportWrapper('FPDFText_GetLooseCharBox', 3);
 Module['_FPDF_GetFormType'] = createExportWrapper('FPDF_GetFormType', 1);
 Module['_FPDF_LoadCustomDocument'] = createExportWrapper('FPDF_LoadCustomDocument', 2);
@@ -4796,6 +4830,7 @@ Module['_FPDF_GetSecurityHandlerRevision'] = createExportWrapper('FPDF_GetSecuri
 Module['_FPDF_GetPageCount'] = createExportWrapper('FPDF_GetPageCount', 1);
 Module['_FPDF_LoadPage'] = createExportWrapper('FPDF_LoadPage', 2);
 Module['_FPDF_ClosePage'] = createExportWrapper('FPDF_ClosePage', 1);
+Module['_FPDF_CloseDocument'] = createExportWrapper('FPDF_CloseDocument', 1);
 Module['_FPDF_GetLastError'] = createExportWrapper('FPDF_GetLastError', 0);
 Module['_FPDF_PageToDevice'] = createExportWrapper('FPDF_PageToDevice', 10);
 Module['_FPDFBitmap_Create'] = createExportWrapper('FPDFBitmap_Create', 3);
@@ -5347,6 +5382,7 @@ for (const prop of Object.keys(Module)) {
 
 /* AUTO-GENERATED — DO NOT EDIT BY HAND */
 const functions = {
+    EPDFPage_ApplyRedactions: [["number"], 'boolean'],
     FORM_ForceToKillFocus: [["number"], 'boolean'],
     FORM_OnAfterLoadPage: [["number", "number"], null],
     FORM_OnBeforeClosePage: [["number", "number"], null],
@@ -5358,6 +5394,7 @@ const functions = {
     FORM_SelectAllText: [["number", "number"], 'boolean'],
     FORM_SetFocusedAnnot: [["number", "number"], 'boolean'],
     FORM_SetIndexSelected: [["number", "number", "number", "boolean"], 'boolean'],
+    FPDF_CloseDocument: [["number"], null],
     FPDF_ClosePage: [["number"], null],
     FPDF_FFLDraw: [["number", "number", "number", "number", "number", "number", "number", "number", "number"], null],
     FPDF_GetFileVersion: [["number", "number"], 'boolean'],
@@ -5373,6 +5410,7 @@ const functions = {
     FPDF_RenderPage_Close: [["number"], null],
     FPDF_RenderPage_Continue: [["number", "number"], 'number'],
     FPDF_RenderPageBitmap_Start: [["number", "number", "number", "number", "number", "number", "number", "number", "number"], 'number'],
+    FPDF_SaveAsCopy: [["number", "number", "number"], 'boolean'],
     FPDF_SetFormFieldHighlightAlpha: [["number", "number"], null],
     FPDFAction_GetDest: [["number", "number"], 'number'],
     FPDFAction_GetType: [["number"], 'number'],
@@ -5388,6 +5426,7 @@ const functions = {
     FPDFAnnot_GetOptionLabel: [["number", "number", "number", "number", "number"], 'number'],
     FPDFAnnot_GetRect: [["number", "number"], 'boolean'],
     FPDFAnnot_GetSubtype: [["number"], 'number'],
+    FPDFAnnot_SetRect: [["number", "number"], 'boolean'],
     FPDFBitmap_Create: [["number", "number", "number"], 'number'],
     FPDFBitmap_Destroy: [["number"], null],
     FPDFBitmap_FillRect: [["number", "number", "number", "number", "number", "number"], 'boolean'],
@@ -5403,6 +5442,10 @@ const functions = {
     FPDFBookmark_GetTitle: [["number", "number", "number"], 'number'],
     FPDFDest_GetDestPageIndex: [["number", "number"], 'number'],
     FPDFDest_GetLocationInPage: [["number", "number", "number", "number", "number", "number", "number"], 'boolean'],
+    FPDFFont_GetBaseFontName: [["number", "number", "number"], 'number'],
+    FPDFFont_GetFlags: [["number"], 'number'],
+    FPDFFont_GetIsEmbedded: [["number"], 'number'],
+    FPDFFont_GetWeight: [["number"], 'number'],
     FPDFFormObj_CountObjects: [["number"], 'number'],
     FPDFFormObj_GetObject: [["number", "number"], 'number'],
     FPDFImageObj_GetBitmap: [["number"], 'number'],
@@ -5414,20 +5457,47 @@ const functions = {
     FPDFLink_GetDest: [["number", "number"], 'number'],
     FPDFPage_CloseAnnot: [["number"], null],
     FPDFPage_CountObjects: [["number"], 'number'],
+    FPDFPage_CreateAnnot: [["number", "number"], 'number'],
+    FPDFPage_Delete: [["number", "number"], null],
+    FPDFPage_GenerateContent: [["number"], 'boolean'],
     FPDFPage_GetAnnot: [["number", "number"], 'number'],
     FPDFPage_GetAnnotCount: [["number"], 'number'],
     FPDFPage_GetAnnotIndex: [["number", "number"], 'number'],
     FPDFPage_GetObject: [["number", "number"], 'number'],
+    FPDFPage_GetRotation: [["number"], 'number'],
+    FPDFPage_InsertObject: [["number", "number"], null],
+    FPDFPage_InsertObjectAtIndex: [["number", "number", "number"], 'boolean'],
+    FPDFPage_New: [["number", "number", "number", "number"], 'number'],
+    FPDFPage_RemoveObject: [["number", "number"], 'boolean'],
+    FPDFPage_SetRotation: [["number", "number"], null],
+    FPDFPageObj_CreateNewRect: [["number", "number", "number", "number"], 'number'],
+    FPDFPageObj_CreateTextObj: [["number", "number", "number"], 'number'],
+    FPDFPageObj_Destroy: [["number"], null],
     FPDFPageObj_GetBounds: [["number", "number", "number", "number", "number"], 'boolean'],
+    FPDFPageObj_GetFillColor: [["number", "number", "number", "number", "number"], 'boolean'],
     FPDFPageObj_GetMatrix: [["number", "number"], 'boolean'],
     FPDFPageObj_GetType: [["number"], 'number'],
+    FPDFPageObj_SetFillColor: [["number", "number", "number", "number", "number"], 'boolean'],
+    FPDFPageObj_SetMatrix: [["number", "number"], 'boolean'],
+    FPDFPageObj_Transform: [["number", "number", "number", "number", "number", "number", "number"], null],
+    FPDFPath_SetDrawMode: [["number", "number", "boolean"], 'boolean'],
     FPDFText_ClosePage: [["number"], null],
     FPDFText_CountChars: [["number"], 'number'],
+    FPDFText_GetCharBox: [["number", "number", "number", "number", "number", "number"], 'boolean'],
     FPDFText_GetLooseCharBox: [["number", "number", "number"], 'boolean'],
+    FPDFText_GetTextObject: [["number", "number"], 'number'],
     FPDFText_GetUnicode: [["number", "number"], 'number'],
     FPDFText_IsGenerated: [["number", "number"], 'number'],
     FPDFText_LoadPage: [["number"], 'number'],
+    FPDFText_LoadStandardFont: [["number", "string"], 'number'],
+    FPDFText_SetText: [["number", "number"], 'boolean'],
+    FPDFTextObj_GetFont: [["number"], 'number'],
+    FPDFTextObj_GetFontSize: [["number", "number"], 'boolean'],
+    FPDFTextObj_GetText: [["number", "number", "number", "number"], 'number'],
+    FPDFTextObj_GetTextRenderMode: [["number"], 'number'],
+    FPDFTextObj_SetTextRenderMode: [["number", "number"], 'boolean'],
     PDFiumExt_CloseFileWriter: [["number"], null],
+    PDFiumExt_ExitFormFillEnvironment: [["number"], null],
     PDFiumExt_GetFileWriterData: [["number", "number", "number"], 'number'],
     PDFiumExt_GetFileWriterSize: [["number"], 'number'],
     PDFiumExt_Init: [[], null],

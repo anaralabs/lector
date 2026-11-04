@@ -10,6 +10,8 @@ import type { DocumentInfo, ErrorCode, ErrorPhase, FromRaster, LoadFailureDetail
 export type TileResult = Extract<FromRaster, { t: "tile" }>;
 export type TextResult = Extract<FromRaster, { t: "text" }>;
 export type SizesResult = Extract<FromRaster, { t: "sizes" }>;
+export type EditedResult = Extract<FromRaster, { t: "edited" }>;
+type Unsent<T> = T extends unknown ? Omit<T, "id"> : never;
 export type FormResult = Omit<Extract<FromRaster, { t: "form" }>, "t" | "seq">;
 
 type JobMsg = Extract<ToRaster, { t: "tile" } | { t: "text" } | { t: "outline" }>;
@@ -224,6 +226,30 @@ export class RasterPool {
 		});
 	}
 
+	/** answers to edits and object queries, by id (only the first worker answers count) */
+	private replies = new Map<number, (res: FromRaster) => void>();
+
+	/** Like `form`: every worker applies the edit in order with its jobs; the first worker's answer settles it. */
+	edit(msg: Unsent<Extract<ToRaster, { t: "edit" } | { t: "undo" } | { t: "redo" }>>, onDone: (res: EditedResult) => void) {
+		const id = this.nextId++;
+		const full = { ...msg, id } as ToRaster;
+		this.replies.set(id, onDone as (res: FromRaster) => void);
+		for (const lane of this.lanes) {
+			if (lane.ready) lane.port.postMessage(full);
+			else lane.backlog.push(full);
+		}
+	}
+
+	/** A page's objects, from the first worker (in order with the edits sent before). */
+	objects(page: number, onDone: (res: FromRaster) => void) {
+		const id = this.nextId++;
+		this.replies.set(id, onDone);
+		const lane = this.lanes[0]!;
+		const msg: ToRaster = { t: "objects", id, page };
+		if (lane.ready) lane.port.postMessage(msg);
+		else lane.backlog.push(msg);
+	}
+
 	/** Retry opening the document with a password in every worker that has not opened it. */
 	unlock(password: string) {
 		for (const lane of this.lanes) if (!lane.ready) lane.port.postMessage({ t: "unlock", password } satisfies ToRaster);
@@ -346,6 +372,14 @@ export class RasterPool {
 		if (msg.t === "form") {
 			this.formWaiters.get(msg.seq)?.(msg);
 			this.formWaiters.delete(msg.seq);
+			return;
+		}
+		if (msg.t === "edited" || msg.t === "objects" || (msg.t === "error" && msg.id !== undefined && this.replies.has(msg.id))) {
+			if ("heap" in msg) lane.heap = msg.heap;
+			if (index !== 0) return;
+			const done = this.replies.get(msg.id!);
+			this.replies.delete(msg.id!);
+			done?.(msg);
 			return;
 		}
 		if (msg.t === "saved") {

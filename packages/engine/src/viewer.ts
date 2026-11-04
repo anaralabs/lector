@@ -21,7 +21,7 @@ import {
 import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
 import { FormLayer, modifiers, type FormHit } from "./form-layer";
-import type { DocSource, DocumentInfo, OpenTiming, OutlineItem, PageSize, SizeHint, ToRaster } from "./protocol";
+import type { DocSource, DocumentInfo, EditOp, EditOutcome, OpenTiming, OutlineItem, PageObject, PageSize, SizeHint, ToRaster } from "./protocol";
 import { rasterWorkerCount } from "./raster-pool";
 import { abandonWhole, HEAD_BYTES, probeReadBytes, probeVerdict, RANGE_GRANULE, readLinearization, WHOLE_FILE_MAX } from "./range";
 import { findStartxref, pagePathObjects, parseXref } from "./xref";
@@ -166,6 +166,17 @@ export interface Viewer {
 	/** a search is running */
 	readonly isSearching: boolean;
 	outline(): Promise<OutlineItem[]>;
+	/**
+	 * Experimental content editing. Each op applies to every raster worker's copy
+	 * of the document; only the touched pages re-render. Rejects with the reason
+	 * when the op cannot apply (e.g. no font can show the text).
+	 */
+	edit(op: EditOp): Promise<EditOutcome>;
+	/** resolves null when there is nothing to undo / redo */
+	undo(): Promise<EditOutcome | null>;
+	redo(): Promise<EditOutcome | null>;
+	/** a page's top-level objects with their boxes (page points), for hit-testing edits */
+	pageObjects(page: number): Promise<PageObject[]>;
 	pageText(page: number): Promise<string>;
 	/** page text plus `chars[i]`: the char index (for `rects`) of UTF-16 unit `i` */
 	pageTextMap(page: number): Promise<{ text: string; chars: Int32Array }>;
@@ -891,6 +902,8 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 			} else if (e.type === "layout") {
 				layout = e.layout;
 				textLayer?.setLayout(e.layout);
+			} else if (e.type === "edited" && !e.structure) {
+				textLayer?.invalidate(e.pages);
 				forms?.update();
 			} else if (e.type === "error" && e.code === "password" && e.phase === "document-load") {
 				for (const resolve of unlocks.splice(0)) resolve(false);
@@ -1287,6 +1300,10 @@ export async function createViewer(container: HTMLElement, source: string | Arra
 				return searches.size > 0;
 			},
 			outline: () => request<OutlineItem[]>({ type: "outline" }),
+			edit: (op) => request<EditOutcome>({ type: "edit", op }),
+			undo: () => request<EditOutcome | null>({ type: "undo" }),
+			redo: () => request<EditOutcome | null>({ type: "redo" }),
+			pageObjects: (page) => request<PageObject[]>({ type: "page-objects", page }),
 			pageText: (page) => request<string>({ type: "page-text", page }),
 			pageTextMap: (page) => request<{ text: string; chars: Int32Array }>({ type: "page-text-map", page }),
 			rects: (page, from, to) => request<Rect[]>({ type: "rects", page, from, to }),

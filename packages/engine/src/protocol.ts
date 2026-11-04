@@ -77,7 +77,74 @@ export type ToRaster =
 	/** a form edit, sent to every worker in the same order; only `report` workers answer */
 	| { t: "form"; seq: number; op: FormOp; report: boolean }
 	/** the document bytes with their form edits */
-	| { t: "save"; id: number };
+	| { t: "save"; id: number }
+	/** sent to every worker in the same order: each applies it to its own copy of the document */
+	| { t: "edit"; id: number; page: -1; op: EditOp }
+	| { t: "undo"; id: number; page: -1 }
+	| { t: "redo"; id: number; page: -1 }
+	| { t: "objects"; id: number; page: number };
+
+export type StdFont =
+	| "Helvetica"
+	| "Helvetica-Bold"
+	| "Helvetica-Oblique"
+	| "Helvetica-BoldOblique"
+	| "Times-Roman"
+	| "Times-Bold"
+	| "Times-Italic"
+	| "Times-BoldItalic"
+	| "Courier"
+	| "Courier-Bold"
+	| "Courier-Oblique"
+	| "Courier-BoldOblique";
+
+/** Content edits. `obj`: index in the page's top-level object list when the op runs; points are top-left page points. */
+export type EditOp =
+	/** absorb: other objects of the same visual line (split runs, per-glyph objects), removed once their text moves into `obj` */
+	| { kind: "set-text"; page: number; obj: number; text: string; absorb?: number[] }
+	/** x, y: the baseline start */
+	| { kind: "add-text"; page: number; x: number; y: number; text: string; size: number; font?: StdFont; color?: [number, number, number] }
+	| { kind: "delete-object"; page: number; obj: number }
+	| { kind: "move-object"; page: number; obj: number; dx: number; dy: number }
+	/** quarter turns clockwise */
+	| { kind: "rotate-page"; page: number; quarter: number }
+	| { kind: "delete-page"; page: number }
+	| { kind: "insert-page"; at: number; w: number; h: number }
+	/** removes everything under the rect (text, image pixels, paths) and paints it black */
+	| { kind: "redact"; page: number; rect: [number, number, number, number] };
+
+export interface EditOutcome {
+	/** pages whose content changed (re-render, re-extract) */
+	pages: number[];
+	/** pages were added or removed: indices after the touched one moved */
+	structure: boolean;
+	/** a page changed size or orientation */
+	resized?: boolean;
+	/** set-text/add-text: "same" when the original font had every glyph, else the standard-14 fallback used */
+	font?: "same" | StdFont;
+	/** set-text: how much wider (points) the object became; text does not reflow */
+	widthDelta?: number;
+	/** the area that changed, l t r b in page points (absent: the whole page) */
+	region?: [number, number, number, number];
+	/** add-text: the new object's index */
+	index?: number;
+	undone?: boolean;
+	/** worker time for the op */
+	ms?: number;
+}
+
+export interface PageObject {
+	index: number;
+	type: "unknown" | "text" | "path" | "image" | "shading" | "form";
+	/** l, t, r, b in page points (top-left origin) */
+	box: [number, number, number, number];
+	text?: string;
+	font?: string;
+	size?: number;
+	embedded?: boolean;
+	/** render mode 3: an OCR layer over a scan */
+	invisible?: boolean;
+}
 
 /** Document metadata (Info dictionary), like pdf.js `getMetadata().info` and lector's `onDocumentLoad`. */
 export interface DocumentInfo {
@@ -171,4 +238,7 @@ export type FromRaster =
 	| { t: "cancelled"; id: number; heap: number }
 	/** fields whose value a form edit changed; `reset`: a button that may have changed any field */
 	| { t: "form"; seq: number; changed: { name: string; value: string }[]; reset: boolean }
-	| { t: "saved"; id: number; buf?: ArrayBuffer; error?: string };
+	| { t: "saved"; id: number; buf?: ArrayBuffer; error?: string }
+	/** outcome null: nothing to undo/redo; sizes: every page, after a structural or size change */
+	| { t: "edited"; id: number; outcome: EditOutcome | null; error?: string; pageCount: number; sizes: SizeEntry[]; ms: number; heap: number }
+	| { t: "objects"; id: number; page: number; objects: PageObject[]; heap: number };

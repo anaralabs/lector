@@ -7,8 +7,8 @@ import { type Box, FormDirt, type FormOp, type FormWidget, widgetAt } from "./fo
 import { Compositor } from "./gl";
 import { anchoredY, buildLayout, estimateSizes } from "./layout";
 import { uploadRank } from "./upload-rank";
-import type { DocumentInfo, ErrorCode, ErrorPhase, Link, LoadFailureDetail, OpenTiming, OutlineItem, PageSize, SizeEntry } from "./protocol";
-import { RasterPool, type SizesResult, type TextResult, type TileResult } from "./raster-pool";
+import type { DocumentInfo, EditOp, EditOutcome, ErrorCode, ErrorPhase, Link, LoadFailureDetail, OpenTiming, OutlineItem, PageSize, SizeEntry } from "./protocol";
+import { type EditedResult, RasterPool, type SizesResult, type TextResult, type TileResult } from "./raster-pool";
 import { TileCache } from "./tile-cache";
 import { boundedDistance, foldQuery, insertRanked, matchPage, type RawMatch, type SearchOptions, splitLimit } from "./search";
 import { PageText, type Rect, type SelectionTextOptions, type TextPoint, comparePoints } from "./text";
@@ -208,7 +208,12 @@ export type Request =
 	| { type: "text-layer"; page: number }
 	| { type: "thumbnail"; page: number; width: number }
 	/** the document bytes with the form edits made so far */
-	| { type: "save-document" };
+	| { type: "save-document" }
+	/** content edits: answer EditOutcome (or null for undo/redo with nothing to do); reject with the worker's reason */
+	| { type: "edit"; op: EditOp }
+	| { type: "undo" }
+	| { type: "redo" }
+	| { type: "page-objects"; page: number };
 
 export type Command =
 	| { type: "zoom"; zoom: number; x?: number; y?: number }
@@ -354,7 +359,11 @@ export type CoreEvent =
 	/** an edit changed a field's value (`name` is the field's full name; every widget of it shows `value`) */
 	| { type: "form-change"; name: string; value: string }
 	/** the page shows its edited fields: no bitmap from before the edit is drawn any more */
-	| { type: "form-painted"; page: number };
+	| { type: "form-painted"; page: number }
+	/** a content edit changed these pages (structure: pages were added or removed; a `layout` event came first) */
+	| { type: "edited"; pages: number[]; structure: boolean }
+	/** an edited page is drawn without pre-edit bitmaps; ms since the edit was asked for */
+	| { type: "edit-painted"; page: number; ms: number };
 
 /** epoch ms (timeOrigin + now), comparable across the main thread and workers */
 export const epochNow = () => performance.timeOrigin + performance.now();
@@ -542,6 +551,12 @@ export class ViewerCore {
 	private settleTimer: ReturnType<typeof setTimeout> | null = null;
 
 	private texts = new Map<number, PageText>();
+	/** per-page content edit count, part of text job keys so pre-edit text is dropped */
+	private rev = new Map<number, number>();
+	/** bumped when pages are added or removed: every page-keyed cache restarts */
+	private epoch = 0;
+	/** page -> when its content edit was asked for, until it is drawn without pre-edit bitmaps */
+	private editPaint = new Map<number, number>();
 	/** page -> priority of its queued text job */
 	private textPending = new Map<number, number>();
 	/** raster image boxes per page (l, t, r, b in points), kept in original colours in dark mode */
@@ -1984,7 +1999,7 @@ export class ViewerCore {
 				const h = Math.max(1, Math.round(size.h * scale));
 				// Concurrent requests for one thumbnail share a job (the pool keeps one
 				// callback per key). Callers only read the pixels.
-				const key = `thumb:${req.page}:${w}`;
+				const key = `thumb:${req.page}:${w}:${this.rev.get(req.page) ?? 0}:${this.epoch}`;
 				let job = this.thumbs.get(key);
 				if (!job) {
 					job = new Promise((resolve) => {
@@ -1998,6 +2013,14 @@ export class ViewerCore {
 				}
 				return job;
 			}
+			case "edit":
+			case "undo":
+			case "redo":
+				return this.runEdit(req);
+			case "page-objects":
+				return new Promise((resolve, reject) => {
+					this.pool.objects(req.page, (res) => (res.t === "objects" ? resolve(res.objects) : reject(new Error(res.t === "error" ? res.message : "no objects"))));
+				});
 			case "save-document":
 				return new Uint8Array(await this.pool.save());
 			case "outline":
@@ -2219,11 +2242,13 @@ export class ViewerCore {
 		this.textPending.set(page, priority);
 		if (queued !== undefined) {
 			// already requested: only raise its priority (a press is waiting on it)
-			this.pool.request(`text:${page}`, priority, { t: "text", page }, () => {});
+			this.pool.request(this.textKey(page), priority, { t: "text", page }, () => {});
 			this.pool.pump();
 			return;
 		}
-		this.pool.request(`text:${page}`, priority, { t: "text", page }, (res) => {
+		const key = this.textKey(page);
+		this.pool.request(key, priority, { t: "text", page }, (res) => {
+			if (key !== this.textKey(page)) return;
 			this.textPending.delete(page);
 			if (res.t !== "text") {
 				// Extraction failed: the page has no text, and waiters (search) move on.
@@ -2278,8 +2303,89 @@ export class ViewerCore {
 		return !!(this.tiles.get(this.tileKey(page, s, 0, 0))?.tex || this.tiles.get(this.tileKey(page, s / PREVIEW_DIV, 0, 0))?.tex);
 	}
 
+	private textKey(page: number) {
+		return `text:${page}:${this.rev.get(page) ?? 0}:${this.epoch}`;
+	}
+
+	// ---------------------------------------------------------------- content edits
+
+	private runEdit(req: Extract<Request, { type: "edit" | "undo" | "redo" }>): Promise<EditOutcome | null> {
+		const asked = performance.now();
+		return new Promise((resolve, reject) => {
+			const done = (res: EditedResult) => {
+				if (this.disposed) return;
+				if (res.error) return reject(new Error(res.error));
+				if (res.outcome) this.applyEdit(res, asked);
+				resolve(res.outcome ? { ...res.outcome, ms: res.ms } : null);
+			};
+			if (req.type === "edit") this.pool.edit({ t: "edit", page: -1, op: req.op }, done);
+			else this.pool.edit({ t: req.type, page: -1 }, done);
+		});
+	}
+
+	private applyEdit(res: EditedResult, asked: number) {
+		const o = res.outcome!;
+		if (o.structure) {
+			this.restructure(res.sizes);
+			this.emit({ type: "edited", pages: [], structure: true });
+			return;
+		}
+		if (o.resized) {
+			for (const [i, w, h] of res.sizes) this.pages[i] = { w, h };
+			for (const page of o.pages) for (const tile of [...(this.tilesByPage.get(page) ?? [])]) this.dropTile(tile);
+			this.relayout();
+			this.clampCamera();
+			this.emit({ type: "layout", pages: this.pages.map((p) => ({ ...p })), layout: this.layout.map((r) => ({ ...r })), complete: true });
+		}
+		for (const page of o.pages) {
+			const r = !o.resized && o.region;
+			// a little past the object: anti-aliased glyph edges spill over its bounds
+			this.dirt.bump(page, r ? [r[0] - 2, r[1] - 2, r[2] + 2, r[3] + 2] : null);
+			this.settling.add(page);
+			this.editPaint.set(page, asked);
+			this.rev.set(page, (this.rev.get(page) ?? 0) + 1);
+			this.texts.delete(page);
+			this.links.delete(page);
+			this.images.delete(page);
+			this.textPending.delete(page);
+			if (this.selRange && this.selRange[0].page <= page && this.selRange[1].page >= page) this.clearSelection();
+			this.requestText(page, 300);
+		}
+		this.emit({ type: "edited", pages: o.pages, structure: false });
+		this.requestFrame();
+	}
+
+	/** Pages were added or removed: every page-keyed cache restarts from the workers' new sizes. */
+	private restructure(sizes: SizeEntry[]) {
+		this.epoch++;
+		for (const tile of [...this.tiles.values()]) this.dropTile(tile);
+		for (const set of this.tilesByPage.values()) for (const tile of set) if (tile.tex) this.gl.free(tile.tex, tile.w, tile.h);
+		this.tilesByPage.clear();
+		this.arrived = [];
+		this.texts.clear();
+		this.textPending.clear();
+		this.links.clear();
+		this.images.clear();
+		this.rev.clear();
+		this.thumbs.clear();
+		this.widgets.clear();
+		this.settling.clear();
+		this.editPaint.clear();
+		this.dirt = new FormDirt();
+		// the persistent cache is keyed by page index
+		this.cache = null;
+		if (this.selRange) this.clearSelection();
+		this.pages = sizes.map(([, w, h]) => ({ w, h }));
+		this.estimated = this.pages.map(() => false);
+		this.unknown = 0;
+		this.relayout();
+		this.clampCamera();
+		this.emit({ type: "layout", pages: this.pages.map((p) => ({ ...p })), layout: this.layout.map((r) => ({ ...r })), complete: true });
+		this.requestFrame();
+	}
+
 	private tileKey(page: number, scale: number, x: number, y: number) {
-		const key = `${page}:${scale}:${x}:${y}`;
+		const key = `${page}:${scale}:${x}:${y}${this.epoch ? `@${this.epoch}` : ""}`;
 		if (!this.dirt.edited(page)) return key;
 		const box: Box | null = scale <= this.baseScale(page) ? null : [x / scale, y / scale, (x + TILE) / scale, (y + TILE) / scale];
 		const v = this.dirt.version(page, box);
@@ -2740,6 +2846,11 @@ export class ViewerCore {
 			if (this.settling.has(p) && stale.size === 0) {
 				this.settling.delete(p);
 				this.emit({ type: "form-painted", page: p });
+				const asked = this.editPaint.get(p);
+				if (asked !== undefined) {
+					this.editPaint.delete(p);
+					this.emit({ type: "edit-painted", page: p, ms: performance.now() - asked });
+				}
 			}
 			// Coarse first, the target scale last so it ends up on top; a pre-edit tile under its replacement.
 			ready.sort((a, b) => (a.scale === target ? 1 : 0) - (b.scale === target ? 1 : 0) || a.scale - b.scale || (stale.has(a) ? 0 : 1) - (stale.has(b) ? 0 : 1));

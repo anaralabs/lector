@@ -61,6 +61,17 @@ export class TextLayer {
 		this.update();
 	}
 
+	/** these pages' text changed (an edit): rebuild them */
+	invalidate(pages: number[]) {
+		for (const p of pages) {
+			this.shown.get(p)?.remove();
+			this.shown.delete(p);
+			this.cache.delete(p);
+		}
+		this.want = [];
+		this.update();
+	}
+
 	setViewport(w: number, h: number) {
 		this.vw = w;
 		this.vh = h;
