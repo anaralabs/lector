@@ -161,7 +161,7 @@ export class Editor {
 	objects(index: number): PageObject[] {
 		const page = this.host.page(index);
 		const tp = P.FPDFText_LoadPage(page);
-		const mem = malloc(16);
+		const mem = malloc(24);
 		const out: PageObject[] = [];
 		try {
 			const n = P.FPDFPage_CountObjects(page);
@@ -174,7 +174,10 @@ export class Editor {
 				if (type === "text") {
 					entry.text = readBytes((b, l) => P.FPDFTextObj_GetText(obj, tp, b, l), true);
 					P.FPDFTextObj_GetFontSize(obj, mem);
-					entry.size = new Float32Array(heap().buffer, mem, 1)[0]!;
+					const raw = new Float32Array(heap().buffer, mem, 1)[0]!;
+					// TeX/Springer output sets 1 Tf and scales through the text matrix
+					const m = P.FPDFPageObj_GetMatrix(obj, mem) ? new Float32Array(heap().buffer, mem, 4) : null;
+					entry.size = m ? raw * Math.hypot(m[2]!, m[3]!) : raw;
 					const font = P.FPDFTextObj_GetFont(obj);
 					entry.font = readBytes((b, l) => P.FPDFFont_GetBaseFontName(font, b, l), false);
 					entry.embedded = P.FPDFFont_GetIsEmbedded(font) === 1;

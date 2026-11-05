@@ -82,6 +82,7 @@ const SERIF = `"Times New Roman", "Nimbus Roman", Times, serif`;
 const SANS = `Helvetica, Arial, "Nimbus Sans", sans-serif`;
 const MONO = `"Courier New", Courier, "Nimbus Mono PS", monospace`;
 const ADD_SIZE = 12;
+const DESCENDERS = /[gjpqyQ,;()[\]{}|/_@$]/;
 
 function faceOf(font = "", flags = 0): Face {
 	const n = font.replace(/^[A-Z]{6}\+/, "");
@@ -201,7 +202,7 @@ const sameLine = (a: Line | null, b: Line | null) =>
 	!!a && !!b && a.page === b.page && a.objs[0]!.index === b.objs[0]!.index;
 /** Baseline from a tight glyph box: drop the descent only when the text has descenders. */
 const baselineOf = (l: Line, size: number) =>
-	l.box[3] - (/[gjpqyQ,;()[\]{}|/_@$]/.test(lineText(l)) ? 0.21 * size : 0);
+	l.box[3] - (DESCENDERS.test(lineText(l)) ? 0.21 * size : 0);
 
 const sx = (p: number, x: number) => (layout[p]!.x + x - cam.x) * cam.zoom;
 const sy = (p: number, y: number) => (layout[p]!.y + y - cam.y) * cam.zoom;
@@ -521,9 +522,18 @@ async function act(what: "delete" | "redact" | "edit") {
 	}
 }
 
+/** Glyph boxes run cap-height to descender (~0.72 / ~0.93 em); trust the reported size only when it agrees. */
+function sizeOf(line: Line, reported?: number) {
+	const h = line.box[3] - line.box[1];
+	const fromBox = h / (DESCENDERS.test(lineText(line)) ? 0.93 : 0.72);
+	return reported && reported > fromBox * 0.5 && reported < fromBox * 2
+		? reported
+		: fromBox;
+}
+
 function editLine(line: Line, caretX?: number) {
 	const first = line.objs[0]!;
-	const size = first.size ?? line.box[3] - line.box[1];
+	const size = sizeOf(line, first.size);
 	openEditor(
 		{
 			page: line.page,

@@ -140,6 +140,7 @@ export interface PageObject {
 	box: [number, number, number, number];
 	text?: string;
 	font?: string;
+	/** font size in page points, text matrix applied */
 	size?: number;
 	embedded?: boolean;
 	/** render mode 3: an OCR layer over a scan */
