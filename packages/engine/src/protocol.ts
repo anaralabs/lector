@@ -144,6 +144,10 @@ export interface PageObject {
 	embedded?: boolean;
 	/** render mode 3: an OCR layer over a scan */
 	invisible?: boolean;
+	/** PDF font descriptor flags (1 fixed pitch, 2 serif, 64 italic, 1<<18 force bold) */
+	flags?: number;
+	/** fill colour, 0-255 RGB */
+	color?: [number, number, number];
 }
 
 /** Document metadata (Info dictionary), like pdf.js `getMetadata().info` and lector's `onDocumentLoad`. */

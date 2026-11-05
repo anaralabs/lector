@@ -178,6 +178,8 @@ export class Editor {
 					const font = P.FPDFTextObj_GetFont(obj);
 					entry.font = readBytes((b, l) => P.FPDFFont_GetBaseFontName(font, b, l), false);
 					entry.embedded = P.FPDFFont_GetIsEmbedded(font) === 1;
+					entry.flags = P.FPDFFont_GetFlags(font);
+					if (P.FPDFPageObj_GetFillColor(obj, mem, mem + 4, mem + 8, mem + 12)) entry.color = [...new Uint32Array(heap().buffer, mem, 3)] as [number, number, number];
 					entry.invisible = P.FPDFTextObj_GetTextRenderMode(obj) === 3;
 				}
 				out.push(entry);
