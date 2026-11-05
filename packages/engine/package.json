@@ -17,6 +17,10 @@
 			"types": "./dist/support.d.ts",
 			"import": "./dist/support.js"
 		},
+		"./node": {
+			"types": "./dist/node.d.ts",
+			"import": "./dist/node.js"
+		},
 		"./react": {
 			"types": "./dist/react.d.ts",
 			"import": "./dist/react.js"
@@ -52,6 +56,7 @@
 	},
 	"devDependencies": {
 		"@embedpdf/pdfium": "2.15.1",
+		"@types/node": "22.10.2",
 		"@types/react": "19",
 		"binaryen": "132.0.0",
 		"mupdf": "1.27.0",

@@ -48,6 +48,15 @@ export default defineConfig([
 		dts: { entry: { support: "src/support.ts" } },
 	},
 	{
+		// Server-side text extraction: Node 20+, reads dist/pdfium.wasm from disk.
+		...shared,
+		entry: { node: "src/node.ts" },
+		platform: "node",
+		target: "node20",
+		splitting: false,
+		dts: { entry: { node: "src/node.ts" } },
+	},
+	{
 		// Each worker is one self-contained file (no shared chunks), so hosts can
 		// self-host the documented files: raster-worker.js, core-worker.js, pdfium.wasm.
 		...shared,
