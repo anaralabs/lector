@@ -274,6 +274,26 @@ const { bitmap, page, rect, scale } = await renderer.render(url, {
 
 `<LectorView>` (from `/react`, a client component) takes `source`, `options` (live `CoreOptions`), `onEvent`, `onViewer`, `className`, `style` and every creation option (`wasmUrl`, `workers`, `offscreen`, `onLink`, `createWorker`, `workerUrls`, `password`, `textLayer`, `interceptFind`, `rangeLoading`, `autoFetch`, `tileCache`). Its ref is the `Viewer`. Changing any of those except the callbacks recreates the viewer.
 
+## Server-side text (Node)
+
+`@anaralabs/lector-engine/node` runs the same trimmed PDFium build and the same text model (`PageText`) as the viewer, without workers, canvas or GPU. A character range computed on the server selects exactly the same text in the viewer, so a citation can be stored as `{ page, start, end }` instead of text the viewer has to search for.
+
+```ts
+import { loadPdfium } from "@anaralabs/lector-engine/node";
+
+const pdfium = await loadPdfium(); // reads dist/pdfium.wasm; pass { wasm } (bytes, module or path) when bundling
+const doc = pdfium.open(new Uint8Array(await readFile("paper.pdf")));
+const page = doc.pageText(0);
+page.text; // === (await viewer.pageTextMap(0)).text
+page.rects(start, end); // === the rects the viewer draws for that range
+doc.close();
+```
+
+- `page.text` and `page.chars` are what `viewer.pageTextMap(page)` returns. Offsets into `page.text` map to PDFium chars through `chars`, as the viewer does.
+- `page.model` is the viewer's `PageText` (lines, `rects`, `wordAt`, `layout()`).
+- One instance runs one call at a time and holds every open document in its heap: `close()` documents you are done with. Open one instance per concurrent job.
+- No OCR: a scanned page without a text layer has empty text here and in the viewer.
+
 ## Behaviour notes and trade-offs
 
 ### Dark mode and scans
