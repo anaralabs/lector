@@ -342,17 +342,28 @@ function absorbText(
 	captionLines: Set<number>,
 ): Box {
 	const width = box[2] - box[0];
-	const near = grow(box, 16, 18);
+	const isLabel = (line: FigureLine) =>
+		line.box[2] - line.box[0] <= Math.max(60, width * 0.6) && !prose(line.text);
 	let out = box;
 	lines.forEach((line, i) => {
-		if (captionLines.has(i)) return;
-		const within = inside(line.box, grow(box, 2));
-		const label =
-			line.box[2] - line.box[0] <= Math.max(60, width * 0.6) &&
-			!prose(line.text);
-		if (within >= 0.9 || (label && inside(line.box, near) >= 0.6))
+		if (!captionLines.has(i) && inside(line.box, grow(box, 2)) >= 0.9)
 			out = union(out, line.box);
 	});
+	// Two rings of labels: tick labels, then the axis titles beyond them.
+	for (let ring = 0; ring < 2; ring++) {
+		const near = grow(out, 16, 18);
+		let next = out;
+		lines.forEach((line, i) => {
+			if (
+				!captionLines.has(i) &&
+				isLabel(line) &&
+				inside(line.box, near) >= 0.6
+			)
+				next = union(next, line.box);
+		});
+		if (next === out) break;
+		out = next;
+	}
 	return out;
 }
 
