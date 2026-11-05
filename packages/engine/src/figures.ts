@@ -192,8 +192,7 @@ function joinRules(regions: Region[]): Region[] {
 			prev &&
 			between &&
 			r.box[1] - prev.box[3] < 260 &&
-			!others.some((o) => hits(o.box, between)) &&
-			!out.some((o) => o !== prev && hits(o.box, between))
+			!others.some((o) => hits(o.box, between))
 		) {
 			prev.box = union(prev.box, r.box);
 			prev.paths += r.paths;
@@ -329,30 +328,31 @@ function gapTo(
 	return null;
 }
 
-/** Text that belongs to a graphic: tick labels, legends, panel letters, box labels. */
+/** a sentence of body text rather than a label */
+const prose = (text: string) => text.split(/\s+/).length >= 5;
+
+/**
+ * Text that belongs to a graphic: tick labels, legends, panel letters, box labels.
+ * Lines inside the graphic always count; short non-prose lines just outside it
+ * count too, measured against the graphic itself so absorbing cannot snowball.
+ */
 function absorbText(
 	box: Box,
 	lines: FigureLine[],
 	captionLines: Set<number>,
 ): Box {
+	const width = box[2] - box[0];
+	const near = grow(box, 16, 18);
 	let out = box;
 	lines.forEach((line, i) => {
-		if (!captionLines.has(i) && inside(line.box, grow(box, 2)) >= 0.6)
+		if (captionLines.has(i)) return;
+		const within = inside(line.box, grow(box, 2));
+		const label =
+			line.box[2] - line.box[0] <= Math.max(60, width * 0.6) &&
+			!prose(line.text);
+		if (within >= 0.9 || (label && inside(line.box, near) >= 0.6))
 			out = union(out, line.box);
 	});
-	for (let pass = 0; pass < 3; pass++) {
-		let grew = false;
-		const width = out[2] - out[0];
-		lines.forEach((line, i) => {
-			if (captionLines.has(i) || inside(line.box, out) >= 0.99) return;
-			const short = line.box[2] - line.box[0] <= Math.max(60, width * 0.6);
-			const reach = short ? grow(out, 16, 18) : grow(out, 4, 3);
-			if (inside(line.box, reach) < 0.6) return;
-			out = union(out, line.box);
-			grew = true;
-		});
-		if (!grew) break;
-	}
 	return out;
 }
 
@@ -361,11 +361,23 @@ export function detectFigures(input: FigureInput): PageFigure[] {
 	const pageArea = w * h;
 	if (pageArea <= 0) return [];
 	const items: { box: Box; image: boolean; rule: boolean }[] = [];
+	// A box or image under paragraphs (an abstract panel, a page background, an OCR scan) is layout.
+	const underText = (b: Box) => {
+		const over = input.lines.filter(
+			(l) => inside(l.box, b) > 0.8 && prose(l.text),
+		);
+		const wide = over.filter(
+			(l) => l.box[2] - l.box[0] >= 0.6 * (b[2] - b[0]),
+		).length;
+		const covered = over.reduce((sum, l) => sum + area(l.box), 0);
+		return wide >= 3 || covered >= 0.2 * area(b);
+	};
 	for (const box of input.images)
 		if (
 			area(box) < MAX_AREA_FRACTION * pageArea &&
 			box[2] - box[0] >= 4 &&
-			box[3] - box[1] >= 4
+			box[3] - box[1] >= 4 &&
+			!underText(box)
 		)
 			items.push({ box, image: true, rule: false });
 	for (const box of input.paths) {
@@ -508,16 +520,7 @@ export function detectFigures(input: FigureInput): PageFigure[] {
 		const image = region.imageArea >= 0.5 * area(b);
 		if (image && area(b) >= SCAN_AREA_FRACTION * pageArea) continue;
 		if (!image && region.paths - region.rules < MIN_UNCAPTIONED_PATHS) continue;
-		// A box or image under paragraphs (an abstract panel, a page background, an OCR scan) is layout.
-		if (
-			input.lines.filter(
-				(l) =>
-					inside(l.box, b) > 0.8 &&
-					l.box[2] - l.box[0] >= 0.6 * bw &&
-					l.text.length >= 25,
-			).length >= 3
-		)
-			continue;
+		if (underText(b)) continue;
 		figures.push({ box: b, kind: "vector", image, region });
 	}
 
