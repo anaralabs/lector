@@ -72,9 +72,11 @@ const REMOTE_PAGE_MS = 400;
  * Raster workers for this device: half the cores (2-4) on desktops, 2 where
  * memory is short (each worker holds its own PDFium heap: more workers did not
  * beat 4 on heavy scans and cost ~40% more memory), 2 on phones and tablets
- * (1 when the browser reports 2GB or less).
+ * (1 when the browser reports 2GB or less). Without a GPU the CPU also draws
+ * every frame, so 1 below 8 cores and 2 from 8.
  */
-export function rasterWorkerCount({ cores, memoryGB, touch }: { cores?: number; memoryGB?: number; touch: boolean }) {
+export function rasterWorkerCount({ cores, memoryGB, touch, software = false }: { cores?: number; memoryGB?: number; touch: boolean; software?: boolean }) {
+	if (software) return (cores || 4) >= 8 ? 2 : 1;
 	if (touch) return memoryGB !== undefined && memoryGB <= 2 ? 1 : 2;
 	const n = Math.min(4, Math.max(2, Math.floor((cores || 4) / 2)));
 	return memoryGB !== undefined && memoryGB <= 4 ? 2 : n;

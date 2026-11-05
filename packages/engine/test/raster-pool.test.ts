@@ -46,6 +46,14 @@ test("worker count follows cores and memory, capped on touch devices", () => {
 	assert.equal(rasterWorkerCount({ cores: 8, memoryGB: 2, touch: true }), 1);
 });
 
+test("without a GPU the workers leave cores for drawing", () => {
+	assert.equal(rasterWorkerCount({ cores: 2, touch: false, software: true }), 1);
+	assert.equal(rasterWorkerCount({ cores: 4, touch: false, software: true }), 1);
+	assert.equal(rasterWorkerCount({ cores: 8, touch: false, software: true }), 2);
+	assert.equal(rasterWorkerCount({ cores: 32, memoryGB: 16, touch: false, software: true }), 2);
+	assert.equal(rasterWorkerCount({ touch: false, software: true }), 1);
+});
+
 test("unknown pages spread across idle workers", () => {
 	const { pool, ports, tile } = setup(3);
 	for (let i = 0; i < 3; i++) tile(`t${i}`, 0, 10 + i);

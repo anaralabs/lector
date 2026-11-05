@@ -1,5 +1,6 @@
 // Software-rendering bench: frame times of each compositor on a GPU-less box, per gesture.
 // Usage: node bench/softgl.mjs [dpr] [files,comma] [modes,comma]; DARK=1 dark mode, UNCAPPED=1 no vsync cap, HZ=240 faster input (same gesture speed).
+// HEADED=1 presents to a display (run under xvfb-run): headless skips the browser's own compositing, which is most of a software frame.
 import { chromium } from "playwright-core";
 
 const base = process.env.URL ?? "http://127.0.0.1:5199/";
@@ -19,7 +20,7 @@ const pct = (xs, p) => (xs.length ? xs[Math.min(xs.length - 1, Math.floor(xs.len
 
 for (const mode of modes) {
 	const m = MODE[mode];
-	const browser = await chromium.launch({ executablePath: exe, headless: true, args: [...m.args, ...uncapped] });
+	const browser = await chromium.launch({ executablePath: exe, headless: process.env.HEADED !== "1", args: [...m.args, ...uncapped] });
 	for (const file of files) {
 		const page = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: dpr });
 		const errors = [];
@@ -39,7 +40,7 @@ for (const mode of modes) {
 			return home ? within(home.evaluate(`(${expr})`).catch(() => undefined)) : undefined;
 		};
 		const drive = async (frames, step) => {
-			await core("(__core.debugFrames = [], 1)");
+			await core("(__core.debugFrames = [], __core.debugWork = [], 1)");
 			const r = await page.evaluate(
 				async ({ frames, step, hz }) => {
 					const el = document.getElementById("viewer");
@@ -60,11 +61,12 @@ for (const mode of modes) {
 				{ frames, step, hz },
 			);
 			const ends = (await core("__core.debugFrames.splice(0)")) ?? [];
+			const work = (await core("__core.debugWork.splice(0)")) ?? [];
 			// Only frames that moved the camera, back to back: a gesture past min/max zoom changes nothing.
 			const gaps = [];
 			for (let i = 1; i < ends.length; i++) if (ends[i] > 0 && ends[i - 1] > 0) gaps.push(ends[i] - ends[i - 1]);
 			const ft = gaps.filter((d) => d < 250).sort((a, b) => a - b);
-			await core("(__core.debugFrames = null, 1)");
+			await core("(__core.debugFrames = null, __core.debugWork = null, 1)");
 			await page.waitForTimeout(700);
 			const cpu = r.stats.map((s) => s.avgCpuMs).filter((x) => x > 0);
 			const tiles = r.stats.map((s) => s.avgTileMs).filter((x) => x > 0);
@@ -78,16 +80,22 @@ for (const mode of modes) {
 				tileMs: +(tiles.length ? tiles.reduce((a, b) => a + b, 0) / tiles.length : 0).toFixed(1),
 				gpuMB: +Math.max(0, ...r.stats.map((s) => s.textureMB)).toFixed(0),
 				workerMB: +Math.max(0, ...r.stats.map((s) => s.workerMB)).toFixed(0),
+				// p95 of the compositor thread's time in frame() and right after it (commit, queued tile messages)
+				frameP95: +pct(work.map((w) => w[0]).sort((a, b) => a - b), 0.95).toFixed(1),
+				afterP95: +pct(work.map((w) => w[1]).sort((a, b) => a - b), 0.95).toFixed(1),
+				rasterScale: Math.min(9, ...r.stats.map((s) => s.rasterScale ?? 9)),
+				adaptive: r.stats.some((s) => s.adaptive),
 			};
 		};
 		const scroll = await drive(360, "wheel(0, 15 * k, false)");
+		const fling = await drive(360, "wheel(0, Math.max(0, 90 - (i % 90)) * k, false)");
 		const zoom = await drive(240, "wheel(0, -3 * k, true, 400, 300)");
 		await page.waitForTimeout(800);
 		const pan = await drive(360, "wheel(Math.sin(i/40)*10*k, 12 * k, false)");
 		const zoomOut = await drive(240, "wheel(0, 4 * k, true)");
 		const comp = await page.evaluate(() => window.__viewer.compositor);
 		await page.screenshot({ path: `/tmp/softgl-${mode}-${file}-${dpr}${extra ? "-x" : ""}.png` });
-		console.log(JSON.stringify({ mode, comp, file, dpr, dark: process.env.DARK === "1", uncapped: !!uncapped.length, painted: Math.round(painted), scroll, zoom, pan, zoomOut, errors: errors.slice(0, 2) }));
+		console.log(JSON.stringify({ mode, comp, file, dpr, dark: process.env.DARK === "1", uncapped: !!uncapped.length, painted: Math.round(painted), scroll, fling, zoom, pan, zoomOut, errors: errors.slice(0, 2) }));
 		await page.close();
 	}
 	await browser.close();
