@@ -4,6 +4,7 @@
 
 import { hideNoteIcons, noteIconIndices, type PdfAnnotation, readAnnotations } from "./annotations";
 import { BlockCache } from "./blocks";
+import { detectFigures, type PageFigure, readFigureLines, readFigureObjects } from "./figures";
 import { applyFormOp, type FormContext, readWidgets, saveDocument } from "./form-fill";
 import { init, type Pdfium } from "./pdfium/pdfium.js";
 import { bakePixels } from "./bake";
@@ -345,6 +346,21 @@ function listAnnotations(msg: Extract<ToRaster, { t: "annots" }>) {
 		console.error(err);
 	}
 	send({ t: "annots", id: msg.id, page: msg.page, items });
+}
+
+function listFigures(msg: Extract<ToRaster, { t: "figures" }>) {
+	let items: PageFigure[] = [];
+	try {
+		items = withPage(msg.page, (page) => {
+			const ctx = { P, heap, toPage: transformFor(msg.page) };
+			const { w, h } = sizeOf(msg.page);
+			return detectFigures({ page: msg.page, w, h, ...readFigureObjects(ctx, page), lines: readFigureLines(ctx, page) });
+		});
+	} catch (err) {
+		// Detection is a convenience: a page it cannot read simply has no figures.
+		console.error(err);
+	}
+	send({ t: "figures", id: msg.id, page: msg.page, items });
 }
 
 function extractText(msg: Extract<ToRaster, { t: "text" }>) {
@@ -874,6 +890,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 				else if (m.t === "text") extractText(m);
 				else if (m.t === "outline") send({ t: "outline", id: m.id, items: readOutline(0, 0) });
 				else if (m.t === "annots") listAnnotations(m);
+				else if (m.t === "figures") listFigures(m);
 				else if (m.t === "sizes") readSizes(m);
 				else if (m.t === "unlock" && P && !doc && fileAccess) loadDocument(m.password);
 				else if (m.t === "form") formEdit(m);

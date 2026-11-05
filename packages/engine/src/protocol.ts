@@ -2,6 +2,7 @@
 // Coordinates sent to workers are in PDF points with a top-left origin.
 
 import type { PdfAnnotation } from "./annotations";
+import type { PageFigure } from "./figures";
 import type { FormOp, FormWidget } from "./forms";
 
 export interface PageSize {
@@ -75,6 +76,8 @@ export type ToRaster =
 	| { t: "outline"; id: number; page: -1 }
 	/** the page's markup annotations (highlights, notes, ink, ...) */
 	| { t: "annots"; id: number; page: number }
+	/** figures, charts and tables on the page, with their captions */
+	| { t: "figures"; id: number; page: number }
 	/** read these pages' sizes, stopping early after a few ms (the answer lists the ones read) */
 	| { t: "sizes"; id: number; page: number; pages: number[] }
 	/** stop the running tile job `id` (it answers `cancelled`; a job that already finished answers as usual) */
@@ -174,6 +177,7 @@ export type FromRaster =
 	  }
 	| { t: "outline"; id: number; items: OutlineItem[] }
 	| { t: "annots"; id: number; page: number; items: PdfAnnotation[] }
+	| { t: "figures"; id: number; page: number; items: PageFigure[] }
 	| { t: "cancelled"; id: number; heap: number }
 	/** fields whose value a form edit changed; `reset`: a button that may have changed any field */
 	| { t: "form"; seq: number; changed: { name: string; value: string }[]; reset: boolean }
