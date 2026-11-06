@@ -105,6 +105,18 @@ test("a restore within the wait keeps WebGL", () => {
 	assert.deepEqual(types(), ["error:gpu"]);
 });
 
+test("a restore that cannot rebuild its shaders moves to 2D at once and says why", () => {
+	const { timers, events, recovery, types } = setup();
+	const gl = fakeCompositor("webgl2");
+	recovery.watch(gl, () => {});
+	gl.onLost();
+	timers.advance(800);
+	(gl.onLost as (cause?: unknown) => void)(new Error("lector-engine: shader failed to compile"));
+	timers.advance(0);
+	assert.deepEqual(types(), ["error:gpu", "error:gpu", "need-canvas"]);
+	assert.match(events[1]!.message!, /could not be rebuilt \(lector-engine: shader failed to compile\); moving to Canvas 2D/);
+});
+
 test("a second loss moves to 2D at once, with one request", () => {
 	const { timers, recovery, types } = setup();
 	const gl = fakeCompositor("webgl2");

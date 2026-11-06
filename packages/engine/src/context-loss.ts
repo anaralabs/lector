@@ -58,7 +58,7 @@ export class ContextRecovery {
 
 	/** Listens to `gl`'s loss and restore; a context that is already lost asks for a fresh canvas right away. */
 	watch(gl: Compositor, onRestored: () => void) {
-		gl.onLost = () => this.lost(gl);
+		gl.onLost = (cause) => this.lost(gl, cause);
 		gl.onRestored = () => {
 			this.cancel();
 			onRestored();
@@ -66,12 +66,15 @@ export class ContextRecovery {
 		if (gl.lost) this.request(0);
 	}
 
-	private lost(gl: Compositor) {
+	private lost(gl: Compositor, cause?: unknown) {
 		const what = gl.kind === "webgl2" ? "WebGL" : "Canvas 2D";
-		this.emit({ type: "error", message: `lector-engine: the ${what} context was lost; waiting for the browser to restore it`, code: "gpu", phase: "render" });
-		// A second loss, or one the browser does not undo quickly, means this GPU is not dependable.
+		const message = cause
+			? `lector-engine: the restored ${what} context could not be rebuilt (${String((cause as Error)?.message ?? cause)}); moving to Canvas 2D`
+			: `lector-engine: the ${what} context was lost; waiting for the browser to restore it`;
+		this.emit({ type: "error", message, code: "gpu", phase: "render" });
+		// A second loss, a failed restore, or one the browser does not undo quickly means this GPU is not dependable.
 		this.losses++;
-		this.request(this.losses > 1 ? 0 : RESTORE_WAIT_MS);
+		this.request(cause || this.losses > 1 ? 0 : RESTORE_WAIT_MS);
 	}
 
 	private request(ms: number) {
