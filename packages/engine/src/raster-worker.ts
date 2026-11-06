@@ -6,10 +6,13 @@ import { hideNoteIcons, noteIconIndices, type PdfAnnotation, readAnnotations } f
 import { BlockCache } from "./blocks";
 import { detectFigures, type PageFigure, readFigureLines, readFigureObjects } from "./figures";
 import { applyFormOp, type FormContext, readWidgets, saveDocument } from "./form-fill";
+import type { FormOp } from "./forms";
 import { init, type Pdfium } from "./pdfium/pdfium.js";
 import { bakePixels } from "./bake";
+import { boxFor, pageTransform, readCharBoxes, type Xf } from "./char-boxes";
 import type { DocSource, DocumentInfo, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
 import { blockVerdict, openErrorCode, RANGE_BLOCK, RANGE_GRANULE, RANGE_MAX_RUN, retryableBlockStatus } from "./range";
+import { trapKind } from "./wasm-trap";
 
 const FPDF_ANNOT = 0x01;
 const FPDF_REVERSE_BYTE_ORDER = 0x10; // RGBA instead of BGRA
@@ -19,6 +22,8 @@ const FPDF_PAGEOBJ_FORM = 5;
 const MAX_IMAGES = 256;
 
 let P: Pdfium;
+/** the PDFium step running now, named in a trap report */
+let op = "";
 // Re-read on every use: the WASM heap buffer is replaced when memory grows.
 const heap = () => (P.pdfium as unknown as { HEAPU8: Uint8Array }).HEAPU8;
 let doc = 0;
@@ -62,8 +67,11 @@ function loadPage(index: number): number {
 		pages.set(index, hit);
 		return hit;
 	}
+	const prev = op;
+	op = "FPDF_LoadPage";
 	const page = P.FPDF_LoadPage(doc, index);
 	if (form) P.FORM_OnAfterLoadPage(page, form);
+	op = prev;
 	pages.set(index, page);
 	trimPages();
 	return page;
@@ -84,11 +92,15 @@ function withPage<T>(index: number, fn: (page: number) => T): T {
 	const page = loadPage(index);
 	const held = pinned.has(index);
 	pinned.add(index);
+	let trapped = false;
 	try {
 		return fn(page);
+	} catch (err) {
+		trapped = !!trapKind(err);
+		throw err;
 	} finally {
 		if (!held) pinned.delete(index);
-		trimPages();
+		if (!trapped) trimPages();
 	}
 }
 
@@ -144,9 +156,11 @@ async function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 	let notes = noteIcons.get(msg.page);
 	if (!notes) noteIcons.set(msg.page, (notes = noteIconIndices(P, page)));
 	const showNotes = notes.length ? hideNoteIcons(P, page, notes) : null;
+	let trapped = false;
 	try {
 		P.FPDFBitmap_FillRect(bmp, 0, 0, w, h, 0xffffffff);
 		sliceEnd = performance.now() + SLICE_MS;
+		op = "FPDF_RenderPageBitmap";
 		let status = P.FPDF_RenderPageBitmap_Start(bmp, page, -msg.x, -msg.y, pw, ph, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER, pauseStruct());
 		while (status === FPDF_RENDER_TOBECONTINUED) {
 			await yieldToEvents();
@@ -161,6 +175,7 @@ async function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 		}
 		// Form fields: drawn by the form fill environment, which also generates
 		// appearances for widgets that have none (NeedAppearances, filled values).
+		op = "FPDF_FFLDraw";
 		if (form) P.FPDF_FFLDraw(form, bmp, page, -msg.x, -msg.y, pw, ph, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
 		const ptr = P.FPDFBitmap_GetBuffer(bmp);
 		const stride = P.FPDFBitmap_GetStride(bmp);
@@ -178,6 +193,7 @@ async function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 		if (msg.bake) {
 			const boxes: number[] = [];
 			if (msg.bake.tone) {
+				op = "readImages";
 				const images = pageImages(page, msg.page);
 				for (let i = 0; i < images.length; i += 4) boxes.push(images[i]! * msg.scale - msg.x, images[i + 1]! * msg.scale - msg.y, images[i + 2]! * msg.scale - msg.x, images[i + 3]! * msg.scale - msg.y);
 			}
@@ -192,47 +208,31 @@ async function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 			return;
 		}
 		send({ t: "tile", id: msg.id, buf, w, h, ms: performance.now() - t0, heap: heapBytes() }, [buf]);
+	} catch (err) {
+		// the trapped instance is discarded whole: calling into it again could trap over the original error
+		trapped = !!trapKind(err);
+		throw err;
 	} finally {
-		showNotes?.();
 		rendering = 0;
-		P.FPDFBitmap_Destroy(bmp);
 		if (!held) pinned.delete(msg.page);
-		trimPages();
+		if (!trapped) {
+			showNotes?.();
+			P.FPDFBitmap_Destroy(bmp);
+			trimPages();
+		}
 	}
 }
 
-type Xf = (x: number, y: number) => [number, number];
 const transforms = new Map<number, Xf>();
 const inverses = new Map<number, Xf>();
 
-/**
- * PDF user space -> page points with a top-left origin, as displayed: applies
- * /Rotate and the crop box offset (PDFium's own page-to-device mapping).
- */
 function transformFor(index: number): Xf {
 	const hit = transforms.get(index);
 	if (hit) return hit;
-	const page = loadPage(index);
 	const { w, h } = sizeOf(index);
-	const K = 64; // device units per point: 1/64pt precision from integer output
-	const out = P.pdfium.wasmExports.malloc(8);
-	const map = (x: number, y: number): [number, number] => {
-		P.FPDF_PageToDevice(page, 0, 0, Math.round(w * K), Math.round(h * K), 0, x, y, out, out + 4);
-		const v = new Int32Array(heap().buffer, out, 2);
-		return [v[0]! / K, v[1]! / K];
-	};
-	const o = map(0, 0);
-	const ax = map(1000, 0);
-	const ay = map(0, 1000);
-	P.pdfium.wasmExports.free(out);
-	const a = (ax[0] - o[0]) / 1000;
-	const b = (ax[1] - o[1]) / 1000;
-	const c = (ay[0] - o[0]) / 1000;
-	const d = (ay[1] - o[1]) / 1000;
-	const xf: Xf = (x, y) => [o[0] + a * x + c * y, o[1] + b * x + d * y];
+	const { xf, inverse } = pageTransform(P, heap, loadPage(index), w, h);
 	transforms.set(index, xf);
-	const det = a * d - b * c || 1;
-	inverses.set(index, (x, y) => [(d * (x - o[0]) - c * (y - o[1])) / det, (a * (y - o[1]) - b * (x - o[0])) / det]);
+	inverses.set(index, inverse);
 	return xf;
 }
 
@@ -247,13 +247,6 @@ function formContext(): FormContext | null {
 	if (!form) return null;
 	formCtx ??= { P, doc, form, heap, withPage, toPage: (i, x, y) => transformFor(i)(x, y), toUser: (i, x, y) => inverseFor(i)(x, y) };
 	return formCtx;
-}
-
-/** Axis-aligned box (l, t, r, b) in page points from a user-space rect. */
-function boxFor(xf: Xf, x0: number, y0: number, x1: number, y1: number): [number, number, number, number] {
-	const [ax, ay] = xf(x0, y0);
-	const [bx, by] = xf(x1, y1);
-	return [Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)];
 }
 
 function readDest(dest: number): Link["dest"] {
@@ -340,8 +333,12 @@ function readOutline(parent: number, depth: number): OutlineItem[] {
 function listAnnotations(msg: Extract<ToRaster, { t: "annots" }>) {
 	let items: PdfAnnotation[] = [];
 	try {
-		items = withPage(msg.page, (page) => readAnnotations({ P, heap, toPage: transformFor(msg.page) }, msg.page, page));
+		items = withPage(msg.page, (page) => {
+			op = "readAnnotations";
+			return readAnnotations({ P, heap, toPage: transformFor(msg.page) }, msg.page, page);
+		});
 	} catch (err) {
+		if (trapKind(err)) throw err;
 		// A broken annotation must not surface as a viewer error: the page still renders.
 		console.error(err);
 	}
@@ -369,26 +366,9 @@ function extractText(msg: Extract<ToRaster, { t: "text" }>) {
 
 function extractPageText(msg: Extract<ToRaster, { t: "text" }>, page: number) {
 	const t0 = performance.now();
+	op = "FPDFText_LoadPage";
 	const xf = transformFor(msg.page);
-	const tp = P.FPDFText_LoadPage(page);
-	const n = Math.max(0, P.FPDFText_CountChars(tp));
-	const codes = new Uint32Array(n);
-	const boxes = new Float32Array(n * 4);
-	const rect = P.pdfium.wasmExports.malloc(16); // FS_RECTF {left, top, right, bottom}
-	const f32 = () => new Float32Array(heap().buffer, rect, 4);
-	for (let i = 0; i < n; i++) {
-		codes[i] = P.FPDFText_GetUnicode(tp, i);
-		if (P.FPDFText_IsGenerated(tp, i)) continue;
-		if (!P.FPDFText_GetLooseCharBox(tp, i, rect)) continue;
-		const r = f32();
-		const [l, t, rr, b] = boxFor(xf, r[0]!, r[1]!, r[2]!, r[3]!);
-		boxes[i * 4] = l;
-		boxes[i * 4 + 1] = t;
-		boxes[i * 4 + 2] = rr;
-		boxes[i * 4 + 3] = b;
-	}
-	P.pdfium.wasmExports.free(rect);
-	P.FPDFText_ClosePage(tp);
+	const { codes, boxes } = readCharBoxes(P, heap, page, xf);
 	const links = readLinks(page, xf);
 	const { images, scans } = readImages(page, msg.page, xf);
 	const ctx = formContext();
@@ -651,6 +631,7 @@ function loadFailureDetail(err: number): LoadFailureDetail {
 function formEdit(m: Extract<ToRaster, { t: "form" }>) {
 	const ctx = formContext();
 	const res = ctx && m.op.page >= 0 && m.op.page < pageCount ? applyFormOp(ctx, m.op, m.report) : { changed: [], reset: false };
+	formLog.push(m.op);
 	if (m.report) send({ t: "form", seq: m.seq, ...res });
 }
 
@@ -675,6 +656,10 @@ let blockSize = BLOB_BLOCK;
 let cache: BlockCache | null = null;
 let fileAccess = 0;
 let pendingPassword: string | undefined;
+/** the password the document opened with, for reopening it after a trap */
+let openedPassword: string | undefined;
+/** form edits applied so far, replayed into a fresh PDFium */
+const formLog: FormOp[] = [];
 /** blocks other workers shared before this one had a cache */
 const early: [number, Uint8Array][] = [];
 let reader: FileReaderSync | null = null;
@@ -727,8 +712,7 @@ function getBlock(_param: number, position: number, buf: number, size: number): 
 	}
 }
 
-function loadDocument(password: string | undefined) {
-	const t0 = performance.now();
+function ensureFileAccess() {
 	if (!fileAccess) {
 		// FPDF_FILEACCESS { unsigned long m_FileLen; GetBlock* m_GetBlock; void* m_Param; }
 		const fn = (P.pdfium as unknown as { addFunction: (f: (...a: number[]) => number, sig: string) => number }).addFunction(getBlock, "iiiii");
@@ -738,6 +722,19 @@ function loadDocument(password: string | undefined) {
 		view[1] = fn;
 		view[2] = 0;
 	}
+}
+
+function initForm() {
+	if (P.FPDF_GetFormType(doc) === FORMTYPE_NONE) return;
+	const info = P.PDFiumExt_OpenFormFillInfo();
+	form = P.PDFiumExt_InitFormFillEnvironment(doc, info);
+	// No blue field tint: pages look as they print.
+	if (form) P.FPDF_SetFormFieldHighlightAlpha(form, 0);
+}
+
+function loadDocument(password: string | undefined) {
+	const t0 = performance.now();
+	ensureFileAccess();
 	readFailure = null;
 	doc = P.FPDF_LoadCustomDocument(fileAccess, password ?? "");
 	if (!doc) {
@@ -754,12 +751,8 @@ function loadDocument(password: string | undefined) {
 		send({ t: "error", message, code, phase: "document-load", detail: loadFailureDetail(err) });
 		return;
 	}
-	if (P.FPDF_GetFormType(doc) !== FORMTYPE_NONE) {
-		const info = P.PDFiumExt_OpenFormFillInfo();
-		form = P.PDFiumExt_InitFormFillEnvironment(doc, info);
-		// No blue field tint: pages look as they print.
-		if (form) P.FPDF_SetFormFieldHighlightAlpha(form, 0);
-	}
+	openedPassword = password;
+	initForm();
 	pageCount = P.FPDF_GetPageCount(doc);
 	// Sizes come from the page tree without parsing page content.
 	const sizes: SizeEntry[] = [];
@@ -770,6 +763,36 @@ function loadDocument(password: string | undefined) {
 	send({ t: "opened", pageCount, sizes, info: readInfo(password), wasmMs, wasmShared, openMs: performance.now() - t0 });
 	// The main thread starts the other workers now, so they parse from the blocks this one shared.
 	self.postMessage({ t: "opened" });
+}
+
+/** Drops every handle into the trapped instance, starts a fresh PDFium and reopens the document with its form edits. */
+async function recover(): Promise<boolean> {
+	doc = 0;
+	form = 0;
+	formCtx = null;
+	pause = 0;
+	fileAccess = 0;
+	rendering = 0;
+	cancelled = false;
+	pages.clear();
+	pinned.clear();
+	transforms.clear();
+	inverses.clear();
+	noteIcons.clear();
+	try {
+		P = await loadPdfium(wasmUrl, wasmModule);
+		P.PDFiumExt_Init();
+		ensureFileAccess();
+		doc = P.FPDF_LoadCustomDocument(fileAccess, openedPassword ?? "");
+		if (!doc) return false;
+		initForm();
+		const ctx = formContext();
+		if (ctx) for (const edit of formLog) applyFormOp(ctx, edit, false);
+		return true;
+	} catch (err) {
+		console.error(err);
+		return false;
+	}
 }
 
 function hintedPages(): number[] {
@@ -858,6 +881,9 @@ async function instantiatePdfium(wasmUrl: string, imports: WebAssembly.Imports, 
 	}
 }
 
+let wasmUrl = "";
+/** the compiled module, so a fresh instance after a trap needs no download */
+let wasmModule: WebAssembly.Module | undefined;
 let wasmMs: number | undefined;
 let wasmShared = false;
 let sharedModuleUsed = false;
@@ -868,6 +894,7 @@ function loadPdfium(wasmUrl: string, compiled?: WebAssembly.Module): Promise<Pdf
 			instantiateWasm(imports: WebAssembly.Imports, receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void) {
 				(async () => {
 					const { instance, module } = await instantiatePdfium(wasmUrl, imports, compiled);
+					wasmModule = module;
 					receive(instance, module);
 				})().catch(reject);
 				return {};
@@ -885,6 +912,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 		if (running) return;
 		running = true;
 		for (let m = queue.shift(); m; m = queue.shift()) {
+			op = m.t;
 			try {
 				if (m.t === "tile") await renderTile(m);
 				else if (m.t === "text") extractText(m);
@@ -896,15 +924,25 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 				else if (m.t === "form") formEdit(m);
 				else if (m.t === "save") save(m.id);
 			} catch (err) {
+				const kind = trapKind(err);
+				const recovered = kind ? await recover() : true;
 				// A failed edit is not a failed job: the pool would blame whatever job this worker is running.
 				if (m.t === "form" || m.t === "save") {
 					console.error(err);
 					if (m.t === "form" && m.report) send({ t: "form", seq: m.seq, changed: [], reset: false });
 					else if (m.t === "save") send({ t: "saved", id: m.id, error: String((err as Error)?.message ?? err) });
-					continue;
+					if (recovered) continue;
 				}
 				const id = "id" in m ? m.id : undefined;
-				send({ t: "error", message: String((err as Error)?.stack ?? err), code: "unknown", phase: m.t === "tile" ? "render" : "text", id });
+				const phase = m.t === "text" ? "text" : "render";
+				if (!kind) {
+					send({ t: "error", message: String((err as Error)?.stack ?? err), code: "unknown", phase, id });
+					continue;
+				}
+				const page = "page" in m && m.page >= 0 ? m.page : undefined;
+				const where = page === undefined ? "" : ` on page ${page + 1}`;
+				const message = `lector-engine: PDFium ${kind}${where} in ${op}${recovered ? "" : " (could not restart it)"}: ${String((err as Error)?.message ?? err)}`;
+				send({ t: "error", message, code: "wasm-trap", phase, id, page, op, recovered });
 			}
 		}
 		running = false;
@@ -923,6 +961,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 		queue.push(m);
 		void run();
 	};
+	wasmUrl = msg.wasmUrl;
 	try {
 		const t0 = performance.now();
 		P = await loadPdfium(msg.wasmUrl, msg.module);
@@ -971,7 +1010,7 @@ self.onmessage = (ev: MessageEvent<ToRaster>) => {
 	if (ev.data.t !== "init") return;
 	open(ev.data).catch((err) => {
 		const message = String((err as Error)?.stack ?? err);
-		if (port) send({ t: "error", message, code: "unknown", phase: "document-load" });
+		if (port) send({ t: "error", message, code: trapKind(err) ? "wasm-trap" : "unknown", phase: "document-load" });
 		else console.error(message);
 	});
 };

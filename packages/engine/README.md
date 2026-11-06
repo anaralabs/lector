@@ -104,7 +104,7 @@ Pages are **0-based** everywhere. Page-space geometry is in PDF points with a to
 | option | default | |
 | --- | --- | --- |
 | `wasmUrl` | required | URL of `pdfium.wasm` |
-| `workers` | half the cores, 2–4 (2 with 4GB or less, 2 on touch devices, 1 on touch devices with 2GB or less) | PDFium raster workers |
+| `workers` | half the cores, 2–4 (2 with 4GB or less, 2 on touch devices, 1 on touch devices with 2GB or less; without a GPU 1, or 2 from 8 cores) | PDFium raster workers |
 | `offscreen` | when supported | composite in a worker (`OffscreenCanvas`) |
 | `createWorker`, `workerUrls` | | see [Workers and the wasm](#workers-and-the-wasm) |
 | `onEvent(e)` | | every `CoreEvent` |
@@ -133,6 +133,7 @@ Pages are **0-based** everywhere. Page-space geometry is in PDF points with a to
 | `initialTarget` | `null` | where to open, applied before the first paint (wins over `initialPage`/`initialTop`/`initialOffset`): `{ page, top? }` (points below the page top), `{ page, topFraction }` (fraction of that page's height), `{ fraction }` (like `scrollToFraction`)or `{ page, rect, align?, units? }` (like `reveal`, for a citation; `units: "fraction"` for a rect in 0–1 of the page). With `rangeLoading`, that page is fetched and drawn first |
 | `minZoom` / `maxZoom` | `0.1` / `24` | |
 | `dark`, `paper`, `ink` | `false`, near-black, near-white | dark mode: page white maps to `paper`, ink to `ink` |
+| `adaptive` | `"auto"` | Canvas 2D compositor only: `"auto"` skips look-ahead tiles while the camera moves and new sharp tiles mid-zoom, and draws and rasters at 1x while moving (full DPR ~120ms after it stops) without a GPU, or once motion frames keep missing 60Hz; `true` always moves at 1x, `false` turns it all off |
 | `reducedMotion` | from `prefers-reduced-motion` | flights jump instantly |
 | `copyOptions` | `{}` | lector's copy options: `{ lineBreaks?: "preserve" \| "space", ignoreHyphenation?: boolean }`; `false` leaves copy to the browser |
 
@@ -237,15 +238,17 @@ Multi-click selection snaps like a text editor: a double click selects the word,
 | `find` | Cmd/Ctrl+F with `interceptFind` |
 | `form-change { name, value }` | a form field's value was committed (see [Forms](#forms)) |
 | `form-widgets { page, widgets }`, `form-painted { page }` | a page's form widgets became known; a page shows its edited fields |
-| `stats` | frame and memory statistics (`workerMB`: PDFium heaps + block caches) |
+| `stats` | frame and memory statistics (`workerMB`: PDFium heaps + block caches; `compositor`; `rasterScale`: the lowest device pixels per CSS pixel drawn in the window, below the DPR while the 2D compositor moves at low resolution; `adaptive`: low-resolution motion is engaged) |
 | `error { message, code, phase }` | see below |
 
 ### Errors
 
 `error` events and `EngineError` (rejections of `createViewer` and `viewer.loaded`) carry a `code` and a `phase`, like lector's `onError({ error, phase, source })`:
 
-- `code`: `password` (encrypted: pass `password` or call `viewer.unlock(password)`, which resolves `false` for a wrong one), `parse` (not a PDF or damaged), `security` (unsupported encryption), `file`, `fetch`, `unsupported` (browser), `wasm` (pdfium.wasm failed to load), `gpu` (no WebGL2 context; with phase `render`, the context was lost: drawing resumes when the browser restores it, and if it does not within 1.5s, or the context is lost a second time, the viewer moves to the Canvas 2D compositor on a fresh canvas and emits `compositor`), `worker` (a worker script failed to load or crashed; the viewer tears down), `destroyed` (a request was still waiting when the viewer was destroyed), `unknown`.
+- `code`: `password` (encrypted: pass `password` or call `viewer.unlock(password)`, which resolves `false` for a wrong one), `parse` (not a PDF or damaged), `security` (unsupported encryption), `file`, `fetch`, `unsupported` (browser), `wasm` (pdfium.wasm failed to load), `gpu` (no WebGL2 context; with phase `render`, the context was lost: drawing resumes when the browser restores it, and if it does not within 1.5s, or the context is lost a second time, the viewer moves to the Canvas 2D compositor on a fresh canvas and emits `compositor`), `worker` (a worker script failed to load or crashed; the viewer tears down), `destroyed` (a request was still waiting when the viewer was destroyed), `wasm-trap` (PDFium crashed or ran out of memory and the engine gave up on the document, see below), `unknown`.
 - `phase`: `engine-load`, `document-load`, `render`, `text`, `request` (a viewer request such as `pageText`).
+
+When PDFium crashes on a page (a WebAssembly trap, abort or out-of-memory), the raster worker throws its PDFium instance away, starts a fresh one and reopens the document with its form edits. The page is tried once more; if it crashes again it is skipped: it stays blank under a `.lector-page-failed` placeholder (restyle it, or set `--lector-page-failed-color` / `--lector-page-failed-background`) and a `{ type: "page-failed", page, code: "wasm-trap" }` event fires once for it. The rest of the document keeps working. If a worker cannot start a fresh PDFium, or the document crashes PDFium more than 6 times, an `error` event with code `wasm-trap` (phase `render` or `text`) reports that the engine gave up.
 
 ### Rendering a region without a viewer
 
@@ -275,6 +278,26 @@ const { bitmap, page, rect, scale } = await renderer.render(url, {
 - Types: `Camera`, `CoreEvent`, `CoreOptions`, `DocumentInfo`, `EngineError`, `ErrorCode`, `ErrorPhase`, `Highlight`, `Link`, `OutlineItem`, `PageSize`, `Rect`, `SearchHit`, `SearchOptions`, `SearchResults`, `SelectionInfo`, `SelectionTextOptions`, `SelectionUnit`, `Stats`, `TextLayerLine`, `TextPoint`.
 
 `<LectorView>` (from `/react`, a client component) takes `source`, `options` (live `CoreOptions`), `onEvent`, `onViewer`, `className`, `style` and every creation option (`wasmUrl`, `workers`, `offscreen`, `onLink`, `createWorker`, `workerUrls`, `password`, `textLayer`, `interceptFind`, `rangeLoading`, `autoFetch`, `tileCache`). Its ref is the `Viewer`. Changing any of those except the callbacks recreates the viewer.
+
+## Server-side text (Node)
+
+`@anaralabs/lector-engine/node` runs the same trimmed PDFium build and the same text model (`PageText`) as the viewer, without workers, canvas or GPU. A character range computed on the server selects exactly the same text in the viewer, so a citation can be stored as `{ page, start, end }` instead of text the viewer has to search for.
+
+```ts
+import { loadPdfium } from "@anaralabs/lector-engine/node";
+
+const pdfium = await loadPdfium(); // reads dist/pdfium.wasm; pass { wasm } (bytes, module or path) when bundling
+const doc = pdfium.open(new Uint8Array(await readFile("paper.pdf")));
+const page = doc.pageText(0);
+page.text; // === (await viewer.pageTextMap(0)).text
+page.rects(start, end); // === the rects the viewer draws for that range
+doc.close();
+```
+
+- `page.text` and `page.chars` are what `viewer.pageTextMap(page)` returns. Offsets into `page.text` map to PDFium chars through `chars`, as the viewer does.
+- `page.model` is the viewer's `PageText` (lines, `rects`, `wordAt`, `layout()`).
+- One instance runs one call at a time and holds every open document in its heap: `close()` documents you are done with. Open one instance per concurrent job.
+- No OCR: a scanned page without a text layer has empty text here and in the viewer.
 
 ## Behaviour notes and trade-offs
 
@@ -344,7 +367,7 @@ Below the minimum, nothing is half-rendered:
 
 There is no WebGL1 path: a device without WebGL2 (a blocklisted or very old GPU, a VM without a driver) gets the Canvas 2D compositor, which also replaces WebGL2 on software rasterisers, where it is faster. Force one with `compositor: "webgl2" | "canvas2d"` (default `auto`); `viewer.compositor`, the `compositor` field of `stats` and a `data-compositor="webgl2" | "canvas2d"` attribute on the viewer's container (updated if the viewer switches mid-session) say which one runs. With `auto`, WebGL2 that passes the probe but will not start in the compositor worker also falls back to 2D (`compositor` event, reason `unavailable`).
 
-The 2D compositor is built for CPU rasterisers: the raster workers bake gamma and the dark-mode tone into each tile (photos keep their colours) and hand over `ImageBitmap`s, each pixel on screen is blitted once (fallback scales only fill the holes of the target scale), and while the zoom moves it draws at 1x and lets the browser stretch the canvas until the zoom settles (`motionResolution: false` keeps full resolution). Its tiles live in RAM, so it caps `textureBudgetMB` at 256. After a context-loss swap, `viewer.canvas` stays the element that receives input (transparent, above the new one), so hit-testing against it keeps working. On a 4-core machine without a GPU (`bench/softgl.mjs`) it holds 60fps for scroll, pan and pinch at DPR 1 and 2, in light and dark mode.
+The 2D compositor is built for CPU rasterisers: the raster workers bake gamma and the dark-mode tone into each tile (photos keep their colours) and hand over `ImageBitmap`s, each pixel on screen is blitted once (fallback scales only fill the holes of the target scale), and while the zoom moves it draws at 1x and lets the browser stretch the canvas until the zoom settles (`motionResolution: false` keeps full resolution). Mid-zoom it requests no new sharp tiles and while the camera moves no look-ahead ones, and where motion frames run late it scrolls at 1x as well (`adaptive`). Without a GPU the browser's own compositing runs on the CPU too, so it starts one raster worker (two from 8 cores). Its tiles live in RAM, so it caps `textureBudgetMB` at 256. After a context-loss swap, `viewer.canvas` stays the element that receives input (transparent, above the new one), so hit-testing against it keeps working. On a 4-core machine without a GPU, and on a slow dual-core (`bench/softgl.mjs` with `HEADED=1` under `xvfb-run`, CPUs pinned with `taskset`), it holds about 60fps for scroll, pan and pinch on text documents at DPR 1 to 2, in light and dark mode.
 
 The worker compositor needs WebGL2 on an `OffscreenCanvas`. Safari 16.4–16.x has `transferControlToOffscreen` but no WebGL on `OffscreenCanvas`, so the engine checks for a working context instead of testing for the API, and uses the main-thread compositor there. You can force the main-thread compositor with `offscreen: false`.
 

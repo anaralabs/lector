@@ -13,6 +13,7 @@ export type SizesResult = Extract<FromRaster, { t: "sizes" }>;
 export type FormResult = Omit<Extract<FromRaster, { t: "form" }>, "t" | "seq">;
 
 type JobMsg = Extract<ToRaster, { t: "tile" } | { t: "text" } | { t: "outline" } | { t: "annots" } | { t: "figures" }>;
+type ErrorResult = Extract<FromRaster, { t: "error" }>;
 
 interface Job {
 	key: string;
@@ -67,14 +68,20 @@ const EMA = 0.3;
 const LOOKAHEAD = 64;
 /** what loading a page costs a worker that does not have it while the file is still remote (a range round trip or more) */
 const REMOTE_PAGE_MS = 400;
+/** retries for a page whose job crashed PDFium (on a fresh instance) before the page is skipped */
+export const PAGE_TRAP_RETRIES = 1;
+/** PDFium crashes per document before the engine gives up on it */
+export const DOC_TRAP_LIMIT = 6;
 
 /**
  * Raster workers for this device: half the cores (2-4) on desktops, 2 where
  * memory is short (each worker holds its own PDFium heap: more workers did not
  * beat 4 on heavy scans and cost ~40% more memory), 2 on phones and tablets
- * (1 when the browser reports 2GB or less).
+ * (1 when the browser reports 2GB or less). Without a GPU the CPU also draws
+ * every frame, so 1 below 8 cores and 2 from 8.
  */
-export function rasterWorkerCount({ cores, memoryGB, touch }: { cores?: number; memoryGB?: number; touch: boolean }) {
+export function rasterWorkerCount({ cores, memoryGB, touch, software = false }: { cores?: number; memoryGB?: number; touch: boolean; software?: boolean }) {
+	if (software) return (cores || 4) >= 8 ? 2 : 1;
 	if (touch) return memoryGB !== undefined && memoryGB <= 2 ? 1 : 2;
 	const n = Math.min(4, Math.max(2, Math.floor((cores || 4) / 2)));
 	return memoryGB !== undefined && memoryGB <= 4 ? 2 : n;
@@ -104,6 +111,12 @@ export class RasterPool {
 	affinity = false;
 	onIdle: () => void = () => {};
 	onError: (message: string, code: ErrorCode, phase: ErrorPhase, detail?: LoadFailureDetail) => void = (m) => console.error(m);
+	/** a page PDFium cannot render: its jobs fail from now on */
+	onPageFailed: (page: number, code: ErrorCode) => void = () => {};
+	private traps = 0;
+	private pageTraps = new Map<number, number>();
+	private failedPages = new Set<number>();
+	private gaveUp = false;
 	now: () => number = () => performance.now();
 
 	constructor(ports: MessagePort[]) {
@@ -162,6 +175,11 @@ export class RasterPool {
 		onDone: (res: FromRaster) => void,
 		frac = msg.t === "tile" ? 1 : 0,
 	) {
+		if (this.failedPages.has(msg.page)) {
+			const failed: ErrorResult = { t: "error", message: `lector-engine: page ${msg.page + 1} failed to render`, code: "wasm-trap", phase: msg.t === "text" ? "text" : "render", page: msg.page };
+			queueMicrotask(() => onDone(failed));
+			return;
+		}
 		const queued = this.queue.get(key);
 		if (queued) {
 			queued.priority = priority;
@@ -338,6 +356,47 @@ export class RasterPool {
 
 
 
+	/**
+	 * A job crashed PDFium. The worker restarted it (`recovered`): retry the
+	 * page once, then skip it. A worker that could not restart, or too many
+	 * crashes, fails the document.
+	 */
+	private trapped(lane: Lane, msg: ErrorResult) {
+		const job = lane.busy;
+		if (job) {
+			this.inflight.delete(job.msg.id);
+			this.unwanted.delete(job.msg.id);
+			lane.busy = null;
+			lane.cancelling = false;
+		}
+		this.traps++;
+		if (!msg.recovered) lane.ready = false;
+		const page = msg.page ?? job?.page ?? -1;
+		if (!msg.recovered || this.traps > DOC_TRAP_LIMIT) {
+			if (!this.gaveUp) this.onError(msg.message, "wasm-trap", msg.phase);
+			this.gaveUp = true;
+			job?.onDone(msg);
+		} else if (page < 0) job?.onDone(msg);
+		else {
+			const tries = (this.pageTraps.get(page) ?? 0) + 1;
+			this.pageTraps.set(page, tries);
+			if (job && tries <= PAGE_TRAP_RETRIES && !this.failedPages.has(page) && !this.queue.has(job.key)) this.queue.set(job.key, job);
+			else this.failPage(page, msg, job);
+		}
+		this.pump();
+		if (this.pending === 0) this.onIdle();
+	}
+
+	private failPage(page: number, msg: ErrorResult, job: Job | null) {
+		const first = !this.failedPages.has(page);
+		this.failedPages.add(page);
+		const dropped = [...this.queue.values()].filter((q) => q.page === page);
+		for (const q of dropped) this.queue.delete(q.key);
+		if (first) this.onPageFailed(page, "wasm-trap");
+		job?.onDone(msg);
+		for (const q of dropped) q.onDone(msg);
+	}
+
 	/** The whole file is local now: any worker can take any page. */
 	releaseAffinity() {
 		this.affinity = false;
@@ -366,6 +425,10 @@ export class RasterPool {
 		if (msg.t === "error") {
 			// Every worker opens the same bytes: report load failures once.
 			const load = msg.phase === "document-load" || msg.phase === "engine-load";
+			if (msg.code === "wasm-trap" && !load) {
+				this.trapped(lane, msg);
+				return;
+			}
 			if (!load || index === 0) this.onError(msg.message, msg.code, msg.phase, msg.detail);
 			const job = lane.busy;
 			if (job) {
