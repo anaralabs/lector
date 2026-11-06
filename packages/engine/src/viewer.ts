@@ -36,7 +36,7 @@ import { TextLayer, type TextLayerLine } from "./text-layer";
 export interface ViewerOptions extends Partial<CoreOptions> {
 	/** URL of the package's `pdfium.wasm` (`@anaralabs/lector-engine/pdfium.wasm`) */
 	wasmUrl: string;
-	/** number of PDFium raster workers (default: half the cores, 2-4; 2 on touch devices or with 4GB or less) */
+	/** number of PDFium raster workers (default: half the cores, 2-4; 2 on touch devices or with 4GB or less; without a GPU 1, or 2 from 8 cores) */
 	workers?: number;
 	/** run the compositor in a worker with an OffscreenCanvas (default: when WebGL2 works on one) */
 	offscreen?: boolean;
@@ -967,7 +967,8 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 		const motionQuery = coreOptions.reducedMotion === undefined && typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
 		if (motionQuery) coreOptions.reducedMotion = motionQuery.matches;
 		if (touchDevice) coreOptions.textureBudgetMB ??= 128;
-		const n = workerCount ?? rasterWorkerCount({ cores: navigator.hardwareConcurrency, memoryGB: (navigator as { deviceMemory?: number }).deviceMemory, touch: touchDevice });
+		const software = compositor === "canvas2d" && (support.softwareGL || !support.webgl2);
+		const n = workerCount ?? rasterWorkerCount({ cores: navigator.hardwareConcurrency, memoryGB: (navigator as { deviceMemory?: number }).deviceMemory, touch: touchDevice, software });
 		const rasterWorkers: (() => Worker)[] = [];
 		const corePorts: MessagePort[] = [];
 		cleanups.push(() => {
@@ -1207,13 +1208,13 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 			postToCore = (msg) => pendingInput.push(msg);
 			spawned.booted.then((worker) => {
 				if (destroyed) return;
-				worker.postMessage({ t: "init", canvas: offscreen, ports: corePorts, options: coreOptions, debug }, [offscreen, ...corePorts]);
+				worker.postMessage({ t: "init", canvas: offscreen, ports: corePorts, options: coreOptions, debug, software }, [offscreen, ...corePorts]);
 				for (const msg of pendingInput) worker.postMessage(msg);
 				postToCore = (msg, transfer = []) => worker.postMessage(msg, transfer);
 			});
 		} else {
 			try {
-				core = new ViewerCore(canvas, corePorts, handleEvent, (cb) => requestAnimationFrame(cb), coreOptions);
+				core = new ViewerCore(canvas, corePorts, handleEvent, (cb) => requestAnimationFrame(cb), coreOptions, software);
 			} catch (err) {
 				throw new EngineError(`lector-engine: no WebGL2 context: ${String((err as Error)?.message ?? err)}`, "gpu", "engine-load");
 			}
