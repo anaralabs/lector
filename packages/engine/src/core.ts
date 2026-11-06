@@ -372,6 +372,8 @@ export type CoreEvent =
 	| { type: "load"; timings: LoadTimings }
 	/** `code`/`phase` say what failed and when (see ErrorCode, ErrorPhase) */
 	| { type: "error"; message: string; code: ErrorCode; phase: ErrorPhase; detail?: LoadFailureDetail }
+	/** PDFium could not render this page (0-based): it stays blank with a `.lector-page-failed` placeholder; the rest of the document keeps working */
+	| { type: "page-failed"; page: number; code: ErrorCode }
 	/** a page's form field widgets became known (AcroForm documents; pages with fields only) */
 	| { type: "form-widgets"; page: number; widgets: FormWidget[] }
 	/** an edit changed a field's value (`name` is the field's full name; every widget of it shows `value`) */
@@ -677,6 +679,7 @@ export class ViewerCore {
 		this.pool = new RasterPool(ports);
 		this.pool.onOpened = (pageCount, sizes, info, timing) => this.opened(pageCount, sizes, info, timing);
 		this.pool.onError = (message, code, phase, detail) => this.emit({ type: "error", message, code, phase, ...(detail && { detail }) });
+		this.pool.onPageFailed = (page, code) => this.emit({ type: "page-failed", page, code });
 		this.bindCompositor();
 		if (this.opts.compositor !== "auto" && this.gl.kind !== this.opts.compositor) queueMicrotask(() => this.emit({ type: "compositor", kind: this.gl.kind, reason: "unavailable" }));
 	}

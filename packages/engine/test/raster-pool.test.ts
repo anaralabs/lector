@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FromRaster, ToRaster } from "../src/protocol.ts";
-import { RasterPool, rasterWorkerCount } from "../src/raster-pool.ts";
+import { DOC_TRAP_LIMIT, PAGE_TRAP_RETRIES, RasterPool, rasterWorkerCount } from "../src/raster-pool.ts";
 
 class FakePort {
 	sent: ToRaster[] = [];
@@ -185,4 +185,91 @@ test("text cost is learned from what extraction took", () => {
 	const job = ports[0]!.busy!;
 	ports[0]!.reply({ t: "text", id: job.id, page: 3, codes: new Uint32Array(0), boxes: new Float32Array(0), links: [], images: new Float32Array(0), scans: 1, size: { w: 1, h: 1 }, ms: 120, heap: 0 });
 	assert.ok((pool as unknown as { textMs: number }).textMs > 30);
+});
+
+function trap(port: FakePort, recovered = true) {
+	const job = port.busy!;
+	port.reply({ t: "error", message: "lector-engine: PDFium trap", code: "wasm-trap", phase: "render", id: job.id, page: job.page, op: "FPDF_RenderPageBitmap", recovered });
+	return job;
+}
+
+function trapSetup(n = 1) {
+	const s = setup(n);
+	const failed: number[] = [];
+	const errors: string[] = [];
+	const results = new Map<string, FromRaster["t"]>();
+	s.pool.onPageFailed = (page) => failed.push(page);
+	s.pool.onError = (_m, code) => errors.push(code);
+	const tile = (key: string, page: number, priority = 10) => s.pool.request(key, priority, { t: "tile", page, scale: 1, x: 0, y: 0, w: 512, h: 512 }, (res) => results.set(key, res.t), 1);
+	return { ...s, failed, errors, results, tile };
+}
+
+const flush = () => new Promise<void>((r) => queueMicrotask(r));
+
+test("a job that crashed PDFium is retried once on the restarted worker", () => {
+	const { pool, ports, finish, failed, errors, results, tile } = trapSetup();
+	tile("a", 3);
+	pool.pump();
+	const first = trap(ports[0]!);
+	assert.equal(ports[0]!.busy?.id, first.id, "the same job goes out again");
+	finish(ports[0]!, 5);
+	assert.equal(results.get("a"), "tile");
+	assert.deepEqual(failed, []);
+	assert.deepEqual(errors, []);
+});
+
+test("a page that crashes PDFium twice is skipped and its later jobs fail at once", async () => {
+	const { pool, ports, failed, errors, results, tile } = trapSetup();
+	tile("a", 3);
+	tile("b", 3, 11);
+	pool.pump();
+	trap(ports[0]!);
+	trap(ports[0]!);
+	assert.deepEqual(failed, [3]);
+	assert.equal(results.get("a"), "error");
+	assert.equal(results.get("b"), "error", "queued jobs of the page fail with it");
+	assert.equal(pool.pending, 0);
+	tile("c", 3);
+	assert.equal(pool.pending, 0, "never sent to a worker");
+	await flush();
+	assert.equal(results.get("c"), "error");
+	assert.deepEqual(errors, [], "the document keeps working");
+	tile("d", 4);
+	pool.pump();
+	assert.equal(ports[0]!.busy?.page, 4);
+});
+
+test("too many crashes in one document fail it once", () => {
+	const { pool, ports, failed, errors, tile } = trapSetup();
+	for (let p = 0; p * PAGE_TRAP_RETRIES * 2 < DOC_TRAP_LIMIT; p++) {
+		tile(`p${p}`, p);
+		pool.pump();
+		trap(ports[0]!);
+		trap(ports[0]!);
+	}
+	assert.deepEqual(errors, []);
+	assert.deepEqual(failed, [0, 1, 2]);
+	tile("last", 9);
+	pool.pump();
+	trap(ports[0]!);
+	assert.deepEqual(errors, ["wasm-trap"]);
+	tile("more", 5);
+	pool.pump();
+	trap(ports[0]!);
+	assert.deepEqual(errors, ["wasm-trap"], "reported once");
+});
+
+test("a worker that could not restart PDFium fails the document and takes no more jobs", () => {
+	const { pool, ports, errors, results, tile } = trapSetup(2);
+	tile("a", 1);
+	tile("b", 2, 11);
+	pool.pump();
+	const lane = ports.findIndex((p) => p.busy?.page === 1);
+	trap(ports[lane]!, false);
+	assert.deepEqual(errors, ["wasm-trap"]);
+	assert.equal(results.get("a"), "error");
+	const before = ports[lane]!.sent.length;
+	tile("c", 5);
+	pool.pump();
+	assert.equal(ports[lane]!.sent.length, before);
 });

@@ -21,6 +21,7 @@ import {
 import type { PdfAnnotation } from "./annotations";
 import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
+import { FailedPages } from "./failed-pages";
 import { FormLayer, modifiers, type FormHit } from "./form-layer";
 import type { DocSource, DocumentInfo, OpenTiming, OutlineItem, PageSize, SizeHint, ToRaster } from "./protocol";
 import { rasterWorkerCount } from "./raster-pool";
@@ -955,6 +956,8 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 		const overlay = document.createElement("div");
 		overlay.className = "lector-overlay";
 		overlay.style.cssText = "position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:2;";
+		const failedPages = new FailedPages(container);
+		cleanups.push(() => failedPages.destroy());
 
 		// Raster workers, each with a port to the core. They share the document
 		// source. Phones and tablets: each worker still holds PDFium's heap, and iOS
@@ -1100,6 +1103,7 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 				viewH = e.h;
 			} else if (e.type === "camera") {
 				camera = e.camera;
+				failedPages.setCamera(e.camera);
 				textLayer?.setCamera(e.camera, e.moving && compositorNow === "canvas2d");
 				forms?.update();
 			}
@@ -1151,11 +1155,16 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 				openTiming = e.timing;
 				opened = true;
 				layout = e.layout;
+				failedPages.setLayout(e.layout);
 				resolveLoaded({ pages: e.pages, info: e.info });
 				textLayer?.setLayout(e.layout);
 				for (const resolve of unlocks.splice(0)) resolve(true);
+			} else if (e.type === "page-failed") {
+				failedPages.add(e.page);
+				failedPages.setCamera(camera);
 			} else if (e.type === "layout") {
 				layout = e.layout;
+				failedPages.setLayout(e.layout);
 				textLayer?.setLayout(e.layout);
 				forms?.update();
 			} else if (e.type === "error" && e.code === "password" && e.phase === "document-load") {
