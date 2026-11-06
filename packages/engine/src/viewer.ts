@@ -19,6 +19,7 @@ import {
 	ViewerCore,
 } from "./core";
 import type { PdfAnnotation } from "./annotations";
+import type { PageFigure } from "./figures";
 import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
 import { FailedPages } from "./failed-pages";
@@ -178,6 +179,12 @@ export interface Viewer {
 	 * whose icons the host draws.
 	 */
 	annotations(page: number): Promise<PdfAnnotation[]>;
+	/**
+	 * Figures, charts, diagrams and tables on `page` (0-based): rect in page points
+	 * (axis labels included, caption not), kind, and the caption and its label
+	 * ("Figure 3") when one is found. Detected on a raster worker, once per page.
+	 */
+	pageFigures(page: number): Promise<PageFigure[]>;
 	pageText(page: number): Promise<string>;
 	/** page text plus `chars[i]`: the char index (for `rects`) of UTF-16 unit `i` */
 	pageTextMap(page: number): Promise<{ text: string; chars: Int32Array }>;
@@ -1569,6 +1576,10 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 			annotations: async (page) => {
 				await loaded;
 				return request<PdfAnnotation[]>({ type: "annotations", page });
+			},
+			pageFigures: async (page) => {
+				await loaded;
+				return request<PageFigure[]>({ type: "figures", page });
 			},
 			pageText: (page) => request<string>({ type: "page-text", page }),
 			pageTextMap: (page) => request<{ text: string; chars: Int32Array }>({ type: "page-text-map", page }),

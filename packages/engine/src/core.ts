@@ -3,6 +3,7 @@
 // code runs on the main thread or inside a worker with an OffscreenCanvas.
 
 import type { PdfAnnotation } from "./annotations";
+import type { PageFigure } from "./figures";
 import { markColor } from "./colors";
 import { type Box, FormDirt, type FormOp, type FormWidget, widgetAt } from "./forms";
 import { type AdaptiveMode, MOVE_SETTLE_MS, MotionPolicy, motionScale } from "./adaptive";
@@ -221,6 +222,8 @@ export type Request =
 	| { type: "outline" }
 	/** the page's markup annotations, read once per page */
 	| { type: "annotations"; page: number }
+	/** figures, charts and tables on the page, detected once per page */
+	| { type: "figures"; page: number }
 	| { type: "page-text"; page: number }
 	/** page text plus, per UTF-16 unit, the char index that `rects` takes */
 	| { type: "page-text-map"; page: number }
@@ -1919,6 +1922,7 @@ export class ViewerCore {
 
 	private outline: Promise<OutlineItem[]> | null = null;
 	private annotations = new Map<number, Promise<PdfAnnotation[]>>();
+	private figures = new Map<number, Promise<PageFigure[]>>();
 	private thumbs = new Map<string, Promise<{ buf: ArrayBuffer; w: number; h: number } | null>>();
 
 	private cancelled = new Set<number>();
@@ -2104,6 +2108,18 @@ export class ViewerCore {
 						this.pool.pump();
 					});
 					this.annotations.set(req.page, job);
+				}
+				return job;
+			}
+			case "figures": {
+				if (!Number.isInteger(req.page) || req.page < 0 || req.page >= this.pages.length) throw new Error(`no page ${req.page}`);
+				let job = this.figures.get(req.page);
+				if (!job) {
+					job = new Promise((resolve) => {
+						this.pool.request(`figures:${req.page}`, 460 + req.page / 1e4, { t: "figures", page: req.page }, (res) => resolve(res.t === "figures" ? res.items : []));
+						this.pool.pump();
+					});
+					this.figures.set(req.page, job);
 				}
 				return job;
 			}
