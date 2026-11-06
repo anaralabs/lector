@@ -63,7 +63,8 @@ export interface Compositor {
 	readonly kind: CompositorKind;
 	textureBytes: number;
 	lost: boolean;
-	onLost: () => void;
+	/** cause: the restored context could not be rebuilt */
+	onLost: (cause?: unknown) => void;
 	onRestored: () => void;
 	dispose(): void;
 	resize(w: number, h: number): void;
@@ -99,6 +100,8 @@ interface Programs {
 	vbo: WebGLBuffer;
 }
 
+const infoLog = (log: string | null) => (log?.trim() ? `: ${log.trim()}` : "");
+
 export class GLCompositor implements Compositor {
 	readonly kind = "webgl2" as const;
 	readonly gl: WebGL2RenderingContext;
@@ -114,11 +117,14 @@ export class GLCompositor implements Compositor {
 	 * it is restored. Every texture is gone by then; the owner re-uploads.
 	 */
 	lost = false;
-	onLost: () => void = () => {};
+	onLost: (cause?: unknown) => void = () => {};
 	onRestored: () => void = () => {};
 	private ac = new AbortController();
 
-	constructor(readonly canvas: Canvas) {
+	readonly canvas: Canvas;
+
+	constructor(canvas: Canvas) {
+		this.canvas = canvas;
 		const gl = canvas.getContext("webgl2", {
 			alpha: false,
 			antialias: false,
@@ -149,7 +155,14 @@ export class GLCompositor implements Compositor {
 				this.lost = false;
 				this.textureBytes = 0;
 				this.mode = null;
-				this.build();
+				try {
+					this.build();
+				} catch (err) {
+					// a throw here is an uncaught worker error with no message; treat it as another loss
+					this.lost = true;
+					this.onLost(err);
+					return;
+				}
 				this.onRestored();
 			},
 			{ signal: this.ac.signal },
@@ -199,7 +212,7 @@ export class GLCompositor implements Compositor {
 			const s = gl.createShader(type)!;
 			gl.shaderSource(s, src);
 			gl.compileShader(s);
-			if (!gl.getShaderParameter(s, gl.COMPILE_STATUS) && !gl.isContextLost()) throw new Error(gl.getShaderInfoLog(s) ?? "shader");
+			if (!gl.getShaderParameter(s, gl.COMPILE_STATUS) && !gl.isContextLost()) throw new Error(`lector-engine: shader failed to compile${infoLog(gl.getShaderInfoLog(s))}`);
 			return s;
 		};
 		const p = gl.createProgram()!;
@@ -212,7 +225,7 @@ export class GLCompositor implements Compositor {
 		// Flagged for deletion; they go with the program.
 		gl.deleteShader(v);
 		gl.deleteShader(f);
-		if (!gl.getProgramParameter(p, gl.LINK_STATUS) && !gl.isContextLost()) throw new Error(gl.getProgramInfoLog(p) ?? "link");
+		if (!gl.getProgramParameter(p, gl.LINK_STATUS) && !gl.isContextLost()) throw new Error(`lector-engine: shader program failed to link${infoLog(gl.getProgramInfoLog(p))}`);
 		return p;
 	}
 
