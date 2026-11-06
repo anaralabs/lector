@@ -7,6 +7,7 @@ import { markColor } from "./colors";
 import { type Box, FormDirt, type FormOp, type FormWidget, widgetAt } from "./forms";
 import { Canvas2DCompositor } from "./canvas2d";
 import { createCompositor } from "./compositor";
+import { ContextRecovery } from "./context-loss";
 import type { Compositor, CompositorKind } from "./gl";
 import { anchoredY, buildLayout, estimateSizes } from "./layout";
 import { uploadRank } from "./upload-rank";
@@ -453,7 +454,6 @@ const PREVIEW_MS = 50;
 /** preview scale = base scale / PREVIEW_DIV (1/16 of the pixels) */
 const PREVIEW_DIV = 4;
 const ZOOM_SETTLE_MS = 180;
-const RESTORE_WAIT_MS = 1500;
 const CANVAS2D_BUDGET_MB = 256;
 const UPLOAD_BUDGET_MS = 2.5;
 /** per-frame texture upload budget (bytes): halves after a late frame, grows while frames are on time */
@@ -681,39 +681,31 @@ export class ViewerCore {
 		if (this.opts.compositor !== "auto" && this.gl.kind !== this.opts.compositor) queueMicrotask(() => this.emit({ type: "compositor", kind: this.gl.kind, reason: "unavailable" }));
 	}
 
-	private losses = 0;
-	private lossTimer: ReturnType<typeof setTimeout> | null = null;
+	private recovery = new ContextRecovery((e) => this.emit(e));
 
 	private bindCompositor() {
-		this.gl.onLost = () => {
-			this.emit({ type: "error", message: "lector-engine: the WebGL context was lost; waiting for the browser to restore it", code: "gpu", phase: "render" });
-			if (this.gl.kind !== "webgl2") return;
-			// A second loss, or one the browser does not undo quickly, means this GPU is not dependable: move to 2D.
-			this.losses++;
-			if (this.lossTimer) clearTimeout(this.lossTimer);
-			this.lossTimer = setTimeout(() => this.emit({ type: "need-canvas", reason: "context-lost" }), this.losses > 1 ? 0 : RESTORE_WAIT_MS);
-		};
-		this.gl.onRestored = () => {
-			if (this.lossTimer) clearTimeout(this.lossTimer);
-			this.lossTimer = null;
-			this.contextRestored();
-		};
+		this.recovery.watch(this.gl, () => this.contextRestored());
 	}
 
-	/** Continues on a fresh canvas with the 2D compositor; tiles are fetched again. */
+	/** Continues on a fresh canvas with a CPU-backed 2D compositor; tiles are fetched again. Never throws: a canvas that cannot draw asks for another, then errors. */
 	swapCanvas(canvas: HTMLCanvasElement | OffscreenCanvas) {
 		if (this.disposed) return;
-		if (this.lossTimer) clearTimeout(this.lossTimer);
-		this.lossTimer = null;
+		const next = this.recovery.swap(canvas, (c) => new Canvas2DCompositor(c, true));
+		if (!next) return;
 		for (const tile of this.tiles.values()) tile.tex = null;
 		this.gl.dispose();
-		this.gl = new Canvas2DCompositor(canvas);
+		this.gl = next;
 		this.bindCompositor();
 		this.drawnDpr = this.dpr;
 		this.gl.resize(Math.round(this.vw * this.dpr), Math.round(this.vh * this.dpr));
 		this.dirty = true;
 		this.requestFrame();
 		this.emit({ type: "compositor", kind: "canvas2d", reason: "context-lost" });
+	}
+
+	/** The host could not make a fresh canvas for `need-canvas`. */
+	canvasFailed(reason: string) {
+		if (!this.disposed) this.recovery.fail(reason);
 	}
 
 	private disposed = false;
@@ -729,9 +721,10 @@ export class ViewerCore {
 		this.pending = null;
 		this.dragging = false;
 		this.velocity = { x: 0, y: 0 };
-		for (const timer of [this.settleTimer, this.idleTimer, this.cacheTimer, this.press?.timer, this.lossTimer]) if (timer) clearTimeout(timer);
+		for (const timer of [this.settleTimer, this.idleTimer, this.cacheTimer, this.press?.timer]) if (timer) clearTimeout(timer);
 		this.settleTimer = this.idleTimer = this.cacheTimer = null;
 		this.press = null;
+		this.recovery.dispose();
 		this.pool.dispose();
 		for (const tile of this.tiles.values()) if (tile.tex) this.gl.free(tile.tex, tile.w, tile.h);
 		this.tiles.clear();

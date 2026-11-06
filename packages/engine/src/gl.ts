@@ -131,7 +131,8 @@ export class GLCompositor implements Compositor {
 		}) as WebGL2RenderingContext | null;
 		if (!gl) throw new Error("WebGL2 is not available");
 		this.gl = gl;
-		this.build();
+		// A context handed out already lost (context limit, blocked GPU) owns this canvas: the core moves to a fresh one.
+		this.lost = !this.tryBuild();
 		// preventDefault on loss asks the browser to restore the context later.
 		const target = canvas as EventTarget;
 		target.addEventListener(
@@ -146,14 +147,24 @@ export class GLCompositor implements Compositor {
 		target.addEventListener(
 			"webglcontextrestored",
 			() => {
-				this.lost = false;
 				this.textureBytes = 0;
 				this.mode = null;
-				this.build();
+				if (!this.tryBuild()) return;
+				this.lost = false;
 				this.onRestored();
 			},
 			{ signal: this.ac.signal },
 		);
+	}
+
+	/** False when the context was lost while building; other failures throw. */
+	private tryBuild() {
+		try {
+			if (!this.gl.isContextLost()) this.build();
+		} catch (err) {
+			if (!this.gl.isContextLost()) throw err;
+		}
+		return !this.gl.isContextLost();
 	}
 
 	/** Programs and the quad buffer (again after a context restore). */
