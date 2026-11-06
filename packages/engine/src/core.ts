@@ -685,13 +685,16 @@ export class ViewerCore {
 	private lossTimer: ReturnType<typeof setTimeout> | null = null;
 
 	private bindCompositor() {
-		this.gl.onLost = () => {
-			this.emit({ type: "error", message: "lector-engine: the WebGL context was lost; waiting for the browser to restore it", code: "gpu", phase: "render" });
+		this.gl.onLost = (cause) => {
+			const message = cause
+				? `lector-engine: the restored WebGL context could not be rebuilt (${String((cause as Error)?.message ?? cause)}); moving to Canvas 2D`
+				: "lector-engine: the WebGL context was lost; waiting for the browser to restore it";
+			this.emit({ type: "error", message, code: "gpu", phase: "render" });
 			if (this.gl.kind !== "webgl2") return;
-			// A second loss, or one the browser does not undo quickly, means this GPU is not dependable: move to 2D.
+			// A second loss, a failed restore, or one the browser does not undo quickly means this GPU is not dependable: move to 2D.
 			this.losses++;
 			if (this.lossTimer) clearTimeout(this.lossTimer);
-			this.lossTimer = setTimeout(() => this.emit({ type: "need-canvas", reason: "context-lost" }), this.losses > 1 ? 0 : RESTORE_WAIT_MS);
+			this.lossTimer = setTimeout(() => this.emit({ type: "need-canvas", reason: "context-lost" }), cause || this.losses > 1 ? 0 : RESTORE_WAIT_MS);
 		};
 		this.gl.onRestored = () => {
 			if (this.lossTimer) clearTimeout(this.lossTimer);
