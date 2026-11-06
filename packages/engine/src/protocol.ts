@@ -18,9 +18,11 @@ export interface PageSize {
  * drawing resumes if the browser restores it); `worker`: a worker script did
  * not load or crashed; `compositor`: the context was lost and no fresh canvas could
  * be drawn on (fall back); `destroyed`: the viewer was destroyed before a request answered;
+ * `wasm-trap`: PDFium crashed (a WebAssembly trap or abort) or ran out of memory and the
+ * engine gave up on the document (a crash it recovered from fails one page: `page-failed`);
  * `unknown`: anything else.
  */
-export type ErrorCode = "password" | "parse" | "security" | "file" | "fetch" | "unsupported" | "wasm" | "gpu" | "compositor" | "worker" | "destroyed" | "unknown";
+export type ErrorCode = "password" | "parse" | "security" | "file" | "fetch" | "unsupported" | "wasm" | "gpu" | "compositor" | "worker" | "destroyed" | "wasm-trap" | "unknown";
 /** When it failed, like lector's `onError` phases; `request`: a pending viewer request (`pageText`, `outline`, ...). */
 export type ErrorPhase = "engine-load" | "document-load" | "render" | "text" | "request";
 
@@ -150,7 +152,18 @@ export type FromRaster =
 	/** sizes: the pages read so far (all of them for `{ all: true }`) */
 	| ({ t: "opened"; pageCount: number; sizes: SizeEntry[]; info: DocumentInfo } & Partial<OpenTiming>)
 	| { t: "sizes"; id: number; sizes: SizeEntry[]; heap: number }
-	| { t: "error"; message: string; code: ErrorCode; phase: ErrorPhase; id?: number; detail?: LoadFailureDetail }
+	| {
+			t: "error";
+			message: string;
+			code: ErrorCode;
+			phase: ErrorPhase;
+			id?: number;
+			detail?: LoadFailureDetail;
+			/** `wasm-trap`: the page and PDFium step that trapped, and whether the worker started a fresh PDFium */
+			page?: number;
+			op?: string;
+			recovered?: boolean;
+	  }
 	/** heap: the worker's WASM heap plus its block cache, in bytes */
 	| { t: "tile"; id: number; buf?: ArrayBuffer; bitmap?: ImageBitmap; baked?: boolean; w: number; h: number; ms: number; heap: number }
 	| {

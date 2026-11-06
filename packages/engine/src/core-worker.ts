@@ -5,7 +5,7 @@
 import { type Command, type CoreOptions, type InputMsg, ViewerCore } from "./core";
 
 type Msg =
-	| { t: "init"; canvas: OffscreenCanvas; ports: MessagePort[]; options: Partial<CoreOptions>; debug?: boolean }
+	| { t: "init"; canvas: OffscreenCanvas; ports: MessagePort[]; options: Partial<CoreOptions>; debug?: boolean; software?: boolean }
 	| { t: "input"; msg: InputMsg }
 	| { t: "command"; cmd: Command }
 	/** the viewer is destroyed: free GPU resources and ports, then exit */
@@ -35,7 +35,7 @@ self.onmessage = (ev: MessageEvent<Msg>) => {
 	}
 	if (m.t === "init") {
 		try {
-			core = new ViewerCore(m.canvas, m.ports, (e) => self.postMessage(e), raf, m.options);
+			core = new ViewerCore(m.canvas, m.ports, (e) => self.postMessage(e), raf, m.options, m.software);
 			// Debugging and benches only (the viewer passes globalThis.__lectorEngineDebug).
 			if (m.debug) (self as unknown as { __core: ViewerCore }).__core = core;
 		} catch (err) {

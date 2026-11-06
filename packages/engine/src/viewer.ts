@@ -21,6 +21,7 @@ import {
 import type { PdfAnnotation } from "./annotations";
 import type { SearchOptions } from "./search";
 import { EngineError } from "./errors";
+import { FailedPages } from "./failed-pages";
 import { FormLayer, modifiers, type FormHit } from "./form-layer";
 import type { DocSource, DocumentInfo, OpenTiming, OutlineItem, PageSize, SizeHint, ToRaster } from "./protocol";
 import { rasterWorkerCount } from "./raster-pool";
@@ -35,7 +36,7 @@ import { TextLayer, type TextLayerLine } from "./text-layer";
 export interface ViewerOptions extends Partial<CoreOptions> {
 	/** URL of the package's `pdfium.wasm` (`@anaralabs/lector-engine/pdfium.wasm`) */
 	wasmUrl: string;
-	/** number of PDFium raster workers (default: half the cores, 2-4; 2 on touch devices or with 4GB or less) */
+	/** number of PDFium raster workers (default: half the cores, 2-4; 2 on touch devices or with 4GB or less; without a GPU 1, or 2 from 8 cores) */
 	workers?: number;
 	/** run the compositor in a worker with an OffscreenCanvas (default: when WebGL2 works on one) */
 	offscreen?: boolean;
@@ -955,6 +956,8 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 		const overlay = document.createElement("div");
 		overlay.className = "lector-overlay";
 		overlay.style.cssText = "position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:2;";
+		const failedPages = new FailedPages(container);
+		cleanups.push(() => failedPages.destroy());
 
 		// Raster workers, each with a port to the core. They share the document
 		// source. Phones and tablets: each worker still holds PDFium's heap, and iOS
@@ -964,7 +967,8 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 		const motionQuery = coreOptions.reducedMotion === undefined && typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
 		if (motionQuery) coreOptions.reducedMotion = motionQuery.matches;
 		if (touchDevice) coreOptions.textureBudgetMB ??= 128;
-		const n = workerCount ?? rasterWorkerCount({ cores: navigator.hardwareConcurrency, memoryGB: (navigator as { deviceMemory?: number }).deviceMemory, touch: touchDevice });
+		const software = compositor === "canvas2d" && (support.softwareGL || !support.webgl2);
+		const n = workerCount ?? rasterWorkerCount({ cores: navigator.hardwareConcurrency, memoryGB: (navigator as { deviceMemory?: number }).deviceMemory, touch: touchDevice, software });
 		const rasterWorkers: (() => Worker)[] = [];
 		const corePorts: MessagePort[] = [];
 		cleanups.push(() => {
@@ -1107,6 +1111,7 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 				viewH = e.h;
 			} else if (e.type === "camera") {
 				camera = e.camera;
+				failedPages.setCamera(e.camera);
 				textLayer?.setCamera(e.camera, e.moving && compositorNow === "canvas2d");
 				forms?.update();
 			}
@@ -1158,11 +1163,16 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 				openTiming = e.timing;
 				opened = true;
 				layout = e.layout;
+				failedPages.setLayout(e.layout);
 				resolveLoaded({ pages: e.pages, info: e.info });
 				textLayer?.setLayout(e.layout);
 				for (const resolve of unlocks.splice(0)) resolve(true);
+			} else if (e.type === "page-failed") {
+				failedPages.add(e.page);
+				failedPages.setCamera(camera);
 			} else if (e.type === "layout") {
 				layout = e.layout;
+				failedPages.setLayout(e.layout);
 				textLayer?.setLayout(e.layout);
 				forms?.update();
 			} else if (e.type === "error" && e.code === "password" && e.phase === "document-load") {
@@ -1205,13 +1215,13 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 			postToCore = (msg) => pendingInput.push(msg);
 			spawned.booted.then((worker) => {
 				if (destroyed) return;
-				worker.postMessage({ t: "init", canvas: offscreen, ports: corePorts, options: coreOptions, debug }, [offscreen, ...corePorts]);
+				worker.postMessage({ t: "init", canvas: offscreen, ports: corePorts, options: coreOptions, debug, software }, [offscreen, ...corePorts]);
 				for (const msg of pendingInput) worker.postMessage(msg);
 				postToCore = (msg, transfer = []) => worker.postMessage(msg, transfer);
 			});
 		} else {
 			try {
-				core = new ViewerCore(canvas, corePorts, handleEvent, (cb) => requestAnimationFrame(cb), coreOptions);
+				core = new ViewerCore(canvas, corePorts, handleEvent, (cb) => requestAnimationFrame(cb), coreOptions, software);
 			} catch (err) {
 				throw new EngineError(`lector-engine: no WebGL2 context: ${String((err as Error)?.message ?? err)}`, "gpu", "engine-load");
 			}

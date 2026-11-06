@@ -5,6 +5,7 @@
 import type { PdfAnnotation } from "./annotations";
 import { markColor } from "./colors";
 import { type Box, FormDirt, type FormOp, type FormWidget, widgetAt } from "./forms";
+import { type AdaptiveMode, MOVE_SETTLE_MS, MotionPolicy, motionScale } from "./adaptive";
 import { Canvas2DCompositor } from "./canvas2d";
 import { createCompositor } from "./compositor";
 import { ContextRecovery } from "./context-loss";
@@ -77,6 +78,11 @@ export interface CoreOptions {
 	compositorFallback: boolean;
 	/** canvas2d: draw at 1x while the zoom moves (sharp again once it settles) */
 	motionResolution: boolean;
+	/**
+	 * canvas2d: no look-ahead tiles while the camera moves and no new sharp tiles mid-zoom; on a machine
+	 * whose motion frames run late (`auto`) or always (`true`), draw and raster at 1x while moving too
+	 */
+	adaptive: AdaptiveMode;
 }
 
 /** Every option's default (hosts can read `pageGap`, colours, ... from here or `viewer.options`). */
@@ -103,6 +109,7 @@ export const defaultOptions: CoreOptions = {
 	copyOptions: {},
 	compositor: "auto",
 	motionResolution: true,
+	adaptive: "auto",
 	compositorFallback: true,
 };
 
@@ -296,6 +303,10 @@ export interface Stats {
 	/** PDFium memory across raster workers (WASM heaps + block caches) */
 	workerMB: number;
 	compositor: CompositorKind;
+	/** lowest device pixels per CSS pixel drawn in the window (below the DPR while the 2D compositor moves at low resolution) */
+	rasterScale: number;
+	/** the 2D compositor draws motion at low resolution on this machine (see `adaptive`) */
+	adaptive: boolean;
 }
 
 export interface Camera {
@@ -373,6 +384,8 @@ export type CoreEvent =
 	| { type: "load"; timings: LoadTimings }
 	/** `code`/`phase` say what failed and when (see ErrorCode, ErrorPhase) */
 	| { type: "error"; message: string; code: ErrorCode; phase: ErrorPhase; detail?: LoadFailureDetail }
+	/** PDFium could not render this page (0-based): it stays blank with a `.lector-page-failed` placeholder; the rest of the document keeps working */
+	| { type: "page-failed"; page: number; code: ErrorCode }
 	/** a page's form field widgets became known (AcroForm documents; pages with fields only) */
 	| { type: "form-widgets"; page: number; widgets: FormWidget[] }
 	/** an edit changed a field's value (`name` is the field's full name; every widget of it shows `value`) */
@@ -564,6 +577,11 @@ export class ViewerCore {
 	private cache: TileCache | null = null;
 	private targetScale = 1;
 	private lastZoomChange = -1e9;
+	private lastMoveAt = -1e9;
+	private movedCam: Camera = { x: 0, y: 0, zoom: 0 };
+	private moveTimer: ReturnType<typeof setTimeout> | null = null;
+	private motion!: MotionPolicy;
+	private minDrawnDpr = Infinity;
 	private settleTimer: ReturnType<typeof setTimeout> | null = null;
 
 	private texts = new Map<number, PageText>();
@@ -671,12 +689,16 @@ export class ViewerCore {
 		private emit: (e: CoreEvent) => void,
 		private raf: (cb: (t: number) => void) => void,
 		options: Partial<CoreOptions> = {},
+		/** no GPU behind the browser (software GL or no WebGL2): `adaptive: "auto"` starts at low-resolution motion */
+		private software = false,
 	) {
 		this.opts = { ...defaultOptions, ...options };
+		this.motion = new MotionPolicy(this.opts.adaptive, software);
 		this.gl = createCompositor(canvas, this.opts.compositor, this.opts.compositorFallback);
 		this.pool = new RasterPool(ports);
 		this.pool.onOpened = (pageCount, sizes, info, timing) => this.opened(pageCount, sizes, info, timing);
 		this.pool.onError = (message, code, phase, detail) => this.emit({ type: "error", message, code, phase, ...(detail && { detail }) });
+		this.pool.onPageFailed = (page, code) => this.emit({ type: "page-failed", page, code });
 		this.bindCompositor();
 		if (this.opts.compositor !== "auto" && this.gl.kind !== this.opts.compositor) queueMicrotask(() => this.emit({ type: "compositor", kind: this.gl.kind, reason: "unavailable" }));
 	}
@@ -721,8 +743,8 @@ export class ViewerCore {
 		this.pending = null;
 		this.dragging = false;
 		this.velocity = { x: 0, y: 0 };
-		for (const timer of [this.settleTimer, this.idleTimer, this.cacheTimer, this.press?.timer]) if (timer) clearTimeout(timer);
-		this.settleTimer = this.idleTimer = this.cacheTimer = null;
+		for (const timer of [this.settleTimer, this.moveTimer, this.idleTimer, this.cacheTimer, this.press?.timer]) if (timer) clearTimeout(timer);
+		this.settleTimer = this.moveTimer = this.idleTimer = this.cacheTimer = null;
 		this.press = null;
 		this.recovery.dispose();
 		this.pool.dispose();
@@ -1809,6 +1831,7 @@ export class ViewerCore {
 				return;
 			case "options": {
 				const copyChanged = "copyOptions" in cmd.options && JSON.stringify(cmd.options.copyOptions) !== JSON.stringify(this.opts.copyOptions);
+				if (cmd.options.adaptive !== undefined && cmd.options.adaptive !== this.opts.adaptive) this.motion = new MotionPolicy(cmd.options.adaptive, this.software);
 				this.opts = { ...this.opts, ...cmd.options };
 				// The copied text follows the new options.
 				if (copyChanged && this.selRange && !this.dragging) this.emitSelection(true);
@@ -2531,8 +2554,10 @@ export class ViewerCore {
 		// destination's bitmaps and sharp tiles are fetched while it moves.
 		const flight = this.flight;
 		const cam = flight ? flight.to : this.cam;
-		const S = cam.zoom * this.dpr;
+		const S = cam.zoom * this.motionDpr(now);
 		const zooming = !flight && now - this.lastZoomChange < ZOOM_SETTLE_MS;
+		const adaptive = this.adaptive;
+		const moving = this.moving(now);
 		// While the zoom is moving, use a power-of-two pyramid so tiles are
 		// reused across frames; once it settles, render at the exact scale.
 		const raw = zooming ? 2 ** Math.ceil(Math.log2(S) - 0.05) : S;
@@ -2591,7 +2616,13 @@ export class ViewerCore {
 		// 2. sharp tiles: visible first (by distance from centre), then look-ahead.
 		// In flight, what passes by mid-way comes after the destination.
 		const passing = flight && flight.to.zoom === this.cam.zoom ? ([visible, this.viewRect(), 20] as const) : null;
-		for (const [pages, region, base] of [[targetVisible, view, 10] as const, ...(passing ? [passing] : []), [near, ahead, 30] as const]) {
+		// 2D: raster spent mid-zoom or far ahead of a moving camera takes the CPU the frames need.
+		const sharpPasses = [
+			...(adaptive && zooming ? [] : [[targetVisible, view, 10] as const]),
+			...(passing ? [passing] : []),
+			...(adaptive && moving ? [] : [[near, ahead, 30] as const]),
+		];
+		for (const [pages, region, base] of sharpPasses) {
 			for (const p of pages) {
 				if (base === 10) this.requestText(p, 20);
 				if (this.estimated[p]) continue;
@@ -2743,6 +2774,31 @@ export class ViewerCore {
 	private frameId = 0;
 	private painted = false;
 
+	private get adaptive() {
+		return this.gl.kind === "canvas2d" && this.opts.adaptive !== false;
+	}
+
+	private moving(now: number) {
+		return !this.flight && now - this.lastMoveAt < MOVE_SETTLE_MS;
+	}
+
+	/** Device pixels per CSS pixel for this frame's sharp tiles and 2D canvas. */
+	private motionDpr(now: number) {
+		return this.adaptive ? motionScale(this.dpr, this.motion.low, this.moving(now)) : this.dpr;
+	}
+
+	private trackMotion(now: number) {
+		const c = this.cam;
+		const m = this.movedCam;
+		if (c.x === m.x && c.y === m.y && c.zoom === m.zoom) return;
+		this.movedCam = { ...c };
+		this.lastMoveAt = now;
+		// A frame once the camera rests brings back full resolution and look-ahead.
+		if (!this.adaptive || this.disposed) return;
+		if (this.moveTimer) clearTimeout(this.moveTimer);
+		this.moveTimer = setTimeout(() => this.requestFrame(), MOVE_SETTLE_MS + 10);
+	}
+
 	private frame(now: number) {
 		// A lost context draws nothing; `contextRestored` asks for a frame.
 		if (!this.dirty || !this.canAim() || this.disposed || this.gl.lost) return;
@@ -2777,12 +2833,13 @@ export class ViewerCore {
 			}
 		}
 
+		this.trackMotion(now);
 		const visible = this.plan(now);
 		this.uploadArrived(visible);
 		const sharp = this.draw(visible, now);
 		if (this.marksAnimating(now)) moving = true;
 		this.evict(this.frameId);
-		this.reportSharp(sharp);
+		this.reportSharp(sharp && this.motionDpr(now) === this.dpr);
 
 		this.cpuTimes.push(performance.now() - cpu0);
 		this.reportView(visible);
@@ -2798,6 +2855,10 @@ export class ViewerCore {
 			const d = this.debugCam;
 			this.debugFrames.push(c.x !== d.x || c.y !== d.y || c.zoom !== d.zoom ? this.frameEnd : -this.frameEnd);
 			this.debugCam = { ...c };
+			const work = this.frameEnd - cpu0;
+			const ch = new MessageChannel();
+			ch.port1.onmessage = () => this.debugWork?.push([work, performance.now() - this.frameEnd]);
+			ch.port2.postMessage(0);
 		}
 	}
 
@@ -2806,12 +2867,16 @@ export class ViewerCore {
 
 	/** benches only: when each frame finished (negative: the camera did not move), when set to an array */
 	debugFrames: number[] | null = null;
+	/** benches only: per frame, ms in frame() and ms until the thread is free after it (the canvas commit, queued messages) */
+	debugWork: [number, number][] | null = null;
 	private debugCam: Camera = { x: 0, y: 0, zoom: 0 };
 
 	private recordFrame(now: number) {
 		const continuous = this.wantedAt === this.lastFrame;
 		const ms = now - (continuous ? this.lastFrame : Math.min(now, this.wantedAt));
 		if (ms > SUSPENDED_MS) return;
+		// Wheel and touch input after a gap is not continuous, but a late frame there is just as visible.
+		if (this.adaptive && this.lastMoveAt === this.lastFrame) this.motion.observe(ms);
 		if (continuous) {
 			this.frameTimes.push(ms);
 			const late = ms > this.vsync * 1.5;
@@ -2863,11 +2928,12 @@ export class ViewerCore {
 		const gl = this.gl;
 		const zooming = !!this.flight || now - this.lastZoomChange < ZOOM_SETTLE_MS;
 		// 2D mid-zoom: a CPU's bilinear blits cost per pixel, so draw at most 1x and let the browser stretch it until the zoom settles.
-		const dpr = gl.kind === "canvas2d" && zooming && this.opts.motionResolution ? Math.min(this.dpr, 1) : this.dpr;
+		const dpr = gl.kind === "canvas2d" && zooming && this.opts.motionResolution ? Math.min(this.dpr, 1) : this.motionDpr(now);
 		if (gl.kind === "canvas2d" && dpr !== this.drawnDpr) {
 			gl.resize(Math.round(this.vw * dpr), Math.round(this.vh * dpr));
 			this.drawnDpr = dpr;
 		}
+		this.minDrawnDpr = Math.min(this.minDrawnDpr, dpr);
 		const S = this.cam.zoom * dpr;
 		const target = this.targetScale;
 		const { background, selectionColor, selectionColorDark, highlightColor, gamma, dark, paper, ink } = this.opts;
@@ -3229,8 +3295,11 @@ export class ViewerCore {
 				workers: this.pool.workers,
 				workerMB: this.pool.heapBytes / 1048576,
 				compositor: this.gl.kind,
+				rasterScale: Number.isFinite(this.minDrawnDpr) ? this.minDrawnDpr : this.dpr,
+				adaptive: this.adaptive && this.motion.low,
 			},
 		});
+		this.minDrawnDpr = Infinity;
 		this.frameTimes = [];
 		this.cpuTimes = [];
 		this.tileMs = [];
