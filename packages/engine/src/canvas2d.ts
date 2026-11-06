@@ -1,6 +1,7 @@
 // Canvas 2D compositor for machines without a usable GPU: tiles arrive baked (gamma, dark tone) as ImageBitmaps from the raster workers.
 
 import { bakePixels, byte } from "./bake";
+import { open2d } from "./context-loss";
 import type { Blend, Compositor, Tone } from "./gl";
 
 type Canvas = HTMLCanvasElement | OffscreenCanvas;
@@ -44,11 +45,16 @@ export class Canvas2DCompositor implements Compositor {
 	onLost: () => void = () => {};
 	onRestored: () => void = () => {};
 	private ac = new AbortController();
+	/** the context lives in CPU memory (after a GPU loss, or without hardware WebGL2) */
+	readonly cpu: boolean;
 
-	constructor(readonly canvas: Canvas) {
-		const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true }) as Ctx | null;
-		if (!ctx) throw new Error("Canvas 2D is not available");
-		this.ctx = ctx;
+	constructor(
+		readonly canvas: Canvas,
+		cpu = false,
+	) {
+		const opened = open2d(canvas, cpu);
+		this.ctx = opened.ctx;
+		this.cpu = opened.cpu;
 		const target = canvas as EventTarget;
 		// Accelerated 2D canvases can be lost too: tile bitmaps survive, only the target is redrawn.
 		target.addEventListener(

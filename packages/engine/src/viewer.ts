@@ -1088,14 +1088,21 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 				const fresh = document.createElement("canvas");
 				fresh.style.cssText = canvas.style.cssText;
 				fresh.setAttribute("aria-hidden", "true");
+				if (display !== canvas) display.remove();
 				canvas.before(fresh);
 				canvas.style.opacity = "0";
 				display = fresh;
 				cleanups.push(() => fresh.remove());
-				if (useOffscreen) {
-					const off = fresh.transferControlToOffscreen();
-					postToCore({ t: "canvas", canvas: off }, [off]);
-				} else core?.swapCanvas(fresh);
+				try {
+					if (useOffscreen) {
+						const off = fresh.transferControlToOffscreen();
+						postToCore({ t: "canvas", canvas: off }, [off]);
+					} else core?.swapCanvas(fresh);
+				} catch (err) {
+					const reason = String((err as Error)?.message ?? err);
+					if (useOffscreen) postToCore({ t: "canvas-failed", reason });
+					else core?.canvasFailed(reason);
+				}
 				return;
 			}
 			if (e.type === "compositor") {
