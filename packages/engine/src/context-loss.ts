@@ -48,6 +48,9 @@ export class ContextRecovery {
 	/** the pending request goes out at once (a later loss event must not push it back) */
 	private soon = false;
 	private stopped = false;
+	private hidden = false;
+	/** a canvas request that came due while the page was hidden */
+	private dueWhileHidden = false;
 	private emit: (e: RecoveryEvent) => void;
 	private timers: Timers;
 
@@ -61,6 +64,7 @@ export class ContextRecovery {
 		gl.onLost = (cause) => this.lost(gl, cause);
 		gl.onRestored = () => {
 			this.cancel();
+			this.dueWhileHidden = false;
 			onRestored();
 		};
 		if (gl.lost) this.request(0);
@@ -72,8 +76,8 @@ export class ContextRecovery {
 			? `lector-engine: the restored ${what} context could not be rebuilt (${String((cause as Error)?.message ?? cause)}); moving to Canvas 2D`
 			: `lector-engine: the ${what} context was lost; waiting for the browser to restore it`;
 		this.emit({ type: "error", message, code: "gpu", phase: "render" });
-		// A second loss, a failed restore, or one the browser does not undo quickly means this GPU is not dependable.
-		this.losses++;
+		// Mobile browsers drop the contexts of a hidden page: that says nothing about the GPU.
+		if (!this.hidden) this.losses++;
 		this.request(cause || this.losses > 1 ? 0 : RESTORE_WAIT_MS);
 	}
 
@@ -84,9 +88,21 @@ export class ContextRecovery {
 		this.timer = this.timers.set(() => {
 			this.timer = null;
 			this.soon = false;
+			if (this.hidden) {
+				this.dueWhileHidden = true;
+				return;
+			}
 			if (this.swaps >= MAX_SWAPS) this.fail(`gave up after ${MAX_SWAPS} canvases`);
 			else this.emit({ type: "need-canvas", reason: "context-lost" });
 		}, ms);
+	}
+
+	/** Canvases are only swapped while the page is visible; one due while hidden is asked for after the browser had its chance to restore. */
+	setHidden(hidden: boolean) {
+		this.hidden = hidden;
+		if (hidden || !this.dueWhileHidden) return;
+		this.dueWhileHidden = false;
+		this.request(RESTORE_WAIT_MS);
 	}
 
 	/** The compositor for the host's fresh canvas, or null: another canvas was asked for, or the switch failed for good (an error went out). */

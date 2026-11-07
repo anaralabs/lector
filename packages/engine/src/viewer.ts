@@ -1242,6 +1242,15 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 			if (debug) g.__core = core;
 		}
 
+		const syncHidden = () => {
+			const hidden = document.visibilityState === "hidden";
+			if (core) core.setHidden(hidden);
+			else postToCore({ t: "hidden", hidden });
+		};
+		syncHidden();
+		document.addEventListener("visibilitychange", syncHidden);
+		cleanups.push(() => document.removeEventListener("visibilitychange", syncHidden));
+
 		const send = (msg: InputMsg) => {
 			if (core) core.handle(msg);
 			else postToCore({ t: "input", msg });
