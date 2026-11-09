@@ -12,7 +12,8 @@ type Msg =
 	| { t: "dispose" }
 	/** a fresh canvas after the WebGL context was lost for good */
 	| { t: "canvas"; canvas: OffscreenCanvas }
-	| { t: "canvas-failed"; reason: string };
+	| { t: "canvas-failed"; reason: string }
+	| { t: "hidden"; hidden: boolean };
 
 let core: ViewerCore | null = null;
 const pending: Msg[] = [];
@@ -52,6 +53,7 @@ self.onmessage = (ev: MessageEvent<Msg>) => {
 function dispatch(m: Msg) {
 	if (m.t === "canvas") core!.swapCanvas(m.canvas);
 	else if (m.t === "canvas-failed") core!.canvasFailed(m.reason);
+	else if (m.t === "hidden") core!.setHidden(m.hidden);
 	else if (m.t === "input") core!.handle(m.msg);
 	else if (m.t === "command") core!.command(m.cmd);
 }

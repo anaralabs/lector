@@ -822,7 +822,7 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 	return viewer;
 
 	function build(): Viewer {
-		const spawn = (kind: "raster" | "core", name: string, onmessage?: (ev: MessageEvent) => void) => {
+		const spawn = (kind: "raster" | "core", name: string, onmessage?: (ev: MessageEvent) => void, optional = false) => {
 			const url = workerUrls?.[kind];
 			// Literal `new Worker(new URL(...))` so bundlers emit the worker chunks.
 			const create = () =>
@@ -862,6 +862,11 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 						setTimeout(() => {
 							if (!destroyed) start();
 						}, WORKER_RETRY_MS);
+						return;
+					}
+					// the pool never hands work to a worker that did not open the document
+					if (!isBooted && optional) {
+						w.terminate();
 						return;
 					}
 					const message = `lector-engine: ${name} worker failed${ev.message ? `: ${ev.message}` : " to load"}`;
@@ -1008,7 +1013,7 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 			wasmWaitMs = epochNow() - buildAt;
 		});
 		for (let i = 0; i < n; i++) {
-			const { current, booted } = spawn("raster", `lector-raster-${i}`, relay);
+			const { current, booted } = spawn("raster", `lector-raster-${i}`, relay, i > 0);
 			if (i === 0)
 				void booted.then(() => {
 					workerBootMs = epochNow() - buildAt;
@@ -1241,6 +1246,15 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 			// Debugging and benches only: set globalThis.__lectorEngineDebug before createViewer.
 			if (debug) g.__core = core;
 		}
+
+		const syncHidden = () => {
+			const hidden = document.visibilityState === "hidden";
+			if (core) core.setHidden(hidden);
+			else postToCore({ t: "hidden", hidden });
+		};
+		syncHidden();
+		document.addEventListener("visibilitychange", syncHidden);
+		cleanups.push(() => document.removeEventListener("visibilitychange", syncHidden));
 
 		const send = (msg: InputMsg) => {
 			if (core) core.handle(msg);

@@ -358,10 +358,11 @@ export class RasterPool {
 
 	/**
 	 * A job crashed PDFium. The worker restarted it (`recovered`): retry the
-	 * page once, then skip it. A worker that could not restart, or too many
-	 * crashes, fails the document.
+	 * page once, then skip it. A worker that could not restart retires; the
+	 * document fails when no worker is left (or the first, which saves and
+	 * reports form edits), or after too many crashes.
 	 */
-	private trapped(lane: Lane, msg: ErrorResult) {
+	private trapped(lane: Lane, index: number, msg: ErrorResult) {
 		const job = lane.busy;
 		if (job) {
 			this.inflight.delete(job.msg.id);
@@ -370,9 +371,14 @@ export class RasterPool {
 			lane.cancelling = false;
 		}
 		this.traps++;
-		if (!msg.recovered) lane.ready = false;
+		if (!msg.recovered) {
+			lane.ready = false;
+			lane.pages = [];
+			lane.backlog = [];
+		}
 		const page = msg.page ?? job?.page ?? -1;
-		if (!msg.recovered || this.traps > DOC_TRAP_LIMIT) {
+		const stranded = !msg.recovered && (index === 0 || !this.lanes.some((l) => l.ready));
+		if (stranded || this.traps > DOC_TRAP_LIMIT) {
 			if (!this.gaveUp) this.onError(msg.message, "wasm-trap", msg.phase);
 			this.gaveUp = true;
 			job?.onDone(msg);
@@ -426,7 +432,7 @@ export class RasterPool {
 			// Every worker opens the same bytes: report load failures once.
 			const load = msg.phase === "document-load" || msg.phase === "engine-load";
 			if (msg.code === "wasm-trap" && !load) {
-				this.trapped(lane, msg);
+				this.trapped(lane, index, msg);
 				return;
 			}
 			if (!load || index === 0) this.onError(msg.message, msg.code, msg.phase, msg.detail);

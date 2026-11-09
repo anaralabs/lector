@@ -728,6 +728,11 @@ export class ViewerCore {
 		this.emit({ type: "compositor", kind: "canvas2d", reason: "context-lost" });
 	}
 
+	/** The page was hidden or shown: a lost canvas is only replaced while visible. */
+	setHidden(hidden: boolean) {
+		this.recovery.setHidden(hidden);
+	}
+
 	/** The host could not make a fresh canvas for `need-canvas`. */
 	canvasFailed(reason: string) {
 		if (!this.disposed) this.recovery.fail(reason);

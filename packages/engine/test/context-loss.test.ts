@@ -247,3 +247,51 @@ test("a disposed core stops asking", () => {
 	timers.advance(5000);
 	assert.deepEqual(types(), ["error:gpu"]);
 });
+
+test("a hidden page keeps its lost canvas until it is visible again", () => {
+	const { timers, recovery, types } = setup();
+	const ctx2d = fakeCompositor("canvas2d");
+	recovery.watch(ctx2d, () => {});
+	recovery.setHidden(true);
+	ctx2d.onLost();
+	timers.advance(60_000);
+	assert.deepEqual(types(), ["error:gpu"]);
+	recovery.setHidden(false);
+	timers.advance(1499);
+	assert.deepEqual(types(), ["error:gpu"]);
+	timers.advance(1);
+	assert.deepEqual(types(), ["error:gpu", "need-canvas"]);
+});
+
+test("the browser restoring a canvas when the page is shown needs no swap", () => {
+	const { timers, recovery, types } = setup();
+	const ctx2d = fakeCompositor("canvas2d");
+	recovery.watch(ctx2d, () => {});
+	recovery.setHidden(true);
+	ctx2d.onLost();
+	timers.advance(5000);
+	recovery.setHidden(false);
+	timers.advance(300);
+	ctx2d.onRestored();
+	timers.advance(5000);
+	assert.deepEqual(types(), ["error:gpu"]);
+});
+
+test("losses while hidden do not use up canvases", () => {
+	const { timers, recovery, types } = setup();
+	const gl = fakeCompositor("canvas2d");
+	recovery.watch(gl, () => {});
+	for (let i = 0; i < 5; i++) {
+		recovery.setHidden(true);
+		gl.onLost();
+		timers.advance(5000);
+		recovery.setHidden(false);
+		timers.advance(200);
+		gl.onRestored();
+	}
+	assert.equal(types().filter((t) => t === "need-canvas").length, 0);
+	assert.equal(types().filter((t) => t === "error:compositor").length, 0);
+	gl.onLost();
+	timers.advance(1500);
+	assert.equal(types().filter((t) => t === "need-canvas").length, 1);
+});

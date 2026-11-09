@@ -267,17 +267,41 @@ test("too many crashes in one document fail it once", () => {
 	assert.deepEqual(errors, ["wasm-trap"], "reported once");
 });
 
-test("a worker that could not restart PDFium fails the document and takes no more jobs", () => {
+test("a worker that could not restart PDFium retires and the others take its page", () => {
+	const { pool, ports, finish, errors, results, tile } = trapSetup(2);
+	tile("a", 1);
+	tile("b", 2, 11);
+	pool.pump();
+	const [first, second] = ports as [FakePort, FakePort];
+	const crashed = trap(second, false);
+	const key = crashed.page === 1 ? "a" : "b";
+	assert.deepEqual(errors, [], "the document keeps working");
+	finish(first, 5);
+	assert.equal(first.busy?.page, crashed.page, "the crashed page is retried on the other worker");
+	finish(first, 5);
+	assert.equal(results.get(key), "tile");
+	const before = second.sent.length;
+	tile("c", 5);
+	pool.pump();
+	assert.equal(second.sent.length, before, "the retired worker takes no more jobs");
+});
+
+test("the document fails when the first worker could not restart PDFium", () => {
 	const { pool, ports, errors, results, tile } = trapSetup(2);
 	tile("a", 1);
 	tile("b", 2, 11);
 	pool.pump();
-	const lane = ports.findIndex((p) => p.busy?.page === 1);
-	trap(ports[lane]!, false);
+	const first = ports[0]!;
+	const job = first.busy!;
+	trap(first, false);
 	assert.deepEqual(errors, ["wasm-trap"]);
-	assert.equal(results.get("a"), "error");
-	const before = ports[lane]!.sent.length;
-	tile("c", 5);
+	assert.equal(results.get(job.page === 1 ? "a" : "b"), "error");
+});
+
+test("the document fails when the last worker could not restart PDFium", () => {
+	const { pool, ports, errors, tile } = trapSetup(1);
+	tile("a", 1);
 	pool.pump();
-	assert.equal(ports[lane]!.sent.length, before);
+	trap(ports[0]!, false);
+	assert.deepEqual(errors, ["wasm-trap"]);
 });
