@@ -51,14 +51,17 @@ function aborted(signal: AbortSignal): unknown {
 export function wait(ms: number, signal?: AbortSignal | null, events?: EventTarget | null, event = "online"): Promise<void> {
 	return new Promise((resolve, reject) => {
 		if (signal?.aborted) return reject(aborted(signal));
-		const done = () => {
+		const cleanup = () => {
 			clearTimeout(timer);
 			signal?.removeEventListener("abort", stop);
 			events?.removeEventListener(event, done);
+		};
+		const done = () => {
+			cleanup();
 			resolve();
 		};
 		const stop = () => {
-			done();
+			cleanup();
 			reject(aborted(signal!));
 		};
 		const timer = setTimeout(done, ms);

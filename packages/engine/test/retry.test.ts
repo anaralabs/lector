@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { backoffMs, type Connectivity, fetchRetrying, retryableStatus, retryingSync, sleepSync } from "../src/retry.ts";
+import { backoffMs, type Connectivity, fetchRetrying, retryableStatus, retryingSync, sleepSync, wait } from "../src/retry.ts";
 
 const fast = { random: () => 0 };
 const online: Connectivity = { online: () => true, events: null };
@@ -71,6 +71,17 @@ test("aborting during the backoff stops at once, with no further request", async
 	assert.ok(performance.now() - t0 < 200, "did not wait out the 250ms backoff");
 	await new Promise((r) => setTimeout(r, 300));
 	assert.equal(calls.length, 1);
+});
+
+test("wait rejects on abort and resolves on its event", async () => {
+	const ac = new AbortController();
+	const pending = wait(10_000, ac.signal);
+	ac.abort();
+	await assert.rejects(pending, (e: Error) => e.name === "AbortError");
+	const events = new EventTarget();
+	const back = wait(10_000, null, events);
+	events.dispatchEvent(new Event("online"));
+	await back;
 });
 
 test("an already aborted signal makes no request", async () => {
