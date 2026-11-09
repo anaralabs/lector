@@ -11,7 +11,8 @@ import { init, type Pdfium } from "./pdfium/pdfium.js";
 import { bakePixels } from "./bake";
 import { boxFor, pageTransform, readCharBoxes, type Xf } from "./char-boxes";
 import type { DocSource, DocumentInfo, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
-import { blockVerdict, openErrorCode, RANGE_BLOCK, RANGE_GRANULE, RANGE_MAX_RUN, retryableBlockStatus } from "./range";
+import { blockVerdict, openErrorCode, RANGE_BLOCK, RANGE_GRANULE, RANGE_MAX_RUN } from "./range";
+import { ONLINE_WAIT_MS, retryingSync, untilOnline } from "./retry";
 import { trapKind } from "./wasm-trap";
 
 const FPDF_ANNOT = 0x01;
@@ -674,8 +675,7 @@ function fetchBlock(start: number, end: number): Uint8Array {
 		reader ??= new FileReaderSync();
 		return new Uint8Array(reader.readAsArrayBuffer(src.blob.slice(start, end)));
 	}
-	let xhr = rangeRequest(src, start, end);
-	if (retryableBlockStatus(xhr.status)) xhr = rangeRequest(src, start, end);
+	const xhr = retryingSync(() => rangeRequest(src, start, end));
 	const buf = xhr.response as ArrayBuffer | null;
 	const verdict = blockVerdict(xhr.status, buf?.byteLength ?? 0, start, end, fileLen);
 	if (verdict === "ok") return new Uint8Array(buf!);
@@ -732,7 +732,7 @@ function initForm() {
 	if (form) P.FPDF_SetFormFieldHighlightAlpha(form, 0);
 }
 
-function loadDocument(password: string | undefined) {
+function loadDocument(password: string | undefined, waitedOnline = false) {
 	const t0 = performance.now();
 	ensureFileAccess();
 	readFailure = null;
@@ -740,6 +740,12 @@ function loadDocument(password: string | undefined) {
 	if (!doc) {
 		const err = P.FPDF_GetLastError();
 		const code = openErrorCode(err, readFailure !== null);
+		if (code === "fetch" && !waitedOnline && navigator.onLine === false) {
+			void untilOnline(ONLINE_WAIT_MS).then(() => {
+				if (!doc) loadDocument(password, true);
+			});
+			return;
+		}
 		const message =
 			code === "password"
 				? password
