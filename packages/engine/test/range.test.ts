@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { abandonWhole, blockVerdict, openErrorCode, HEAD_BYTES, probeReadBytes, probeVerdict, RACE_FILE_MAX, RANGE_GRANULE, rangesBeside, readLinearization, totalFromContentRange, WHOLE_FILE_MAX, WHOLE_PATIENCE_MS } from "../src/range.ts";
+import { abandonWhole, blockVerdict, headerOffset, openErrorCode, reopenWorthIt, HEAD_BYTES, probeReadBytes, probeVerdict, RACE_FILE_MAX, RANGE_GRANULE, rangesBeside, readLinearization, totalFromContentRange, WHOLE_FILE_MAX, WHOLE_PATIENCE_MS } from "../src/range.ts";
 
 test("Content-Range total, including when CORS hides it", () => {
 	assert.equal(totalFromContentRange("bytes 0-1023/52428800"), 52428800);
@@ -107,4 +107,24 @@ test("small file: range reads start beside the download once it looks slow", () 
 	// 50Mbit: done in well under a second
 	assert.equal(rangesBeside({ elapsedMs: 300, received: 1.8 * MB, length: len, rttMs: 550 }), false);
 	assert.equal(rangesBeside({ elapsedMs: 300, received: len, length: len, rttMs: 550 }), false);
+});
+
+test("the header is found wherever it starts, and only a whole %PDF- counts", () => {
+	const enc = (t: string) => new TextEncoder().encode(t);
+	assert.equal(headerOffset(enc("%PDF-1.7\n")), 0);
+	assert.equal(headerOffset(enc(`${"x".repeat(5000)}%PDF-1.4`)), 5000);
+	assert.equal(headerOffset(enc("%%EOF %PD %PDF")), -1);
+	assert.equal(headerOffset(enc("Service unavailable")), -1);
+	assert.equal(headerOffset(new Uint8Array(0)), -1);
+});
+
+test("a failed open from range reads is retried from the whole file; a trap always gets a fresh PDFium", () => {
+	for (const code of ["parse", "fetch", "unknown"] as const) {
+		assert.equal(reopenWorthIt(code, true), true, code);
+		// the same bytes again would fail the same way
+		assert.equal(reopenWorthIt(code, false), false, code);
+	}
+	assert.equal(reopenWorthIt("trap", false), true);
+	assert.equal(reopenWorthIt("trap", true), true);
+	for (const code of ["password", "security", "file"] as const) assert.equal(reopenWorthIt(code, true), false, code);
 });

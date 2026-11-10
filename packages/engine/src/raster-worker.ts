@@ -10,8 +10,8 @@ import type { FormOp } from "./forms";
 import { init, type Pdfium } from "./pdfium/pdfium.js";
 import { bakePixels } from "./bake";
 import { boxFor, pageTransform, readCharBoxes, type Xf } from "./char-boxes";
-import type { DocSource, DocumentInfo, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
-import { blockVerdict, openErrorCode, RANGE_BLOCK, RANGE_GRANULE, RANGE_MAX_RUN } from "./range";
+import type { DocSource, DocumentInfo, ErrorCode, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
+import { blockVerdict, HEADER_SCAN_BYTES, headerOffset, openErrorCode, PDFIUM_HEADER_WINDOW, RANGE_BLOCK, RANGE_GRANULE, RANGE_MAX_RUN, reopenWorthIt } from "./range";
 import { ONLINE_WAIT_MS, retryingSync, untilOnline } from "./retry";
 import { trapKind } from "./wasm-trap";
 
@@ -666,6 +666,12 @@ const early: [number, Uint8Array][] = [];
 let reader: FileReaderSync | null = null;
 /** the last block read that failed, cleared before each open */
 let readFailure: string | null = null;
+/** bytes in front of `%PDF-` that PDFium does not see (it looks for the header in the first KB only) */
+let fileOffset = 0;
+/** the whole file, shared before this worker opened: its length can differ from what the range reads assumed */
+let wholeBlob: Blob | null = null;
+/** blocks came from range reads: they may mix two versions of a file rewritten in place */
+let rangeRead = false;
 
 const heapBytes = () => heap().length + (cache?.bytes ?? 0);
 
@@ -704,7 +710,7 @@ function rangeRequest(src: Extract<DocSource, { kind: "url" }>, start: number, e
 /** int GetBlock(void* param, unsigned long position, unsigned char* buf, unsigned long size) */
 function getBlock(_param: number, position: number, buf: number, size: number): number {
 	try {
-		return cache!.read(position >>> 0, size >>> 0, heap(), buf) ? 1 : 0;
+		return cache!.read(fileOffset + (position >>> 0), size >>> 0, heap(), buf) ? 1 : 0;
 	} catch (err) {
 		readFailure = String((err as Error)?.message ?? err);
 		console.error(`lector-engine: ${readFailure}`);
@@ -718,9 +724,29 @@ function ensureFileAccess() {
 		const fn = (P.pdfium as unknown as { addFunction: (f: (...a: number[]) => number, sig: string) => number }).addFunction(getBlock, "iiiii");
 		fileAccess = P.pdfium.wasmExports.malloc(12);
 		const view = new Uint32Array(heap().buffer, fileAccess, 3);
-		view[0] = fileLen;
 		view[1] = fn;
 		view[2] = 0;
+	}
+	new Uint32Array(heap().buffer, fileAccess, 1)[0] = fileLen - fileOffset;
+}
+
+const share = (start: number, data: Uint8Array) => {
+	if (source?.kind !== "url") return;
+	const copy = data.slice();
+	self.postMessage({ t: "block", start, data: copy }, [copy.buffer]);
+};
+
+function newCache() {
+	cache = new BlockCache(fileLen, { size: () => blockSize, fetch: fetchBlock }, { onFetched: share, granule: RANGE_GRANULE, maxRun: Math.max(1, RANGE_MAX_RUN / URL_BLOCK) });
+}
+
+/** The whole file in one response: one version of it, whatever happens to the object meanwhile. */
+async function downloadWhole(src: Extract<DocSource, { kind: "url" }>): Promise<Blob | null> {
+	try {
+		const res = await fetch(src.url, { credentials: "same-origin", cache: "no-store" });
+		return res.status === 200 ? await res.blob() : null;
+	} catch {
+		return null;
 	}
 }
 
@@ -732,41 +758,116 @@ function initForm() {
 	if (form) P.FPDF_SetFormFieldHighlightAlpha(form, 0);
 }
 
-function loadDocument(password: string | undefined, waitedOnline = false) {
-	const t0 = performance.now();
+type OpenFailure = { code: ErrorCode | "trap"; message: string; detail?: LoadFailureDetail };
+type OpenResult = { pageCount: number; sizes: SizeEntry[]; info: DocumentInfo };
+
+/** One open from the source as it is. A trap leaves this PDFium unusable: only a fresh instance may run after it. */
+function attemptOpen(password: string | undefined): OpenResult | OpenFailure {
 	ensureFileAccess();
 	readFailure = null;
-	doc = P.FPDF_LoadCustomDocument(fileAccess, password ?? "");
-	if (!doc) {
-		const err = P.FPDF_GetLastError();
-		const code = openErrorCode(err, readFailure !== null);
+	pageSizes.length = 0;
+	try {
+		op = "FPDF_LoadCustomDocument";
+		doc = P.FPDF_LoadCustomDocument(fileAccess, password ?? "");
+		if (!doc) {
+			const err = P.FPDF_GetLastError();
+			const code = openErrorCode(err, readFailure !== null);
+			const message =
+				code === "password"
+					? password
+						? "Incorrect password: PDFium could not decrypt the document."
+						: "The document is password-protected."
+					: code === "fetch"
+						? `Could not read the document: ${readFailure}`
+						: `PDFium could not open the document (${code === "unknown" ? `error ${err}` : code})`;
+			return { code, message, detail: loadFailureDetail(err) };
+		}
+		op = "open";
+		initForm();
+		pageCount = P.FPDF_GetPageCount(doc);
+		// Sizes come from the page tree without parsing page content.
+		const sizes: SizeEntry[] = [];
+		for (const i of hintedPages()) {
+			const { w, h } = sizeOf(i);
+			sizes.push([i, w, h]);
+		}
+		return { pageCount, sizes, info: readInfo(password) };
+	} catch (err) {
+		const kind = trapKind(err);
+		if (!kind) throw err;
+		doc = 0;
+		form = 0;
+		return { code: "trap", message: `lector-engine: PDFium ${kind} in ${op} while opening the document: ${String((err as Error)?.message ?? err)}` };
+	}
+}
+
+/** An open that also looks past PDFium's 1KB header window for a `%PDF-` with something in front of it. */
+function tryOpen(password: string | undefined): OpenResult | OpenFailure {
+	const first = attemptOpen(password);
+	if (!("code" in first) || first.code !== "parse" || fileOffset) return first;
+	const head = new Uint8Array(Math.min(fileLen, HEADER_SCAN_BYTES));
+	let at = -1;
+	try {
+		if (cache!.read(0, head.length, head, 0)) at = headerOffset(head);
+	} catch {}
+	if (at < PDFIUM_HEADER_WINDOW) return first;
+	fileOffset = at;
+	const shifted = attemptOpen(password);
+	if (!("code" in shifted)) return shifted;
+	fileOffset = 0;
+	return shifted.code === "trap" ? shifted : first;
+}
+
+/** Gets ready to open once more: from the whole file (range reads failed), and with a fresh PDFium after a trap. False when there is nothing new to try. */
+async function startOver(failure: OpenFailure): Promise<boolean> {
+	if (!reopenWorthIt(failure.code, rangeRead)) return false;
+	let fresh = false;
+	if (rangeRead && source) {
+		rangeRead = false;
+		const shared = source.kind === "blob" ? source.blob : wholeBlob;
+		const blob = shared ?? (source.kind === "url" ? await downloadWhole(source) : null);
+		if (blob) {
+			source = { kind: "blob", blob };
+			fileLen = blob.size;
+			blockSize = BLOB_BLOCK;
+			newCache();
+			fresh = true;
+			// the viewer and the other workers read this copy from now on
+			if (!shared) self.postMessage({ t: "whole", blob });
+		}
+	}
+	fileOffset = 0;
+	if (failure.code === "trap") {
+		try {
+			P = await loadPdfium(wasmUrl, wasmModule);
+			P.PDFiumExt_Init();
+		} catch (err) {
+			console.error(err);
+			return false;
+		}
+		fileAccess = 0;
+		return true;
+	}
+	return fresh;
+}
+
+async function loadDocument(password: string | undefined, waitedOnline = false) {
+	const t0 = performance.now();
+	let result = tryOpen(password);
+	if ("code" in result && (await startOver(result))) result = tryOpen(password);
+	if ("code" in result) {
+		const { code, message, detail } = result;
 		if (code === "fetch" && !waitedOnline && navigator.onLine === false) {
 			void untilOnline(ONLINE_WAIT_MS).then(() => {
-				if (!doc) loadDocument(password, true);
+				if (!doc) void loadDocument(password, true);
 			});
 			return;
 		}
-		const message =
-			code === "password"
-				? password
-					? "Incorrect password: PDFium could not decrypt the document."
-					: "The document is password-protected."
-				: code === "fetch"
-					? `Could not read the document: ${readFailure}`
-					: `PDFium could not open the document (${code === "unknown" ? `error ${err}` : code})`;
-		send({ t: "error", message, code, phase: "document-load", detail: loadFailureDetail(err) });
+		send({ t: "error", message, code: code === "trap" ? "wasm-trap" : code, phase: "document-load", detail });
 		return;
 	}
 	openedPassword = password;
-	initForm();
-	pageCount = P.FPDF_GetPageCount(doc);
-	// Sizes come from the page tree without parsing page content.
-	const sizes: SizeEntry[] = [];
-	for (const i of hintedPages()) {
-		const { w, h } = sizeOf(i);
-		sizes.push([i, w, h]);
-	}
-	send({ t: "opened", pageCount, sizes, info: readInfo(password), wasmMs, wasmShared, openMs: performance.now() - t0 });
+	send({ t: "opened", pageCount: result.pageCount, sizes: result.sizes, info: result.info, wasmMs, wasmShared, openMs: performance.now() - t0 });
 	// The main thread starts the other workers now, so they parse from the blocks this one shared.
 	self.postMessage({ t: "opened" });
 }
@@ -926,7 +1027,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 				else if (m.t === "annots") listAnnotations(m);
 				else if (m.t === "figures") listFigures(m);
 				else if (m.t === "sizes") readSizes(m);
-				else if (m.t === "unlock" && P && !doc && fileAccess) loadDocument(m.password);
+				else if (m.t === "unlock" && P && !doc && fileAccess) await loadDocument(m.password);
 				else if (m.t === "form") formEdit(m);
 				else if (m.t === "save") save(m.id);
 			} catch (err) {
@@ -988,14 +1089,10 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 		blockSize = URL_BLOCK;
 	}
 	// Blocks this worker downloads go to the other workers (through the main thread), so each byte crosses the network once.
-	const share = (start: number, data: Uint8Array) => {
-		if (source?.kind !== "url") return;
-		const copy = data.slice();
-		self.postMessage({ t: "block", start, data: copy }, [copy.buffer]);
-	};
-	cache = new BlockCache(fileLen, { size: () => blockSize, fetch: fetchBlock }, { onFetched: share, granule: RANGE_GRANULE, maxRun: Math.max(1, RANGE_MAX_RUN / URL_BLOCK) });
-	if (source.kind === "url") for (const [start, data] of [...(source.seeds ?? []), ...early.splice(0)]) cache.seed(start, data);
-	loadDocument(pendingPassword ?? msg.password);
+	newCache();
+	rangeRead = source.kind === "url";
+	if (source.kind === "url") for (const [start, data] of [...(source.seeds ?? []), ...early.splice(0)]) cache!.seed(start, data);
+	await loadDocument(pendingPassword ?? msg.password);
 }
 
 // Hosts may load this module through a wrapper (dynamic import from a blob
@@ -1005,7 +1102,9 @@ self.postMessage({ t: "boot" });
 self.onmessage = (ev: MessageEvent<ToRaster>) => {
 	if (ev.data.t === "source") {
 		// The full file arrived: no more network round-trips. Cached blocks stay valid.
-		if (source?.kind === "url" && ev.data.blob.size === fileLen) source = { kind: "blob", blob: ev.data.blob };
+		if (source?.kind !== "url") return;
+		if (ev.data.blob.size === fileLen) source = { kind: "blob", blob: ev.data.blob };
+		else if (!doc) wholeBlob = ev.data.blob;
 		return;
 	}
 	if (ev.data.t === "block") {
