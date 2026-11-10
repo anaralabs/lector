@@ -1,6 +1,6 @@
 // What the core does when its canvas context is lost: wait for the browser to restore it, then move to a fresh CPU-backed 2D canvas.
 
-import type { Compositor } from "./gl";
+import type { Compositor, CompositorKind } from "./gl";
 import type { ErrorCode, ErrorPhase } from "./protocol";
 
 type Canvas = HTMLCanvasElement | OffscreenCanvas;
@@ -140,4 +140,9 @@ export class ContextRecovery {
 		this.cancel();
 		this.stopped = true;
 	}
+}
+
+/** What a core whose `failed` compositor could not start retries with on a fresh canvas: Canvas 2D, unless the host pinned the one that failed. */
+export function retryCompositor(failed: CompositorKind, fallback: boolean): CompositorKind | null {
+	return fallback || failed === "canvas2d" ? "canvas2d" : null;
 }

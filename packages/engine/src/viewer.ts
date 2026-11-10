@@ -21,6 +21,8 @@ import {
 import type { PdfAnnotation } from "./annotations";
 import type { PageFigure } from "./figures";
 import type { SearchOptions } from "./search";
+import { retryCompositor } from "./context-loss";
+import { type CoreInput, type CoreReply, replayInput } from "./core-input";
 import { EngineError } from "./errors";
 import { FailedPages } from "./failed-pages";
 import { FormLayer, modifiers, type FormHit } from "./form-layer";
@@ -702,9 +704,6 @@ export function preloadPdfium(wasmUrl: string): Promise<WebAssembly.Module | und
 	return module;
 }
 
-/** What the main thread posts to the compositor worker before and after init. */
-type CoreMsg = { t: "input"; msg: InputMsg } | { t: "command"; cmd: Command } | { t: "hidden"; hidden: boolean } | { t: "canvas"; canvas: OffscreenCanvas } | { t: "canvas-failed"; reason: string };
-
 /** A URL, the file's bytes, or a promise of either (e.g. a download the host started before the viewer). */
 export type ViewerSource = string | ArrayBuffer | Uint8Array | PromiseLike<string | ArrayBuffer | Uint8Array>;
 
@@ -961,6 +960,19 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 		cleanups.push(() => canvas.remove());
 		container.dataset.compositor = compositorNow;
 		cleanups.push(() => delete container.dataset.compositor);
+		/** A new canvas under the first one, which stays on top, transparent, so input listeners and pointer capture keep working. */
+		const freshCanvas = () => {
+			const fresh = document.createElement("canvas");
+			fresh.style.cssText = canvas.style.cssText;
+			fresh.style.opacity = "";
+			fresh.setAttribute("aria-hidden", "true");
+			if (display !== canvas) display.remove();
+			canvas.before(fresh);
+			canvas.style.opacity = "0";
+			display = fresh;
+			cleanups.push(() => fresh.remove());
+			return fresh;
+		};
 		const overlay = document.createElement("div");
 		overlay.className = "lector-overlay";
 		overlay.style.cssText = "position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:2;";
@@ -1092,18 +1104,6 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 			core = null;
 			postToCore = () => {};
 		};
-		/** A new display canvas under the old one, which stays on top, transparent, so input listeners and pointer capture keep working. */
-		const freshCanvas = () => {
-			const fresh = document.createElement("canvas");
-			fresh.style.cssText = canvas.style.cssText;
-			fresh.setAttribute("aria-hidden", "true");
-			if (display !== canvas) display.remove();
-			canvas.before(fresh);
-			canvas.style.opacity = "0";
-			display = fresh;
-			cleanups.push(() => fresh.remove());
-			return fresh;
-		};
 		const progressFns = new Map<number, (r: SearchResults) => void>();
 		const flights = new Map<number, (landed: boolean) => void>();
 		const handleEvent = (e: CoreEvent) => {
@@ -1113,7 +1113,7 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 					if (offscreenNow) {
 						const off = fresh.transferControlToOffscreen();
 						postToCore({ t: "canvas", canvas: off }, [off]);
-					} else core?.swapCanvas(fresh);
+					}
 				} catch (err) {
 					const reason = String((err as Error)?.message ?? err);
 					if (offscreenNow) postToCore({ t: "canvas-failed", reason });
@@ -1219,66 +1219,108 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 		// Probed, not just feature-tested: Safari 16.4-16.x can transfer a canvas
 		// but has no WebGL on OffscreenCanvas, so it composites on the main thread.
 		let offscreenNow = (wantOffscreen ?? true) && support.offscreenBy[compositor];
-		let postToCore: (msg: unknown, transfer?: Transferable[]) => void = () => {};
+		let postToCore: (msg: CoreInput, transfer?: Transferable[]) => void = () => {};
 		let core: ViewerCore | null = null;
 		const debug = !!(globalThis as { __lectorEngineDebug?: boolean }).__lectorEngineDebug;
-		const mainThreadCore = (target: HTMLCanvasElement) => {
-			try {
-				core = new ViewerCore(target, corePorts, handleEvent, (cb) => requestAnimationFrame(cb), coreOptions, software);
-			} catch (err) {
-				throw new EngineError(`lector-engine: no WebGL2 context: ${String((err as Error)?.message ?? err)}`, "gpu", "engine-load");
-			}
-			const c = core;
+		const mainThreadCore = (target: HTMLCanvasElement, ports: MessagePort[], options: Partial<CoreOptions>, soft: boolean) => {
+			const c = new ViewerCore(target, ports, handleEvent, (cb) => requestAnimationFrame(cb), options, soft);
+			core = c;
 			const g = globalThis as { __core?: ViewerCore };
 			cleanups.push(() => {
 				c.dispose();
 				if (g.__core === c) delete g.__core;
 			});
 			// Debugging and benches only: set globalThis.__lectorEngineDebug before createViewer.
-			if (debug) g.__core = core;
-			return c;
+			if (debug) g.__core = c;
+		};
+		/** Starts the core on a fresh main-thread canvas after its compositor failed to start; returns why nothing can draw, or null. */
+		const retryOnMainThread = (ports: MessagePort[], reason: string): string | null => {
+			const retry = retryCompositor(compositor, coreOptions.compositorFallback);
+			if (!retry) return reason;
+			try {
+				mainThreadCore(freshCanvas(), ports, { ...coreOptions, compositor: retry, compositorFallback: true }, true);
+			} catch (err) {
+				return `${reason}; on the main thread: ${String((err as Error)?.message ?? err)}`;
+			}
+			offscreenNow = false;
+			if (compositorNow !== retry) handleEvent({ type: "compositor", kind: retry, reason: "unavailable" });
+			return null;
+		};
+		/** Starts the core on the main thread when the offscreen one cannot run; returns why nothing can draw, or null. */
+		const startOnMainThread = (ports: MessagePort[]): string | null => {
+			try {
+				mainThreadCore(freshCanvas(), ports, coreOptions, software);
+				offscreenNow = false;
+				return null;
+			} catch (err) {
+				return retryOnMainThread(ports, String((err as Error)?.message ?? err));
+			}
 		};
 		if (offscreenNow) {
 			const offscreen = canvas.transferControlToOffscreen();
+			let worker: Worker | null = null;
+			/** messages the worker's core has not confirmed starting with, replayed into a main-thread core if it could not */
+			let unconfirmed: CoreInput[] | null = [];
+			const coreFailed = (ports: MessagePort[], reason: string) => {
+				worker?.terminate();
+				const sent = unconfirmed ?? [];
+				unconfirmed = null;
+				postToCore = () => {};
+				const failure = retryOnMainThread(ports, reason);
+				if (failure !== null) {
+					handleEvent({ type: "error", message: `lector-engine: no compositor: ${failure}`, code: "gpu", phase: "engine-load" });
+					return;
+				}
+				for (const msg of sent) replayInput(core!, msg);
+			};
 			// Input posted before boot queues here until the compositor exists.
-			const pendingInput: CoreMsg[] = [];
-			postToCore = (msg) => pendingInput.push(msg as CoreMsg);
+			const pendingInput: CoreInput[] = [];
+			postToCore = (msg) => pendingInput.push(msg);
 			const spawned = spawn(
 				"core",
 				"lector-compositor",
-				(ev: MessageEvent<CoreEvent | { t: "boot" }>) => {
-					if ("type" in ev.data) handleEvent(ev.data);
+				(ev: MessageEvent<CoreEvent | CoreReply>) => {
+					const data = ev.data;
+					if ("type" in data) handleEvent(data);
+					else if (data.t === "core-started") unconfirmed = null;
+					else if (data.t === "core-failed" && !destroyed) coreFailed(data.ports, data.reason);
 				},
 				(ev) => {
 					// The compositor script never loaded: composite on the main thread instead, on a canvas that was not transferred.
-					offscreenNow = false;
 					postToCore = () => {};
-					try {
-						const c = mainThreadCore(freshCanvas());
-						for (const m of pendingInput.splice(0)) {
-							if (m.t === "input") c.handle(m.msg);
-							else if (m.t === "command") c.command(m.cmd);
-							else if (m.t === "hidden") c.setHidden(m.hidden);
-						}
-					} catch {
+					if (startOnMainThread(corePorts) !== null) {
 						workerFailed("lector-compositor", ev);
+						return;
 					}
+					for (const msg of pendingInput.splice(0)) replayInput(core!, msg);
 				},
 			);
 			cleanups.push(() => {
 				if (!offscreenNow) return;
 				// The worker disposes its core (GPU resources, ports, timers) and closes itself.
-				const worker = spawned.current();
-				worker.postMessage({ t: "dispose" });
-				setTimeout(() => worker.terminate(), 1000);
+				const w = spawned.current();
+				w.postMessage({ t: "dispose" });
+				setTimeout(() => w.terminate(), 1000);
 			});
-			spawned.booted.then((worker) => {
+			const toWorker = (msg: CoreInput, transfer: Transferable[] = []) => {
+				unconfirmed?.push(msg);
+				worker?.postMessage(msg, transfer);
+			};
+			spawned.booted.then((w) => {
 				if (destroyed) return;
-				worker.postMessage({ t: "init", canvas: offscreen, ports: corePorts, options: coreOptions, debug, software }, [offscreen, ...corePorts]);
-				for (const msg of pendingInput.splice(0)) worker.postMessage(msg);
-				postToCore = (msg, transfer = []) => worker.postMessage(msg, transfer);
+				worker = w;
+				w.postMessage({ t: "init", canvas: offscreen, ports: corePorts, options: coreOptions, debug, software }, [offscreen, ...corePorts]);
+				for (const msg of pendingInput.splice(0)) toWorker(msg);
+				postToCore = toWorker;
 			});
-		} else mainThreadCore(canvas);
+		} else {
+			try {
+				mainThreadCore(canvas, corePorts, coreOptions, software);
+			} catch (err) {
+				const failure = retryOnMainThread(corePorts, String((err as Error)?.message ?? err));
+				if (failure !== null) throw new EngineError(`lector-engine: no compositor: ${failure}`, "gpu", "engine-load");
+			}
+		}
 
 		const syncHidden = () => {
 			const hidden = document.visibilityState === "hidden";
