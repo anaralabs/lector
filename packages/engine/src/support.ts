@@ -6,6 +6,8 @@ export type EngineFeature =
 	| "webgl2"
 	| "canvas2d"
 	| "wasm"
+	| "workers"
+	/** no longer reported: without module workers the engine starts classic ones */
 	| "module-workers"
 	| "message-channel"
 	| "resize-observer"
@@ -27,6 +29,8 @@ export interface EngineSupport {
 	offscreen: boolean;
 	/** per compositor, for hosts that force one */
 	offscreenBy: Record<CompositorKind, boolean>;
+	/** workers can be modules; otherwise the engine starts its workers as classic scripts */
+	moduleWorkers: boolean;
 }
 
 let cached: EngineSupport | null = null;
@@ -91,7 +95,7 @@ export function getEngineSupport(): EngineSupport {
 	const has2d = hasDom && canvas2d(document.createElement("canvas"));
 	if (!gl.ok && !has2d) missing.push("canvas2d");
 	if (typeof WebAssembly !== "object" || typeof WebAssembly.instantiate !== "function") missing.push("wasm");
-	if (!moduleWorkers()) missing.push("module-workers");
+	if (typeof Worker === "undefined") missing.push("workers");
 	if (typeof MessageChannel === "undefined") missing.push("message-channel");
 	if (typeof ResizeObserver === "undefined") missing.push("resize-observer");
 	if (typeof PointerEvent === "undefined") missing.push("pointer-events");
@@ -107,7 +111,7 @@ export function getEngineSupport(): EngineSupport {
 		webgl2: transferable && gl.ok && probeWebgl2(new OffscreenCanvas(1, 1)).ok,
 		canvas2d: transferable && canvas2d(new OffscreenCanvas(1, 1)),
 	};
-	cached = { supported: missing.length === 0, missing, compositor, webgl2: gl.ok, renderer: gl.renderer, softwareGL, offscreen: offscreenBy[compositor], offscreenBy };
+	cached = { supported: missing.length === 0, missing, compositor, webgl2: gl.ok, renderer: gl.renderer, softwareGL, offscreen: offscreenBy[compositor], offscreenBy, moduleWorkers: moduleWorkers() };
 	return cached;
 }
 

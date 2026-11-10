@@ -1,8 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { defineConfig, type Options } from "tsup";
 
-// Oldest browsers that have every runtime feature the engine needs (WebGL2,
-// module workers, dynamic import in workers, WASM); see src/support.ts.
+// Oldest browsers with every runtime feature the engine needs (WebGL2, workers, WASM); see src/support.ts.
 export const browserTarget = ["chrome80", "edge80", "firefox114", "safari15", "ios15"];
 
 /** Source refers to sibling `.ts` worker modules; the published files are `.js`. */
@@ -61,6 +60,10 @@ export default defineConfig([
 		// self-host the documented files: raster-worker.js, core-worker.js, pdfium.wasm.
 		...shared,
 		entry: { "raster-worker": "src/raster-worker.ts", "core-worker": "src/core-worker.ts" },
+		// Plain scripts (no import/export/import.meta) start as module or classic workers alike.
+		format: ["iife"],
+		outExtension: () => ({ js: ".js" }),
+		define: { "import.meta.url": "self.location.href" },
 		splitting: false,
 		// Hosts may serve these files as they are, so ship them minified. The
 		// PDFium glue (src/pdfium/pdfium.js) is bundled into the raster worker;

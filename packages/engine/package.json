@@ -51,6 +51,7 @@
 		"test:types": "tsc --noEmit",
 		"test:package": "node scripts/check-package.mjs",
 		"test:unit": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
+		"test:workers": "node test/workers.browser.mjs",
 		"bench": "node bench/frames.mjs",
 		"bench:features": "node bench/features.mjs",
 		"bench:softgl": "node bench/softgl.mjs"

@@ -115,6 +115,7 @@ jobs:
           pnpm --filter @anaralabs/lector-engine test:types
           pnpm --filter @anaralabs/lector-engine test:unit
           pnpm --filter @anaralabs/lector-engine test:package
+          BROWSERS=chromium pnpm --filter @anaralabs/lector-engine test:workers
 
   release:
     name: Release

@@ -6,7 +6,9 @@ import { EngineError } from "./errors";
 import type { DocSource, ErrorCode, ErrorPhase, FromRaster, PageSize, ToRaster } from "./protocol";
 import { RANGE_GRANULE } from "./range";
 import { type Region, regionRaster } from "./region";
+import { getEngineSupport } from "./support";
 import { openUrl, preloadPdfium } from "./viewer";
+import { type CreateWorker, retryUrl, startWorker, type WorkerType } from "./worker-start";
 
 export type { Region } from "./region";
 
@@ -16,7 +18,7 @@ export interface PageRendererOptions {
 	/** URL of the raster worker script (`workerUrls.raster`); defaults to the bundled one */
 	workerUrl?: string;
 	/** builds the worker for `workerUrl`, as for `createViewer` (cross-origin hosts) */
-	createWorker?: (url: URL, name: string) => Worker;
+	createWorker?: CreateWorker;
 	/** documents kept open at once; each holds a worker with its own PDFium heap (default 2) */
 	maxDocuments?: number;
 	/** a document nothing has asked for in this long is closed (ms, default 30s) */
@@ -90,10 +92,14 @@ export function createPageRenderer(options: PageRendererOptions): PageRenderer {
 	let nextId = 1;
 	let destroyed = false;
 
-	const spawn = (name: string): Worker => {
-		if (!workerUrl) return new Worker(new URL("./raster-worker.ts", import.meta.url), { type: "module", name });
-		const url = new URL(workerUrl, location.href);
-		return createWorker ? createWorker(url, name) : new Worker(url, { type: "module", name });
+	const type: WorkerType = getEngineSupport().moduleWorkers ? "module" : "classic";
+	const spawn = (name: string, attempt: number): Worker => {
+		if (!workerUrl)
+			return type === "module"
+				? new Worker(new URL("./raster-worker.ts", import.meta.url), { type: "module", name })
+				: new Worker(new URL("./raster-worker.ts", import.meta.url), { name });
+		const url = retryUrl(new URL(workerUrl, location.href), attempt);
+		return createWorker ? createWorker(url, name, { type }) : new Worker(url, { type, name });
 	};
 
 	const close = (doc: Doc, err: unknown = new EngineError("lector-engine: the document was closed", "destroyed", "request")) => {
@@ -151,16 +157,7 @@ export function createPageRenderer(options: PageRendererOptions): PageRenderer {
 						return { kind: "url", url: url.href, length: opened.length, credentials: url.origin === location.origin, seeds: opened.seeds };
 					})
 				: Promise.resolve({ kind: "blob", blob: source instanceof Blob ? source : new Blob([(source instanceof Uint8Array ? source : new Uint8Array(source)) as Uint8Array<ArrayBuffer>], { type: "application/pdf" }) });
-		const worker = spawn(`lector-render-${key.slice(-24)}`);
-		doc.worker = worker;
-		const booted = new Promise<void>((resolve) => {
-			const onBoot = (ev: MessageEvent) => {
-				if ((ev.data as { t?: string } | null)?.t !== "boot") return;
-				worker.removeEventListener("message", onBoot);
-				resolve();
-			};
-			worker.addEventListener("message", onBoot);
-		});
+		const name = `lector-render-${key.slice(-24)}`;
 		doc.opened = new Promise<void>((resolve, reject) => {
 			doc.abandon = reject;
 			const fail = (message: string, code: ErrorCode, phase: ErrorPhase) => {
@@ -168,8 +165,14 @@ export function createPageRenderer(options: PageRendererOptions): PageRenderer {
 				reject(err);
 				close(doc, err);
 			};
-			worker.addEventListener("error", (ev) => fail(`lector-engine: render worker failed${ev.message ? `: ${ev.message}` : " to load"}`, "worker", "engine-load"));
-			Promise.all([docSource, booted, pdfium]).then(([src, , module]) => {
+			const workerFailed = (ev: ErrorEvent) => fail(`lector-engine: render worker failed${ev.message ? `: ${ev.message}` : " to load"}`, "worker", "engine-load");
+			const { booted } = startWorker({
+				create: (attempt) => (doc.worker = spawn(name, attempt)),
+				stopped: () => doc.closed,
+				onLoadFailed: workerFailed,
+				onCrashed: workerFailed,
+			});
+			Promise.all([docSource, booted, pdfium]).then(([src, worker, module]) => {
 				if (doc.closed) return;
 				const channel = new MessageChannel();
 				doc.port = channel.port2;
