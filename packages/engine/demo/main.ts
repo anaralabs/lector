@@ -2,8 +2,35 @@ import wasmUrl, { workerUrls } from "../src/vite-wasm";
 
 // Module workers started from a blob loader, as a host app might (survives
 // extensions that re-wrap workers, and cross-origin asset hosts).
-const createWorker = (url: URL, name: string) =>
-	new Worker(URL.createObjectURL(new Blob([`import(${JSON.stringify(url.href)})`], { type: "text/javascript" })), { name });
+const params0 = new URLSearchParams(location.search);
+// bench/worker-faults.mjs: ?fault=<page> crashes PDFium for good on that page in every raster worker; ?bootOom=<n> fails the first n raster workers to reserve memory.
+const faultPage = params0.has("fault") ? Number(params0.get("fault")) : -1;
+let bootOoms = Number(params0.get("bootOom") ?? 0);
+const faultShim = (oom: boolean) => `
+let real = null;
+Object.defineProperty(self, "onmessage", { configurable: true, get: () => real, set: (fn) => { real = fn; } });
+self.addEventListener("message", (ev) => {
+	const d = ev.data;
+	if (!d || d.t !== "init") return real && real(ev);
+	const core = d.port;
+	if (${oom}) return core.postMessage({ t: "error", message: "lector-engine: pdfium.wasm failed to load: WebAssembly.instantiate(): Out of memory: Cannot allocate Wasm memory for new instance", code: "wasm", phase: "engine-load", trap: "oom" });
+	const ch = new MessageChannel();
+	core.onmessage = (e) => {
+		const m = e.data;
+		if ((m.t === "tile" || m.t === "text") && m.page === ${faultPage}) return core.postMessage({ t: "error", message: "lector-engine: PDFium trap on page ${faultPage + 1} in injected (could not restart it): unreachable", code: "wasm-trap", phase: m.t === "text" ? "text" : "render", id: m.id, page: m.page, op: "injected", recovered: false, trap: "trap" });
+		ch.port1.postMessage(m);
+	};
+	ch.port1.onmessage = (e) => core.postMessage(e.data);
+	real({ data: { ...d, port: ch.port2 } });
+});
+`;
+const createWorker = (url: URL, name: string) => {
+	const raster = name.startsWith("lector-raster");
+	const oom = raster && bootOoms > 0;
+	if (oom) bootOoms--;
+	const shim = raster && (oom || faultPage >= 0) ? faultShim(oom) : "";
+	return new Worker(URL.createObjectURL(new Blob([`${shim}import(${JSON.stringify(url.href)})`], { type: "text/javascript" })), { name });
+};
 import { type CoreEvent, createPageRenderer, createViewer, preloadPdfium, type Viewer, type ViewerSource } from "../src";
 
 // Benches read the core (window.__core, or self.__core in the compositor worker).

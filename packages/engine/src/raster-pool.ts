@@ -14,6 +14,14 @@ export type FormResult = Omit<Extract<FromRaster, { t: "form" }>, "t" | "seq">;
 
 type JobMsg = Extract<ToRaster, { t: "tile" } | { t: "text" } | { t: "outline" } | { t: "annots" } | { t: "figures" }>;
 type ErrorResult = Extract<FromRaster, { t: "error" }>;
+type OpenedResult = Extract<FromRaster, { t: "opened" }>;
+
+/** Why one page shows a placeholder (`render`) or has no text (`text`) while the rest of the document keeps working. */
+export interface PageFailure {
+	code: ErrorCode;
+	phase: "render" | "text";
+	message: string;
+}
 
 interface Job {
 	key: string;
@@ -41,7 +49,27 @@ interface Lane {
 	heap: number;
 	/** form edits made before this worker opened the document, replayed once it has */
 	backlog: ToRaster[];
+	/** no longer used (its worker could not start or keep running PDFium) */
+	retired: boolean;
+	/** fresh workers started in this slot after its PDFium could not restart itself */
+	restarts: number;
+	/** started with a smaller PDFium memory ceiling */
+	lowMemory: boolean;
+	opened?: OpenedResult;
 }
+
+const newLane = (port: MessagePort, from?: Lane): Lane => ({
+	port,
+	ready: false,
+	busy: null,
+	pages: [],
+	cancelling: false,
+	heap: 0,
+	backlog: [],
+	retired: false,
+	restarts: from?.restarts ?? 0,
+	lowMemory: from?.lowMemory ?? false,
+});
 
 /**
  * ms = content × frac (+ overhead on a worker that has not loaded the page: parse,
@@ -68,21 +96,24 @@ const EMA = 0.3;
 const LOOKAHEAD = 64;
 /** what loading a page costs a worker that does not have it while the file is still remote (a range round trip or more) */
 const REMOTE_PAGE_MS = 400;
-/** retries for a page whose job crashed PDFium (on a fresh instance) before the page is skipped */
+/** retries for a page whose render or text job failed (on a fresh PDFium after a crash) before it is skipped */
 export const PAGE_TRAP_RETRIES = 1;
-/** PDFium crashes per document before the engine gives up on it */
-export const DOC_TRAP_LIMIT = 6;
+/** fresh workers per slot after its PDFium could not restart itself; then the slot retires */
+export const WORKER_RESTARTS = 2;
+/** a tile that ran out of memory is retried at this fraction of its resolution */
+export const OOM_REDUCE = 2;
 
 /**
  * Raster workers for this device: half the cores (2-4) on desktops, 2 where
  * memory is short (each worker holds its own PDFium heap: more workers did not
- * beat 4 on heavy scans and cost ~40% more memory), 2 on phones and tablets
- * (1 when the browser reports 2GB or less). Without a GPU the CPU also draws
+ * beat 4 on heavy scans and cost ~40% more memory), 2 on phones and tablets,
+ * 1 when the browser reports 2GB or less. Without a GPU the CPU also draws
  * every frame, so 1 below 8 cores and 2 from 8.
  */
 export function rasterWorkerCount({ cores, memoryGB, touch, software = false }: { cores?: number; memoryGB?: number; touch: boolean; software?: boolean }) {
+	if (memoryGB !== undefined && memoryGB <= 2) return 1;
 	if (software) return (cores || 4) >= 8 ? 2 : 1;
-	if (touch) return memoryGB !== undefined && memoryGB <= 2 ? 1 : 2;
+	if (touch) return 2;
 	const n = Math.min(4, Math.max(2, Math.floor((cores || 4) / 2)));
 	return memoryGB !== undefined && memoryGB <= 4 ? 2 : n;
 }
@@ -111,27 +142,63 @@ export class RasterPool {
 	affinity = false;
 	onIdle: () => void = () => {};
 	onError: (message: string, code: ErrorCode, phase: ErrorPhase, detail?: LoadFailureDetail) => void = (m) => console.error(m);
-	/** a page PDFium cannot render: its jobs fail from now on */
-	onPageFailed: (page: number, code: ErrorCode) => void = () => {};
-	private traps = 0;
-	private pageTraps = new Map<number, number>();
+	/** a page PDFium cannot render (its jobs fail from now on) or whose text it cannot extract; the document keeps working */
+	onPageFailed: (page: number, failure: PageFailure) => void = () => {};
+	/**
+	 * Terminate worker `index` and start a fresh one in its place (`lowMemory`:
+	 * with a smaller PDFium memory ceiling), then hand its port to `replace`.
+	 * Without it, a worker whose PDFium cannot restart retires.
+	 */
+	onRestart: ((index: number, lowMemory: boolean) => void) | null = null;
+	/** worker `index` is no longer used: terminate it to free its memory */
+	onRetire: (index: number) => void = () => {};
+	/** failed attempts per `render:<page>` / `text:<page>` since its last success */
+	private tries = new Map<string, number>();
 	private failedPages = new Set<number>();
+	private failedText = new Set<number>();
+	/** pages whose tiles ran out of memory: they render at reduced resolution */
+	private reduced = new Set<number>();
+	/** every form edit, replayed into fresh workers */
+	private formOps: FormOp[] = [];
+	private didOpen = false;
 	private gaveUp = false;
 	now: () => number = () => performance.now();
 
 	constructor(ports: MessagePort[]) {
-		this.lanes = ports.map((port) => ({ port, ready: false, busy: null, pages: [], cancelling: false, heap: 0, backlog: [] }));
-		this.lanes.forEach((lane, i) => {
-			lane.port.onmessage = (ev: MessageEvent<FromRaster>) => this.receive(lane, i, ev.data);
-		});
+		this.lanes = ports.map((port) => newLane(port));
+		for (const [i, lane] of this.lanes.entries()) this.listen(lane, i);
+	}
+
+	private listen(lane: Lane, index: number) {
+		lane.port.onmessage = (ev: MessageEvent<FromRaster>) => this.receive(lane, index, ev.data);
+	}
+
+	/** The fresh worker for slot `index` that `onRestart` asked for. */
+	replace(index: number, port: MessagePort) {
+		const old = this.lanes[index];
+		if (!old || old.retired) {
+			port.close();
+			return;
+		}
+		this.dropWaiters(old);
+		const lane = newLane(port, old);
+		lane.backlog = this.formOps.map((op): ToRaster => ({ t: "form", seq: 0, op, report: false }));
+		this.lanes[index] = lane;
+		this.listen(lane, index);
 	}
 
 	get pending() {
 		return this.queue.size + this.inflight.size;
 	}
 
+	/** workers in use (retired ones excluded) */
 	get workers() {
-		return this.lanes.length;
+		return this.lanes.filter((l) => !l.retired).length;
+	}
+
+	/** the worker that reports the document as opened and answers form edits */
+	private primary() {
+		return this.lanes.findIndex((l) => !l.retired);
 	}
 
 	/** memory held by all PDFium workers (heaps + block caches), bytes */
@@ -175,8 +242,8 @@ export class RasterPool {
 		onDone: (res: FromRaster) => void,
 		frac = msg.t === "tile" ? 1 : 0,
 	) {
-		if (this.failedPages.has(msg.page)) {
-			const failed: ErrorResult = { t: "error", message: `lector-engine: page ${msg.page + 1} failed to render`, code: "wasm-trap", phase: msg.t === "text" ? "text" : "render", page: msg.page };
+		if (this.failedPages.has(msg.page) || (msg.t === "text" && this.failedText.has(msg.page))) {
+			const failed: ErrorResult = { t: "error", message: `lector-engine: page ${msg.page + 1} failed to ${msg.t === "text" ? "extract text" : "render"}`, code: "wasm-trap", phase: msg.t === "text" ? "text" : "render", page: msg.page };
 			queueMicrotask(() => onDone(failed));
 			return;
 		}
@@ -191,7 +258,8 @@ export class RasterPool {
 			return;
 		}
 		const id = this.nextId++;
-		this.queue.set(key, { key, priority, msg: { ...msg, id } as JobMsg, page: msg.page, onDone, frac, est: 0, started: 0, warm: false });
+		const reduce = msg.t === "tile" && this.reduced.has(msg.page) ? { reduce: OOM_REDUCE } : {};
+		this.queue.set(key, { key, priority, msg: { ...msg, ...reduce, id } as JobMsg, page: msg.page, onDone, frac, est: 0, started: 0, warm: false });
 	}
 
 	/** Drop queued tile jobs whose key is not in `keep` (text jobs are cheap and always kept); unwanted running tiles may be cancelled. */
@@ -213,8 +281,8 @@ export class RasterPool {
 	}
 
 	private formSeq = 0;
-	private formWaiters = new Map<number, (res: FormResult) => void>();
-	private saveWaiters = new Map<number, (res: Extract<FromRaster, { t: "saved" }>) => void>();
+	private formWaiters = new Map<number, { lane: Lane; resolve: (res: FormResult) => void }>();
+	private saveWaiters = new Map<number, { lane: Lane; settle: (res: Extract<FromRaster, { t: "saved" }>) => void }>();
 
 	/**
 	 * Applies a form edit in every worker, in order with their jobs: a job sent
@@ -222,9 +290,13 @@ export class RasterPool {
 	 */
 	form(op: FormOp): Promise<FormResult> {
 		const seq = ++this.formSeq;
-		const done = new Promise<FormResult>((resolve) => this.formWaiters.set(seq, resolve));
-		this.lanes.forEach((lane, i) => {
-			const msg: ToRaster = { t: "form", seq, op, report: i === 0 };
+		this.formOps.push(op);
+		const reporter = this.lanes[this.primary()];
+		if (!reporter) return Promise.resolve({ changed: [], reset: false });
+		const done = new Promise<FormResult>((resolve) => this.formWaiters.set(seq, { lane: reporter, resolve }));
+		this.lanes.forEach((lane) => {
+			if (lane.retired) return;
+			const msg: ToRaster = { t: "form", seq, op, report: lane === reporter };
 			if (lane.ready) lane.port.postMessage(msg);
 			else lane.backlog.push(msg);
 		});
@@ -234,11 +306,11 @@ export class RasterPool {
 	/** The document bytes with every form edit, from the first worker. */
 	save(): Promise<ArrayBuffer> {
 		const id = this.nextId++;
-		const lane = this.lanes[0];
+		const lane = this.lanes.find((l) => l.ready && !l.retired) ?? this.lanes[this.primary()];
 		if (!lane) return Promise.reject(new Error("no raster worker"));
 		const msg: ToRaster = { t: "save", id };
 		return new Promise((resolve, reject) => {
-			this.saveWaiters.set(id, (res) => (res.buf ? resolve(res.buf) : reject(new Error(res.error ?? "save failed"))));
+			this.saveWaiters.set(id, { lane, settle: (res) => (res.buf ? resolve(res.buf) : reject(new Error(res.error ?? "save failed"))) });
 			if (lane.ready) lane.port.postMessage(msg);
 			else lane.backlog.push(msg);
 		});
@@ -246,7 +318,7 @@ export class RasterPool {
 
 	/** Retry opening the document with a password in every worker that has not opened it. */
 	unlock(password: string) {
-		for (const lane of this.lanes) if (!lane.ready) lane.port.postMessage({ t: "unlock", password } satisfies ToRaster);
+		for (const lane of this.lanes) if (!lane.ready && !lane.retired) lane.port.postMessage({ t: "unlock", password } satisfies ToRaster);
 	}
 
 	private cost(job: Job, warm: boolean) {
@@ -356,51 +428,155 @@ export class RasterPool {
 
 
 
-	/**
-	 * A job crashed PDFium. The worker restarted it (`recovered`): retry the
-	 * page once, then skip it. A worker that could not restart retires; the
-	 * document fails when no worker is left (or the first, which saves and
-	 * reports form edits), or after too many crashes.
-	 */
-	private trapped(lane: Lane, index: number, msg: ErrorResult) {
+	private settle(lane: Lane) {
 		const job = lane.busy;
 		if (job) {
 			this.inflight.delete(job.msg.id);
 			this.unwanted.delete(job.msg.id);
-			lane.busy = null;
-			lane.cancelling = false;
 		}
-		this.traps++;
-		if (!msg.recovered) {
-			lane.ready = false;
-			lane.pages = [];
-			lane.backlog = [];
+		lane.busy = null;
+		lane.cancelling = false;
+		return job;
+	}
+
+	/** Stops listening to a worker that is being replaced or retired; what it was asked to report settles empty. */
+	private detach(lane: Lane) {
+		lane.port.onmessage = null;
+		lane.port.close();
+		lane.ready = false;
+		lane.pages = [];
+		lane.backlog = [];
+		lane.heap = 0;
+		this.dropWaiters(lane);
+	}
+
+	private dropWaiters(lane: Lane) {
+		for (const [seq, w] of this.formWaiters)
+			if (w.lane === lane) {
+				this.formWaiters.delete(seq);
+				w.resolve({ changed: [], reset: false });
+			}
+		for (const [id, w] of this.saveWaiters)
+			if (w.lane === lane) {
+				this.saveWaiters.delete(id);
+				w.settle({ t: "saved", id, error: "the raster worker restarted" });
+			}
+	}
+
+	private restart(index: number, lowMemory: boolean) {
+		const lane = this.lanes[index]!;
+		if (!this.onRestart) {
+			this.retire(index);
+			return;
 		}
-		const page = msg.page ?? job?.page ?? -1;
-		const stranded = !msg.recovered && (index === 0 || !this.lanes.some((l) => l.ready));
-		if (stranded || this.traps > DOC_TRAP_LIMIT) {
-			if (!this.gaveUp) this.onError(msg.message, "wasm-trap", msg.phase);
-			this.gaveUp = true;
+		this.detach(lane);
+		lane.restarts++;
+		lane.lowMemory ||= lowMemory;
+		this.onRestart(index, lane.lowMemory);
+	}
+
+	private retire(index: number) {
+		const lane = this.lanes[index]!;
+		this.detach(lane);
+		lane.retired = true;
+		this.onRetire(index);
+		this.announce();
+	}
+
+	/** The first working worker to open the document reports it, once. */
+	private announce() {
+		const opened = this.lanes[this.primary()]?.opened;
+		if (this.didOpen || !opened) return;
+		this.didOpen = true;
+		const { wasmMs, wasmShared = false, openMs } = opened;
+		this.onOpened(opened.pageCount, opened.sizes, opened.info, wasmMs !== undefined && openMs !== undefined ? { wasmMs, wasmShared, openMs } : undefined);
+	}
+
+	private giveUp(msg: ErrorResult, code: ErrorCode) {
+		if (!this.gaveUp) this.onError(msg.message, code, msg.phase, msg.detail);
+		this.gaveUp = true;
+	}
+
+	/**
+	 * A worker could not start PDFium or open the document. Before the document
+	 * opened that is the document's error (reported once), unless PDFium's memory
+	 * could not be reserved: then, and for a fresh worker after the document
+	 * opened, the pool goes on with fewer workers, the last one once more with a
+	 * smaller heap ceiling.
+	 */
+	private loadFailed(lane: Lane, index: number, msg: ErrorResult) {
+		this.settle(lane)?.onDone(msg);
+		const memory = msg.trap === "oom";
+		if (!memory && !this.didOpen) {
+			if (index === this.primary()) this.onError(msg.message, msg.code, msg.phase, msg.detail);
+			return;
+		}
+		if (this.lanes.some((l, i) => i !== index && !l.retired)) this.retire(index);
+		else if (memory && !lane.lowMemory && this.onRestart) this.restart(index, true);
+		else this.giveUp(msg, msg.code);
+		this.pump();
+	}
+
+	/**
+	 * A render or text job failed. A worker whose PDFium crashed and could not
+	 * restart itself is replaced by a fresh worker (or retires); the job is
+	 * retried once (a tile that ran out of memory at reduced resolution), then
+	 * its page is skipped. Only a pool with no worker left fails the document.
+	 */
+	private jobFailed(lane: Lane, index: number, msg: ErrorResult) {
+		const job = this.settle(lane);
+		if (msg.code === "wasm-trap" && !msg.recovered) {
+			if (lane.restarts < WORKER_RESTARTS) this.restart(index, msg.trap === "oom");
+			else this.retire(index);
+		}
+		if (this.lanes.every((l) => l.retired)) {
+			this.giveUp(msg, "wasm-trap");
 			job?.onDone(msg);
-		} else if (page < 0) job?.onDone(msg);
-		else {
-			const tries = (this.pageTraps.get(page) ?? 0) + 1;
-			this.pageTraps.set(page, tries);
-			if (job && tries <= PAGE_TRAP_RETRIES && !this.failedPages.has(page) && !this.queue.has(job.key)) this.queue.set(job.key, job);
-			else this.failPage(page, msg, job);
-		}
+		} else if (job) this.retryOrSkip(job, msg);
 		this.pump();
 		if (this.pending === 0) this.onIdle();
 	}
 
-	private failPage(page: number, msg: ErrorResult, job: Job | null) {
+	private retryOrSkip(job: Job, msg: ErrorResult) {
+		const page = msg.page ?? job.page;
+		const phase = job.msg.t === "tile" ? "render" : job.msg.t === "text" ? "text" : null;
+		if (page < 0 || !phase) {
+			console.error(msg.message);
+			job.onDone(msg);
+			return;
+		}
+		const key = `${phase}:${page}`;
+		const tries = (this.tries.get(key) ?? 0) + 1;
+		this.tries.set(key, tries);
+		const skipped = this.failedPages.has(page) || (phase === "text" && this.failedText.has(page));
+		if (tries <= PAGE_TRAP_RETRIES && !skipped && !this.queue.has(job.key)) {
+			if (job.msg.t === "tile" && msg.trap === "oom") {
+				this.reduced.add(page);
+				job.msg = { ...job.msg, reduce: OOM_REDUCE };
+			}
+			this.queue.set(job.key, job);
+			return;
+		}
+		const failure: PageFailure = { code: msg.code, phase, message: msg.message };
+		if (phase === "render") this.failPage(page, failure, msg, job);
+		else this.failText(page, failure, msg, job);
+	}
+
+	private failPage(page: number, failure: PageFailure, msg: ErrorResult, job: Job) {
 		const first = !this.failedPages.has(page);
 		this.failedPages.add(page);
 		const dropped = [...this.queue.values()].filter((q) => q.page === page);
 		for (const q of dropped) this.queue.delete(q.key);
-		if (first) this.onPageFailed(page, "wasm-trap");
-		job?.onDone(msg);
+		if (first) this.onPageFailed(page, failure);
+		job.onDone(msg);
 		for (const q of dropped) q.onDone(msg);
+	}
+
+	private failText(page: number, failure: PageFailure, msg: ErrorResult, job: Job) {
+		const first = !this.failedText.has(page);
+		this.failedText.add(page);
+		if (first) this.onPageFailed(page, failure);
+		job.onDone(msg);
 	}
 
 	/** The whole file is local now: any worker can take any page. */
@@ -411,40 +587,26 @@ export class RasterPool {
 
 	private receive(lane: Lane, index: number, msg: FromRaster) {
 		if (msg.t === "form") {
-			this.formWaiters.get(msg.seq)?.(msg);
+			this.formWaiters.get(msg.seq)?.resolve(msg);
 			this.formWaiters.delete(msg.seq);
 			return;
 		}
 		if (msg.t === "saved") {
-			this.saveWaiters.get(msg.id)?.(msg);
+			this.saveWaiters.get(msg.id)?.settle(msg);
 			this.saveWaiters.delete(msg.id);
 			return;
 		}
 		if (msg.t === "opened") {
 			lane.ready = true;
+			lane.opened = msg;
 			for (const m of lane.backlog.splice(0)) lane.port.postMessage(m);
-			const { wasmMs, wasmShared = false, openMs } = msg;
-			if (index === 0) this.onOpened(msg.pageCount, msg.sizes, msg.info, wasmMs !== undefined && openMs !== undefined ? { wasmMs, wasmShared, openMs } : undefined);
+			this.announce();
 			this.pump();
 			return;
 		}
 		if (msg.t === "error") {
-			// Every worker opens the same bytes: report load failures once.
-			const load = msg.phase === "document-load" || msg.phase === "engine-load";
-			if (msg.code === "wasm-trap" && !load) {
-				this.trapped(lane, index, msg);
-				return;
-			}
-			if (!load || index === 0) this.onError(msg.message, msg.code, msg.phase, msg.detail);
-			const job = lane.busy;
-			if (job) {
-				this.inflight.delete(job.msg.id);
-				lane.busy = null;
-				lane.cancelling = false;
-			}
-			this.pump();
-			// The job's owner learns it failed (text waiters, tiles that must not retry forever).
-			if (job) job.onDone(msg);
+			if (msg.phase === "document-load" || msg.phase === "engine-load") this.loadFailed(lane, index, msg);
+			else this.jobFailed(lane, index, msg);
 			return;
 		}
 		if ("heap" in msg) lane.heap = msg.heap;
@@ -455,7 +617,10 @@ export class RasterPool {
 			lane.busy = null;
 			lane.cancelling = false;
 		}
-		if (job && (msg.t === "tile" || msg.t === "text")) this.learn(job, msg.ms);
+		if (job && (msg.t === "tile" || msg.t === "text")) {
+			this.learn(job, msg.ms);
+			this.tries.delete(`${msg.t === "tile" ? "render" : "text"}:${job.page}`);
+		}
 		this.pump();
 		// A cancelled tile is forgotten: the next plan requests it again if it is still wanted.
 		if (msg.t !== "cancelled") job?.onDone(msg);
