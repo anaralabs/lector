@@ -63,11 +63,6 @@ export function blockVerdict(status: number, received: number, start: number, en
 	return "error";
 }
 
-/** A range read worth one more try: a dropped connection, a timeout, a rate limit or a server error. */
-export function retryableBlockStatus(status: number): boolean {
-	return status === 0 || status === 408 || status === 429 || status >= 500;
-}
-
 /** FPDF_GetLastError -> ErrorCode */
 const LOAD_ERRORS: Record<number, ErrorCode> = { 2: "file", 3: "parse", 4: "password", 5: "security" };
 

@@ -27,6 +27,7 @@ import { FormLayer, modifiers, type FormHit } from "./form-layer";
 import type { DocSource, DocumentInfo, OpenTiming, OutlineItem, PageSize, SizeHint, ToRaster } from "./protocol";
 import { rasterWorkerCount } from "./raster-pool";
 import { abandonWhole, HEAD_BYTES, rangesBeside, probeReadBytes, probeVerdict, RACE_FILE_MAX, RANGE_GRANULE, readLinearization, WHOLE_FILE_MAX } from "./range";
+import { fetchRetrying, isNetworkError, retrying, retryableStatus } from "./retry";
 import { findStartxref, pagePathObjects, parseXref } from "./xref";
 import type { CompositorKind } from "./gl";
 import { getEngineSupport } from "./support";
@@ -230,11 +231,30 @@ async function fetchPdf(url: string, init: RequestInit = {}) {
 	return res;
 }
 
-/** The body can fail mid-download after the headers arrived; that is still a fetch failure. */
-async function readBlob(res: Response, url: string): Promise<Blob> {
+class ServerResponse extends Error {
+	constructor(readonly status: number) {
+		super(`HTTP ${status}`);
+	}
+}
+
+/** The whole file. A dropped connection (before or mid-body) or a retryable status fetches it again; errors read as `fetchPdf`'s. */
+async function downloadPdf(url: string, init: RequestInit = {}, onResponse?: (res: Response) => void): Promise<Blob> {
 	try {
-		return await res.blob();
+		return await retrying(
+			async () => {
+				const res = await fetch(url, { credentials: "same-origin", ...init });
+				onResponse?.(res);
+				if (!res.ok) {
+					void res.body?.cancel().catch(() => {});
+					throw new ServerResponse(res.status);
+				}
+				return await res.blob();
+			},
+			(err) => (err instanceof ServerResponse ? retryableStatus(err.status) : isNetworkError(err)),
+			{ signal: init.signal },
+		);
 	} catch (err) {
+		if (err instanceof ServerResponse) throw new EngineError(`Unexpected server response (${err.status}) while retrieving PDF "${url}".`, "fetch", "document-load", url);
 		throw new EngineError(`Failed to fetch PDF "${url}": ${String((err as Error)?.message ?? err)}`, "fetch", "document-load", url);
 	}
 }
@@ -261,7 +281,7 @@ async function rangeBytes(url: string, start: number, end: number, net: NetCount
 	try {
 		net.requests++;
 		// no-store: the HTTP cache lets one request per URL through at a time, which would serialise these
-		const res = await fetch(url, { credentials: "same-origin", cache: "no-store", headers: { Range: `bytes=${start}-${end - 1}` }, signal });
+		const res = await fetchRetrying(url, { credentials: "same-origin", cache: "no-store", headers: { Range: `bytes=${start}-${end - 1}` }, signal });
 		if (res.status !== 206) return null;
 		const bytes = new Uint8Array(await res.arrayBuffer());
 		net.bytes += bytes.length;
@@ -526,20 +546,20 @@ export async function openUrl(
 		net.firstByteAt ||= epochNow();
 		return res;
 	};
-	const download = async (): Promise<Opened> => ({ blob: await readBlob(answered(await fetchPdf(url, { signal })), url), mode: "download" });
+	const download = async (): Promise<Opened> => ({ blob: await downloadPdf(url, { signal }, answered), mode: "download" });
 	if (!range) return download();
 	const askedAt = epochNow();
-	// A server that refuses the ranged request (e.g. a CORS preflight for `Range`) still serves the plain one.
+	// A server that refuses the ranged request (e.g. a CORS preflight for `Range`) still serves the plain one, so the probe is not retried.
 	const res = await fetchPdf(url, { headers: { Range: `bytes=0-${RACE_FILE_MAX - 1}` }, signal }).then(answered, () => null);
 	if (!res) return download();
 	const rttMs = epochNow() - askedAt;
 	const header = (name: string) => res.headers.get(name);
 	const verdict = probeVerdict({ status: res.status, contentRange: header("Content-Range"), contentEncoding: header("Content-Encoding"), contentLength: header("Content-Length") }, RACE_FILE_MAX);
-	if (verdict.kind === "full-body") return { blob: await readBlob(res, url), mode: "download" };
+	if (verdict.kind === "full-body") return { blob: await res.blob().catch(() => downloadPdf(url, { signal }, answered)), mode: "download" };
 	let length = verdict.kind === "range" || verdict.kind === "whole" ? verdict.length : 0;
 	if (verdict.kind === "need-length") {
 		net.requests++;
-		const head = await fetch(url, { method: "HEAD", credentials: "same-origin", signal }).catch(() => null);
+		const head = await fetchRetrying(url, { method: "HEAD", credentials: "same-origin", signal }).catch(() => null);
 		length = Number(head?.ok ? head.headers.get("Content-Length") : 0) || 0;
 	}
 	if (!length || verdict.kind === "download") {
@@ -619,7 +639,7 @@ async function openRanges(
 	if (headBytes) store.add(0, headBytes);
 	await Promise.all([tail, store.ensure([[0, Math.min(HEAD_BYTES, length)]])]);
 	const first = store.bytes(0, Math.min(HEAD_BYTES, length));
-	if (!first) return { blob: await readBlob(await fetchPdf(url, { signal }), url), mode: "download" };
+	if (!first) return { blob: await downloadPdf(url, { signal }), mode: "download" };
 	const lin = readLinearization(first, length);
 	if (lin && firstPage) await store.ensure([[0, probeReadBytes(lin, true, length)]]);
 	else await prefetchPagePath(store, tailStart, target).catch(() => {});
@@ -901,12 +921,10 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 			}
 			const url = (docSource as { url: string }).url;
 			// Low priority: it must not slow down range requests for what is on screen.
-			fullFetch = fetchPdf(url, { priority: "low", signal: network.signal } as RequestInit)
-				.then((res) => readBlob(res, url))
-				.then(arrived, (err) => {
-					fullFetch = null;
-					throw err;
-				});
+			fullFetch = downloadPdf(url, { priority: "low", signal: network.signal } as RequestInit).then(arrived, (err) => {
+				fullFetch = null;
+				throw err;
+			});
 			return fullFetch;
 		};
 		// The racing download's prefix keeps seeding the workers, and once complete it is their source.
