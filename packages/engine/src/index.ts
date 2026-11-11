@@ -11,3 +11,4 @@ export type { Rect, SelectionTextOptions, TextPoint } from "./text";
 export { type EngineFeature, type EngineSupport, getEngineSupport, isEngineSupported } from "./support";
 export type { TextLayerLine } from "./text-layer";
 export { markColor, type RGB, type RGBA, toneMap } from "./colors";
+export type { CreateWorker, WorkerType } from "./worker-start";

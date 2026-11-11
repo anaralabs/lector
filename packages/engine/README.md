@@ -76,18 +76,22 @@ export default defineConfig({
 
 ### Workers and the wasm
 
-The engine starts two kinds of module workers: `raster-worker` (PDFium) and `core-worker` (the compositor, only when `OffscreenCanvas` + WebGL2 is available). Each worker posts `{ t: "boot" }` when its module has loaded, and the engine waits for that before sending it anything.
+The engine starts two kinds of workers: `raster-worker` (PDFium) and `core-worker` (the compositor, only when `OffscreenCanvas` + WebGL2 is available). Each worker posts `{ t: "boot" }` when its script has loaded, and the engine waits for that before sending it anything. They are module workers, or classic workers in browsers without module workers: the worker files are plain scripts (no `import`, `export` or `import.meta`), so either works.
+
+A worker whose script fails to load (a dropped connection, Safari waking from sleep) is started again after 0.5 s and 2 s (and once the browser is back online), from its URL with a `lector-retry` query so no cached failure is reused. Raster workers that still fail are left out: the document opens on the ones that loaded, and only fails (`worker` error) when none did. If the compositor worker never loads, the engine composites on the main thread instead.
 
 - With no `workerUrls`, the engine calls `new Worker(new URL("./raster-worker.js", import.meta.url), { type: "module" })`, which Vite, webpack 5 and other bundlers recognise.
 - With `workerUrls`, the engine starts workers from those URLs.
-- With `workerUrls` and `createWorker(url, name)`, the host starts each worker. For example, a classic blob worker that runs `import(url)` survives browser extensions that re-wrap module workers and works when assets come from a CDN on another origin:
+- With `workerUrls` and `createWorker(url, name, { type })`, the host starts each worker. For example, a classic blob worker that runs `import(url)` survives browser extensions that re-wrap module workers and works when assets come from a CDN on another origin; where `type` is `"classic"` (no module workers) it loads the script with `importScripts` instead:
 
 ```ts
-const createWorker = (url: URL, name: string) =>
-	new Worker(URL.createObjectURL(new Blob([`import(${JSON.stringify(url.href)})`], { type: "text/javascript" })), { name });
+const createWorker = (url: URL, name: string, options?: { type: "module" | "classic" }) => {
+	const load = options?.type === "classic" ? `importScripts(${JSON.stringify(url.href)})` : `import(${JSON.stringify(url.href)})`;
+	return new Worker(URL.createObjectURL(new Blob([load], { type: "text/javascript" })), { name });
+};
 ```
 
-Without Vite, serve `@anaralabs/lector-engine/pdfium.wasm` and the worker files yourself (the package exports `./raster-worker`, `./core-worker` and `./pdfium.wasm`), and pass their URLs as `wasmUrl` and `workerUrls`. Those three files are all you need: each worker is a single self-contained module (no shared chunks), so they can live in any directory or on a CDN.
+Without Vite, serve `@anaralabs/lector-engine/pdfium.wasm` and the worker files yourself (the package exports `./raster-worker`, `./core-worker` and `./pdfium.wasm`), and pass their URLs as `wasmUrl` and `workerUrls`. Those three files are all you need: each worker is a single self-contained script (no shared chunks), so they can live in any directory or on a CDN.
 
 Serve `pdfium.wasm` as `Content-Type: application/wasm`, compressed (brotli: 4.1MB raw, 1.5MB over the wire): the raster workers then compile it while it downloads (`WebAssembly.instantiateStreaming`). With another content type they wait for the whole file first. It is PDFium trimmed to the functions the engine calls, so `@embedpdf/pdfium`'s own `pdfium.wasm` (a superset) works too, only larger.
 
@@ -357,13 +361,13 @@ Lines are grouped by direction. A line whose first strong character is Hebrew, A
 | Safari (macOS) | 15 | main thread on 15–16.x; worker from 17 |
 | iOS / iPadOS Safari | 15 | main thread on 15–16.x; worker from 17 |
 
-The minimums are set by **module workers** (Firefox 114, Safari 15) and dynamic `import()` in workers (Chrome 80). WebGL2, WebAssembly, pointer events and `ResizeObserver` are all older than that. The build targets those same browsers (`chrome80, firefox114, safari15`), so newer syntax is down-levelled and does not set the minimum.
+The build targets these browsers (`chrome80, firefox114, safari15`), so newer syntax is down-levelled. WebGL2, WebAssembly, workers, pointer events and `ResizeObserver` are all older. Without module workers (Firefox before 114, some managed browsers) the workers start as classic scripts.
 
 Below the minimum, nothing is half-rendered:
 
-- `isEngineSupported()` returns `false`. `getEngineSupport()` also lists what is missing (`canvas2d`, `wasm`, `module-workers`, `message-channel`, `resize-observer`, `pointer-events`), the compositor `auto` picks (`compositor`), the WebGL `renderer` string and whether it is a software rasteriser (`softwareGL`). Both functions are synchronous and cached.
+- `isEngineSupported()` returns `false`. `getEngineSupport()` also lists what is missing (`canvas2d`, `wasm`, `workers`, `message-channel`, `resize-observer`, `pointer-events`), the compositor `auto` picks (`compositor`), the WebGL `renderer` string and whether it is a software rasteriser (`softwareGL`). Both functions are synchronous and cached.
 - `createViewer` (and `<LectorView>`, through `onEvent`) rejects with `lector-engine is not supported in this browser (missing: …)`.
-- If a worker script fails to load, an `{ type: "error" }` event names the worker.
+- If no raster worker loads (after the retries), an `{ type: "error" }` event names the worker.
 
 There is no WebGL1 path: a device without WebGL2 (a blocklisted or very old GPU, a VM without a driver) gets the Canvas 2D compositor, which also replaces WebGL2 on software rasterisers, where it is faster. Force one with `compositor: "webgl2" | "canvas2d"` (default `auto`); `viewer.compositor`, the `compositor` field of `stats` and a `data-compositor="webgl2" | "canvas2d"` attribute on the viewer's container (updated if the viewer switches mid-session) say which one runs. With `auto`, WebGL2 that passes the probe but will not start in the compositor worker also falls back to 2D (`compositor` event, reason `unavailable`).
 

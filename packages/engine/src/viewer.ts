@@ -34,6 +34,7 @@ import { getEngineSupport } from "./support";
 import { documentKey } from "./tile-cache";
 import type { Rect, TextPoint } from "./text";
 import { TextLayer, type TextLayerLine } from "./text-layer";
+import { type CreateWorker, retryUrl, startWorker, type WorkerType } from "./worker-start";
 
 export interface ViewerOptions extends Partial<CoreOptions> {
 	/** URL of the package's `pdfium.wasm` (`@anaralabs/lector-engine/pdfium.wasm`) */
@@ -44,11 +45,13 @@ export interface ViewerOptions extends Partial<CoreOptions> {
 	offscreen?: boolean;
 	onEvent?: (e: CoreEvent) => void;
 	/**
-	 * Creates the engine's module workers. Override to wrap them (e.g. a blob
-	 * loader that dynamic-imports `url`, which survives extensions that re-wrap
-	 * module workers). The engine waits for each worker's `boot` message.
+	 * Creates the engine's workers. Override to wrap them (e.g. a blob loader
+	 * that dynamic-imports `url`, which survives extensions that re-wrap module
+	 * workers). `type` is "classic" in browsers without module workers: load
+	 * `url` with `importScripts` there. A worker that fails to load is created
+	 * again with a cache-busted `url`. The engine waits for each worker's `boot` message.
 	 */
-	createWorker?: (url: URL, name: string) => Worker;
+	createWorker?: CreateWorker;
 	/**
 	 * URLs of the bundled worker scripts (see `./vite`). Required with
 	 * `createWorker` when assets live on another origin; otherwise the engine
@@ -659,9 +662,6 @@ function isPending(source: ViewerSource): source is PromiseLike<string | ArrayBu
 /** the other raster workers wait at most this long for the first one to open the document */
 const STAGGER_MAX_MS = 3000;
 
-/** a worker script that failed to load is fetched once more after this */
-const WORKER_RETRY_MS = 400;
-
 /** presses closer than this (ms, css px) count as a double/triple click */
 const MULTI_CLICK_MS = 500;
 const MULTI_CLICK_PX = 6;
@@ -701,6 +701,9 @@ export function preloadPdfium(wasmUrl: string): Promise<WebAssembly.Module | und
 	}
 	return module;
 }
+
+/** What the main thread posts to the compositor worker before and after init. */
+type CoreMsg = { t: "input"; msg: InputMsg } | { t: "command"; cmd: Command } | { t: "hidden"; hidden: boolean } | { t: "canvas"; canvas: OffscreenCanvas } | { t: "canvas-failed"; reason: string };
 
 /** A URL, the file's bytes, or a promise of either (e.g. a download the host started before the viewer). */
 export type ViewerSource = string | ArrayBuffer | Uint8Array | PromiseLike<string | ArrayBuffer | Uint8Array>;
@@ -842,63 +845,38 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 	return viewer;
 
 	function build(): Viewer {
-		const spawn = (kind: "raster" | "core", name: string, onmessage?: (ev: MessageEvent) => void, optional = false) => {
+		const workerType: WorkerType = support.moduleWorkers ? "module" : "classic";
+		const spawn = (kind: "raster" | "core", name: string, onmessage: (ev: MessageEvent) => void, onLoadFailed: (ev: ErrorEvent) => void) => {
 			const url = workerUrls?.[kind];
 			// Literal `new Worker(new URL(...))` so bundlers emit the worker chunks.
-			const create = () =>
-				url
-					? createWorker
-						? createWorker(new URL(url, location.href), name)
-						: new Worker(url, { type: "module", name })
-					: kind === "raster"
+			const bundled = () =>
+				workerType === "module"
+					? kind === "raster"
 						? new Worker(new URL("./raster-worker.ts", import.meta.url), { type: "module", name })
-						: new Worker(new URL("./core-worker.ts", import.meta.url), { type: "module", name });
-			let worker: Worker;
-			let isBooted = false;
-			let retried = false;
-			let resolveBooted: (w: Worker) => void = () => {};
-			const booted = new Promise<Worker>((resolve) => {
-				resolveBooted = resolve;
-			});
-			const start = () => {
-				const w = create();
-				worker = w;
-				if (onmessage) w.onmessage = onmessage;
-				const onBoot = (ev: MessageEvent) => {
-					if ((ev.data as { t?: string } | null)?.t !== "boot") return;
-					w.removeEventListener("message", onBoot);
-					isBooted = true;
-					resolveBooted(w);
-				};
-				w.addEventListener("message", onBoot);
-				// A worker that fails to load, or throws outside a request, is terminal:
-				// requests to it would never answer. Report it, then tear everything down.
-				w.addEventListener("error", (ev) => {
-					if (destroyed || w !== worker) return;
-					// The script never arrived (network, CDN): load it once more before giving up.
-					if (!isBooted && !retried) {
-						retried = true;
-						w.terminate();
-						setTimeout(() => {
-							if (!destroyed) start();
-						}, WORKER_RETRY_MS);
-						return;
-					}
-					// the pool never hands work to a worker that did not open the document
-					if (!isBooted && optional) {
-						w.terminate();
-						return;
-					}
-					const message = `lector-engine: ${name} worker failed${ev.message ? `: ${ev.message}` : " to load"}`;
-					const phase = opened ? "render" : "engine-load";
-					// Tear down first (settling every promise), then tell the host. Async
-					// (after setup), so handleEvent exists.
-					teardown(new EngineError(message, "worker", phase, sourceUrl));
-					handleEvent({ type: "error", message, code: "worker", phase });
-				});
+						: new Worker(new URL("./core-worker.ts", import.meta.url), { type: "module", name })
+					: kind === "raster"
+						? new Worker(new URL("./raster-worker.ts", import.meta.url), { name })
+						: new Worker(new URL("./core-worker.ts", import.meta.url), { name });
+			const create = (attempt: number) => {
+				if (!url) return bundled();
+				const href = retryUrl(new URL(url, location.href), attempt);
+				return createWorker ? createWorker(href, name, { type: workerType }) : new Worker(href, { type: workerType, name });
 			};
-			start();
-			return { current: () => worker, booted };
+			return startWorker({
+				create,
+				onmessage,
+				stopped: () => destroyed,
+				onLoadFailed,
+				onCrashed: (ev) => workerFailed(name, ev),
+			});
+		};
+		/** A worker that is required, or threw outside a request, is terminal: requests to it would never answer. */
+		const workerFailed = (name: string, ev: ErrorEvent) => {
+			const message = `lector-engine: ${name} worker failed${ev.message ? `: ${ev.message}` : " to load"}`;
+			const phase = opened ? "render" : "engine-load";
+			// Tear down first (settling every promise), then tell the host.
+			teardown(new EngineError(message, "worker", phase, sourceUrl));
+			handleEvent({ type: "error", message, code: "worker", phase });
 		};
 		let fullFetch: Promise<Blob> | null = null;
 		const arrived = (b: Blob) => {
@@ -1001,9 +979,10 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 		const n = workerCount ?? rasterWorkerCount({ cores: navigator.hardwareConcurrency, memoryGB: (navigator as { deviceMemory?: number }).deviceMemory, touch: touchDevice, software });
 		const rasterWorkers: (() => Worker)[] = [];
 		const corePorts: MessagePort[] = [];
+		const lanePorts: MessagePort[] = [];
 		cleanups.push(() => {
 			for (const w of rasterWorkers) w().terminate();
-			for (const port of corePorts) port.close();
+			for (const port of [...corePorts, ...lanePorts]) port.close();
 		});
 		// Only a module someone already compiled (preloadPdfium) is shared; compiling it here would land on the open path's main thread.
 		const pdfium = compiled.get(wasmUrl) ?? Promise.resolve(undefined);
@@ -1031,28 +1010,38 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 			wasmWaitMs = epochNow() - buildAt;
 		});
 		for (let i = 0; i < n; i++) {
-			const { current, booted } = spawn("raster", `lector-raster-${i}`, relay, i > 0);
-			if (i === 0)
-				void booted.then(() => {
-					workerBootMs = epochNow() - buildAt;
-				});
-			rasterWorkers.push(current);
 			const channel = new MessageChannel();
 			corePorts.push(channel.port2);
-			Promise.all([booted, pdfium, opening.then(() => (i > 0 && !blob ? Promise.race([firstOpened, new Promise((r) => setTimeout(r, STAGGER_MAX_MS))]) : undefined))]).then(([worker, module]) => {
+			lanePorts.push(channel.port1);
+		}
+		let lanesTaken = 0;
+		let lostWorkers = 0;
+		// Workers take lanes in boot order, so the document opens on whichever loads first; the pool skips lanes nobody took.
+		for (let k = 0; k < n; k++) {
+			const { current, booted } = spawn("raster", `lector-raster-${k}`, relay, (ev) => {
+				if (++lostWorkers === n) workerFailed(`lector-raster-${k}`, ev);
+			});
+			rasterWorkers.push(current);
+			void booted.then((worker) => {
 				if (destroyed) return;
-				// A full file that arrived before this worker (e.g. during a respawn) replaces range requests.
-				const sizes: SizeHint | undefined = i > 0 ? undefined : blob ? { all: true } : sizeHint;
-				// the racing download finished first: the document opens from it
-				if (i === 0 && blob && loadMode === "race") loadMode = "whole";
-				const init: ToRaster = { t: "init", source: blob ? { kind: "blob", blob } : docSource!,				port: channel.port1, wasmUrl, password: latestPassword, sizes };
-				try {
-					worker.postMessage(module ? { ...init, module } : init, [channel.port1]);
-				} catch {
-					// a browser that cannot clone compiled modules to workers
-					worker.postMessage(init, [channel.port1]);
-				}
-			}, () => {});
+				const i = lanesTaken++;
+				if (i === 0) workerBootMs = epochNow() - buildAt;
+				const port = lanePorts[i]!;
+				Promise.all([pdfium, opening.then(() => (i > 0 && !blob ? Promise.race([firstOpened, new Promise((r) => setTimeout(r, STAGGER_MAX_MS))]) : undefined))]).then(([module]) => {
+					if (destroyed) return;
+					// A full file that arrived before this worker (e.g. after a retry) replaces range requests.
+					const sizes: SizeHint | undefined = i > 0 ? undefined : blob ? { all: true } : sizeHint;
+					// the racing download finished first: the document opens from it
+					if (i === 0 && blob && loadMode === "race") loadMode = "whole";
+					const init: ToRaster = { t: "init", source: blob ? { kind: "blob", blob } : docSource!, port, wasmUrl, password: latestPassword, sizes };
+					try {
+						worker.postMessage(module ? { ...init, module } : init, [port]);
+					} catch {
+						// a browser that cannot clone compiled modules to workers
+						worker.postMessage(init, [port]);
+					}
+				}, () => {});
+			});
 		}
 
 		let selectedText = "";
@@ -1103,27 +1092,31 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 			core = null;
 			postToCore = () => {};
 		};
+		/** A new display canvas under the old one, which stays on top, transparent, so input listeners and pointer capture keep working. */
+		const freshCanvas = () => {
+			const fresh = document.createElement("canvas");
+			fresh.style.cssText = canvas.style.cssText;
+			fresh.setAttribute("aria-hidden", "true");
+			if (display !== canvas) display.remove();
+			canvas.before(fresh);
+			canvas.style.opacity = "0";
+			display = fresh;
+			cleanups.push(() => fresh.remove());
+			return fresh;
+		};
 		const progressFns = new Map<number, (r: SearchResults) => void>();
 		const flights = new Map<number, (landed: boolean) => void>();
 		const handleEvent = (e: CoreEvent) => {
 			if (e.type === "need-canvas") {
-				// The lost canvas stays on top, transparent, so input listeners and pointer capture keep working.
-				const fresh = document.createElement("canvas");
-				fresh.style.cssText = canvas.style.cssText;
-				fresh.setAttribute("aria-hidden", "true");
-				if (display !== canvas) display.remove();
-				canvas.before(fresh);
-				canvas.style.opacity = "0";
-				display = fresh;
-				cleanups.push(() => fresh.remove());
+				const fresh = freshCanvas();
 				try {
-					if (useOffscreen) {
+					if (offscreenNow) {
 						const off = fresh.transferControlToOffscreen();
 						postToCore({ t: "canvas", canvas: off }, [off]);
 					} else core?.swapCanvas(fresh);
 				} catch (err) {
 					const reason = String((err as Error)?.message ?? err);
-					if (useOffscreen) postToCore({ t: "canvas-failed", reason });
+					if (offscreenNow) postToCore({ t: "canvas-failed", reason });
 					else core?.canvasFailed(reason);
 				}
 				return;
@@ -1225,33 +1218,13 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 
 		// Probed, not just feature-tested: Safari 16.4-16.x can transfer a canvas
 		// but has no WebGL on OffscreenCanvas, so it composites on the main thread.
-		const useOffscreen = (wantOffscreen ?? true) && support.offscreenBy[compositor];
+		let offscreenNow = (wantOffscreen ?? true) && support.offscreenBy[compositor];
 		let postToCore: (msg: unknown, transfer?: Transferable[]) => void = () => {};
 		let core: ViewerCore | null = null;
 		const debug = !!(globalThis as { __lectorEngineDebug?: boolean }).__lectorEngineDebug;
-		if (useOffscreen) {
-			const offscreen = canvas.transferControlToOffscreen();
-			const spawned = spawn("core", "lector-compositor", (ev: MessageEvent<CoreEvent | { t: "boot" }>) => {
-				if ("type" in ev.data) handleEvent(ev.data);
-			});
-			cleanups.push(() => {
-				// The worker disposes its core (GPU resources, ports, timers) and closes itself.
-				const worker = spawned.current();
-				worker.postMessage({ t: "dispose" });
-				setTimeout(() => worker.terminate(), 1000);
-			});
-			// Input posted before boot queues inside the worker until init arrives.
-			const pendingInput: unknown[] = [];
-			postToCore = (msg) => pendingInput.push(msg);
-			spawned.booted.then((worker) => {
-				if (destroyed) return;
-				worker.postMessage({ t: "init", canvas: offscreen, ports: corePorts, options: coreOptions, debug, software }, [offscreen, ...corePorts]);
-				for (const msg of pendingInput) worker.postMessage(msg);
-				postToCore = (msg, transfer = []) => worker.postMessage(msg, transfer);
-			});
-		} else {
+		const mainThreadCore = (target: HTMLCanvasElement) => {
 			try {
-				core = new ViewerCore(canvas, corePorts, handleEvent, (cb) => requestAnimationFrame(cb), coreOptions, software);
+				core = new ViewerCore(target, corePorts, handleEvent, (cb) => requestAnimationFrame(cb), coreOptions, software);
 			} catch (err) {
 				throw new EngineError(`lector-engine: no WebGL2 context: ${String((err as Error)?.message ?? err)}`, "gpu", "engine-load");
 			}
@@ -1263,7 +1236,49 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 			});
 			// Debugging and benches only: set globalThis.__lectorEngineDebug before createViewer.
 			if (debug) g.__core = core;
-		}
+			return c;
+		};
+		if (offscreenNow) {
+			const offscreen = canvas.transferControlToOffscreen();
+			// Input posted before boot queues here until the compositor exists.
+			const pendingInput: CoreMsg[] = [];
+			postToCore = (msg) => pendingInput.push(msg as CoreMsg);
+			const spawned = spawn(
+				"core",
+				"lector-compositor",
+				(ev: MessageEvent<CoreEvent | { t: "boot" }>) => {
+					if ("type" in ev.data) handleEvent(ev.data);
+				},
+				(ev) => {
+					// The compositor script never loaded: composite on the main thread instead, on a canvas that was not transferred.
+					offscreenNow = false;
+					postToCore = () => {};
+					try {
+						const c = mainThreadCore(freshCanvas());
+						for (const m of pendingInput.splice(0)) {
+							if (m.t === "input") c.handle(m.msg);
+							else if (m.t === "command") c.command(m.cmd);
+							else if (m.t === "hidden") c.setHidden(m.hidden);
+						}
+					} catch {
+						workerFailed("lector-compositor", ev);
+					}
+				},
+			);
+			cleanups.push(() => {
+				if (!offscreenNow) return;
+				// The worker disposes its core (GPU resources, ports, timers) and closes itself.
+				const worker = spawned.current();
+				worker.postMessage({ t: "dispose" });
+				setTimeout(() => worker.terminate(), 1000);
+			});
+			spawned.booted.then((worker) => {
+				if (destroyed) return;
+				worker.postMessage({ t: "init", canvas: offscreen, ports: corePorts, options: coreOptions, debug, software }, [offscreen, ...corePorts]);
+				for (const msg of pendingInput.splice(0)) worker.postMessage(msg);
+				postToCore = (msg, transfer = []) => worker.postMessage(msg, transfer);
+			});
+		} else mainThreadCore(canvas);
 
 		const syncHidden = () => {
 			const hidden = document.visibilityState === "hidden";
@@ -1564,7 +1579,9 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 
 		return {
 			canvas,
-			offscreen: useOffscreen,
+			get offscreen() {
+				return offscreenNow;
+			},
 			get compositor() {
 				return compositorNow;
 			},
