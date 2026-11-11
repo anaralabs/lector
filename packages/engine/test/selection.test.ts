@@ -228,3 +228,36 @@ test("sentences: segmenter repairs", () => {
 	assert.equal(sentence(t, "shown before"), "As shown before. [4]");
 	assert.equal(sentence(t, "next one"), "The next one; see e.g. Smith (2001).");
 });
+
+test("rects: a tall glyph on the line does not stretch selections that leave it out", () => {
+	const text = "Let f = \u222b g ds";
+	const codes = Uint32Array.from([...text], (c) => c.codePointAt(0)!);
+	const boxes = new Float32Array(codes.length * 4);
+	[...text].forEach((ch, i) => {
+		if (ch === " ") return;
+		const tall = ch === "\u222b";
+		boxes.set([50 + i * 6, tall ? 70 : 100, 56 + i * 6, tall ? 142 : 110], i * 4);
+	});
+	const t = new PageText(codes, boxes);
+	assert.equal(t.lines.length, 1);
+	const integral = text.indexOf("\u222b");
+	assert.deepEqual(t.rects(0, 3), [{ x: 50, y: 100, w: 18, h: 10 }]);
+	assert.deepEqual(t.rects(integral + 2, text.length), [{ x: 50 + (integral + 2) * 6, y: 100, w: 24, h: 10 }]);
+	// selecting the tall glyph itself still covers it
+	assert.deepEqual(t.rects(integral, integral + 1), [{ x: 50 + integral * 6, y: 70, w: 6, h: 72 }]);
+	assert.deepEqual(t.rects(0, text.length), [{ x: 50, y: 70, w: text.length * 6, h: 72 }]);
+});
+
+test("rects: a selection without the line's superscript is the height of its own glyphs", () => {
+	const text = "x2 + y";
+	const codes = Uint32Array.from([...text], (c) => c.codePointAt(0)!);
+	const boxes = new Float32Array(codes.length * 4);
+	[...text].forEach((ch, i) => {
+		if (ch === " ") return;
+		boxes.set(ch === "2" ? [50 + i * 6, 97, 54 + i * 6, 104] : [50 + i * 6, 100, 56 + i * 6, 110], i * 4);
+	});
+	const t = new PageText(codes, boxes);
+	assert.equal(t.lines.length, 1);
+	assert.deepEqual(t.rects(5, 6), [{ x: 80, y: 100, w: 6, h: 10 }]);
+	assert.deepEqual(t.rects(0, 2), [{ x: 50, y: 97, w: 10, h: 13 }]);
+});
