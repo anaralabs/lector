@@ -260,6 +260,7 @@ test("rects: a selection without the line's superscript is the height of its own
 	assert.equal(t.lines.length, 1);
 	assert.deepEqual(t.rects(5, 6), [{ x: 80, y: 100, w: 6, h: 10 }]);
 	assert.deepEqual(t.rects(0, 2), [{ x: 50, y: 97, w: 10, h: 13 }]);
+});
 
 test("hitTest: a click on a row lands on that row when the line above has a tall glyph over it", () => {
 	const rows = ["Let f = \u222b g ds", "then the next row"];
