@@ -2,28 +2,26 @@
 // Runs the viewer core off the main thread: the canvas is an OffscreenCanvas,
 // so host-page work (React renders, layout) cannot delay a frame.
 
-import { type Command, type CoreOptions, type InputMsg, ViewerCore } from "./core";
+import { type CoreOptions, ViewerCore } from "./core";
+import { type CoreInput, type CoreReply, replayInput } from "./core-input";
 
 type Msg =
 	| { t: "init"; canvas: OffscreenCanvas; ports: MessagePort[]; options: Partial<CoreOptions>; debug?: boolean; software?: boolean }
-	| { t: "input"; msg: InputMsg }
-	| { t: "command"; cmd: Command }
 	/** the viewer is destroyed: free GPU resources and ports, then exit */
 	| { t: "dispose" }
-	/** a fresh canvas after the WebGL context was lost for good */
-	| { t: "canvas"; canvas: OffscreenCanvas }
-	| { t: "canvas-failed"; reason: string }
-	| { t: "hidden"; hidden: boolean };
+	| CoreInput;
 
 let core: ViewerCore | null = null;
-const pending: Msg[] = [];
+const pending: CoreInput[] = [];
 
 const raf: (cb: (t: number) => void) => void =
 	typeof self.requestAnimationFrame === "function"
 		? (cb) => self.requestAnimationFrame(cb)
 		: (cb) => setTimeout(() => cb(performance.now()), 1000 / 120);
 
-self.postMessage({ t: "boot" });
+const reply = (m: CoreReply, transfer: Transferable[] = []) => self.postMessage(m, transfer);
+
+reply({ t: "boot" });
 
 self.onmessage = (ev: MessageEvent<Msg>) => {
 	const m = ev.data;
@@ -40,20 +38,16 @@ self.onmessage = (ev: MessageEvent<Msg>) => {
 			// Debugging and benches only (the viewer passes globalThis.__lectorEngineDebug).
 			if (m.debug) (self as unknown as { __core: ViewerCore }).__core = core;
 		} catch (err) {
-			self.postMessage({ type: "error", message: String((err as Error)?.message ?? err), code: "gpu", phase: "engine-load" });
+			// The ports are still unused: the viewer starts the core on a main-thread canvas with them.
+			self.onmessage = null;
+			pending.length = 0;
+			reply({ t: "core-failed", reason: String((err as Error)?.message ?? err), ports: m.ports }, m.ports);
 			return;
 		}
-		for (const p of pending.splice(0)) dispatch(p);
+		reply({ t: "core-started" });
+		for (const p of pending.splice(0)) replayInput(core, p);
 		return;
 	}
 	if (!core) pending.push(m);
-	else dispatch(m);
+	else replayInput(core, m);
 };
-
-function dispatch(m: Msg) {
-	if (m.t === "canvas") core!.swapCanvas(m.canvas);
-	else if (m.t === "canvas-failed") core!.canvasFailed(m.reason);
-	else if (m.t === "hidden") core!.setHidden(m.hidden);
-	else if (m.t === "input") core!.handle(m.msg);
-	else if (m.t === "command") core!.command(m.cmd);
-}
