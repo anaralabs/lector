@@ -244,7 +244,7 @@ export class PageText {
 			for (let i = 0; i < this.lines.length; i++) {
 				const line = this.lines[i]!;
 				if ((accept && !accept(i)) || line.dir === "ttb" || y < line.t || y > line.b) continue;
-				const d = this.glyphDistance(line, x);
+				const d = this.glyphDistance(line, x, y);
 				if (d < nearest) {
 					nearest = d;
 					best = line;
@@ -262,14 +262,23 @@ export class PageText {
 	 * Hebrew in Latin) are not visually monotonic in logical order, so the
 	 * glyph boxes decide, not a logical scan. Vertical lines go top to bottom.
 	 */
-	/** Horizontal distance from x to the nearest glyph of a line. */
-	private glyphDistance(line: Line, x: number) {
+	/**
+	 * Distance from (x, y) to the nearest glyph of a line. A line's band is as
+	 * tall as its tallest glyph, so it can cover the rows next to it: the
+	 * glyph's own box decides which row the point is on.
+	 */
+	private glyphDistance(line: Line, x: number, y: number) {
 		let d = Infinity;
 		for (let i = line.start; i < line.end; i++) {
 			if (!this.hasBox(i)) continue;
 			const l = this.boxes[i * 4]!;
+			const t = this.boxes[i * 4 + 1]!;
 			const r = this.boxes[i * 4 + 2]!;
-			d = Math.min(d, x < l ? l - x : x > r ? x - r : 0);
+			const b = this.boxes[i * 4 + 3]!;
+			const dx = x < l ? l - x : x > r ? x - r : 0;
+			const dy = y < t ? t - y : y > b ? y - b : 0;
+			// loose boxes of neighbouring rows overlap a little: the nearer centre breaks the tie
+			d = Math.min(d, dx + dy + Math.abs(y - (t + b) / 2) * 0.01);
 		}
 		return d;
 	}
