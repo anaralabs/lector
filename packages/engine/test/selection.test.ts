@@ -261,3 +261,31 @@ test("rects: a selection without the line's superscript is the height of its own
 	assert.deepEqual(t.rects(5, 6), [{ x: 80, y: 100, w: 6, h: 10 }]);
 	assert.deepEqual(t.rects(0, 2), [{ x: 50, y: 97, w: 10, h: 13 }]);
 });
+
+test("hitTest: a click on a row lands on that row when the line above has a tall glyph over it", () => {
+	const rows = ["Let f = \u222b g ds", "then the next row"];
+	const codes: number[] = [];
+	const boxes: number[] = [];
+	for (const [n, row] of rows.entries()) {
+		if (n) {
+			codes.push(13, 10);
+			boxes.push(0, 0, 0, 0, 0, 0, 0, 0);
+		}
+		[...row].forEach((ch, i) => {
+			codes.push(ch.codePointAt(0)!);
+			const tall = ch === "\u222b";
+			boxes.push(...(ch === " " ? [0, 0, 0, 0] : [50 + i * 6, tall ? 88 : 100 + n * 12, 56 + i * 6, tall ? 124 : 110 + n * 12]));
+		});
+	}
+	const t = new PageText(Uint32Array.from(codes), Float32Array.from(boxes));
+	assert.equal(t.lines.length, 2);
+	const second = rows[0]!.length + 2;
+	// every glyph of the second row sits inside the first line's band
+	for (let i = 0; i < rows[1]!.length; i++) {
+		if (rows[1]![i] === " ") continue;
+		const caret = t.hitTest(53 + i * 6, 117);
+		assert.ok(caret === second + i || caret === second + i + 1, `row 2 char ${i} -> ${caret}`);
+	}
+	// and the first row is still reachable
+	assert.ok(t.hitTest(53, 105) <= 1);
+});
