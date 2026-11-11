@@ -329,12 +329,17 @@ export class PageText {
 			}
 			let l = Infinity;
 			let r = -Infinity;
+			// the selected glyphs' own band: the line's includes its tallest glyph (an integral, a big bracket)
+			let t = Infinity;
+			let b = -Infinity;
 			for (let i = a; i < z; i++) {
 				if (!this.hasBox(i)) continue;
 				l = Math.min(l, boxes[i * 4]!);
 				r = Math.max(r, boxes[i * 4 + 2]!);
+				t = Math.min(t, boxes[i * 4 + 1]!);
+				b = Math.max(b, boxes[i * 4 + 3]!);
 			}
-			if (l < r) out.push({ x: l, y: line.t, w: r - l, h: line.b - line.t });
+			if (l < r) out.push({ x: l, y: t, w: r - l, h: b - t });
 		}
 		// Consecutive lines meet halfway: loose boxes overlap (translucent
 		// fills would double up into stripes) or leave hairline gaps.
