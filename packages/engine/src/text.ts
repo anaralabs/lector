@@ -255,14 +255,6 @@ export class PageText {
 	}
 
 	/**
-	 * Caret at a point on a line. Horizontal lines hit-test the glyph under (or
-	 * nearest to) x in visual order, then map it to a logical caret: before the
-	 * char on its leading half (the left half of an LTR char, the right half of
-	 * an RTL one), after it on the trailing half. Mixed runs (Latin in Hebrew,
-	 * Hebrew in Latin) are not visually monotonic in logical order, so the
-	 * glyph boxes decide, not a logical scan. Vertical lines go top to bottom.
-	 */
-	/**
 	 * Distance from (x, y) to the nearest glyph of a line. A line's band is as
 	 * tall as its tallest glyph, so it can cover the rows next to it: the
 	 * glyph's own box decides which row the point is on.
@@ -283,6 +275,14 @@ export class PageText {
 		return d;
 	}
 
+	/**
+	 * Caret at a point on a line. Horizontal lines hit-test the glyph under (or
+	 * nearest to) x in visual order, then map it to a logical caret: before the
+	 * char on its leading half (the left half of an LTR char, the right half of
+	 * an RTL one), after it on the trailing half. Mixed runs (Latin in Hebrew,
+	 * Hebrew in Latin) are not visually monotonic in logical order, so the
+	 * glyph boxes decide, not a logical scan. Vertical lines go top to bottom.
+	 */
 	private caretInLine(line: Line, x: number, y: number) {
 		const { boxes } = this;
 		if (line.dir === "ttb") {
@@ -359,7 +359,7 @@ export class PageText {
 			const lineH = Math.min(a.h, b.h);
 			const gap = b.y - aBottom;
 			const sameColumn = b.x < a.x + a.w && a.x < b.x + b.w;
-			if (!sameColumn || b.y <= a.y || gap > lineH * 0.6) continue;
+			if (!sameColumn || b.y <= a.y || aBottom >= b.y + b.h || gap > lineH * 0.6) continue;
 			const mid = (aBottom + b.y) / 2;
 			a.h = mid - a.y;
 			b.h = b.y + b.h - mid;

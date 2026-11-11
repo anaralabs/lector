@@ -289,3 +289,24 @@ test("hitTest: a click on a row lands on that row when the line above has a tall
 	// and the first row is still reachable
 	assert.ok(t.hitTest(53, 105) <= 1);
 });
+
+test("rects: a tall glyph reaching past the next row's bottom never yields a negative height", () => {
+	const rows = ["Let f = ∫ g ds", "then the next row"];
+	const codes: number[] = [];
+	const boxes: number[] = [];
+	for (const [n, row] of rows.entries()) {
+		if (n) {
+			codes.push(13, 10);
+			boxes.push(0, 0, 0, 0, 0, 0, 0, 0);
+		}
+		[...row].forEach((ch, i) => {
+			codes.push(ch.codePointAt(0)!);
+			const tall = ch === "∫";
+			boxes.push(...(ch === " " ? [0, 0, 0, 0] : [50 + i * 6, tall ? 88 : 100 + n * 12, 56 + i * 6, tall ? 140 : 110 + n * 12]));
+		});
+	}
+	const t = new PageText(Uint32Array.from(codes), Float32Array.from(boxes));
+	const rects = t.rects(0, codes.length);
+	assert.ok(rects.length >= 1);
+	for (const r of rects) assert.ok(r.h > 0 && r.w > 0, JSON.stringify(r));
+});
