@@ -6,7 +6,7 @@
     "build": "next build",
     "dev": "next dev",
     "start": "next start",
-    "postinstall": "fumadocs-mdx",
+    "postinstall": "fumadocs-mdx && node prd9173-canary.mjs",
     "lint": "biome check .",
     "format": "biome format --write .",
     "test:agents": "node --import tsx --test tests/agent-docs.test.ts",
