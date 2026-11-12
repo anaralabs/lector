@@ -1,6 +1,13 @@
 type ApplyZoom = (zoom: number) => void;
 const viewportZoomHandlers = new WeakMap<HTMLDivElement, ApplyZoom>();
 
+/**
+ * Set on the zoomed pages element while WebKit layout zoom (CSS `zoom`) is
+ * applied, and absent otherwise. Text layers read it to lay their text out
+ * unzoomed and scale it instead (see TextLayer).
+ */
+export const LAYOUT_ZOOM_PROPERTY = "--lector-layout-zoom";
+
 /** Keep viewport geometry and zoom subscribers in the same coordinate space. */
 export function applyViewportZoom(
 	viewport: HTMLDivElement | null,
