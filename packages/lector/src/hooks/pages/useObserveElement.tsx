@@ -88,7 +88,12 @@ export const useObserveElement = () => {
 		};
 		const handler = createHandler(true);
 		const endHandler = createHandler(false);
-		endHandler();
+		// No synchronous publish on subscribe. Since @tanstack/virtual-core
+		// 3.13.16 (TanStack/virtual#1106) the virtualizer subscribes first and
+		// only then scrolls to `initialOffset`; publishing the live scrollTop
+		// here would overwrite that offset with 0 and open at page 1 regardless
+		// of `initialPage`. TanStack's own observers dropped the call in that
+		// same change.
 		// A zoom changes the logical offset even if the physical position does
 		// not move, or its native scroll event has not arrived yet. Keep the
 		// offset in the same coordinate space as the zoom-aware rect observer.
