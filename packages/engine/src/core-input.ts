@@ -7,6 +7,8 @@ export type CoreInput =
 	/** a fresh canvas after the WebGL context was lost for good */
 	| { t: "canvas"; canvas: OffscreenCanvas }
 	| { t: "canvas-failed"; reason: string }
+	/** a fresh raster worker's port, after a `raster-worker` restart */
+	| { t: "raster-port"; index: number; port: MessagePort }
 	| { t: "hidden"; hidden: boolean };
 
 /** What the compositor worker tells the viewer besides core events. */
@@ -19,6 +21,7 @@ export type CoreReply =
 export function replayInput(core: ViewerCore, m: CoreInput) {
 	if (m.t === "canvas") core.swapCanvas(m.canvas);
 	else if (m.t === "canvas-failed") core.canvasFailed(m.reason);
+	else if (m.t === "raster-port") core.replaceRaster(m.index, m.port);
 	else if (m.t === "hidden") core.setHidden(m.hidden);
 	else if (m.t === "input") core.handle(m.msg);
 	else core.command(m.cmd);

@@ -4,6 +4,7 @@
 import type { PdfAnnotation } from "./annotations";
 import type { PageFigure } from "./figures";
 import type { FormOp, FormWidget } from "./forms";
+import type { TrapKind } from "./wasm-trap";
 
 export interface PageSize {
 	w: number;
@@ -19,8 +20,8 @@ export interface PageSize {
  * drawing resumes if the browser restores it); `worker`: a worker script did
  * not load or crashed; `compositor`: the context was lost and no fresh canvas could
  * be drawn on (fall back); `destroyed`: the viewer was destroyed before a request answered;
- * `wasm-trap`: PDFium crashed (a WebAssembly trap or abort) or ran out of memory and the
- * engine gave up on the document (a crash it recovered from fails one page: `page-failed`);
+ * `wasm-trap`: PDFium crashed (a WebAssembly trap or abort) or ran out of memory in every
+ * raster worker the engine could start (a crash on one page fails only that page: `page-failed`);
  * `unknown`: anything else.
  */
 export type ErrorCode = "password" | "parse" | "security" | "file" | "fetch" | "unsupported" | "wasm" | "gpu" | "compositor" | "worker" | "destroyed" | "wasm-trap" | "unknown";
@@ -54,7 +55,8 @@ export type SizeHint = { all: true } | { all: false; pages: number[]; fraction?:
 
 export type ToRaster =
 	/** sizes: omitted for all but one worker (sizes are read as pages are used there) */
-	| { t: "init"; source: DocSource; port: MessagePort; wasmUrl: string; module?: WebAssembly.Module; password?: string; sizes?: SizeHint }
+	/** lowMemory: cap PDFium's memory lower (a retry after the browser could not reserve it) */
+	| { t: "init"; source: DocSource; port: MessagePort; wasmUrl: string; module?: WebAssembly.Module; password?: string; sizes?: SizeHint; lowMemory?: boolean }
 	/** sent to the worker itself (not the port): the full file arrived, read from it from now on */
 	| { t: "source"; blob: Blob }
 	/** sent to the worker itself: the bytes of one range request another worker made */
@@ -74,6 +76,8 @@ export type ToRaster =
 			h: number;
 			/** 2D compositor: apply gamma and the dark tone here (photos keep their colours) and answer with an ImageBitmap */
 			bake?: { gamma: number; tone: number[] | null };
+			/** render at 1/reduce of the resolution and scale it up (a retry after running out of memory) */
+			reduce?: number;
 	  }
 	| { t: "text"; id: number; page: number }
 	| { t: "outline"; id: number; page: -1 }
@@ -166,6 +170,8 @@ export type FromRaster =
 			page?: number;
 			op?: string;
 			recovered?: boolean;
+			/** a WebAssembly crash or an allocation failure (`oom`: also PDFium's memory could not be reserved at `engine-load`) */
+			trap?: TrapKind;
 	  }
 	/** heap: the worker's WASM heap plus its block cache, in bytes */
 	| { t: "tile"; id: number; buf?: ArrayBuffer; bitmap?: ImageBitmap; baked?: boolean; w: number; h: number; ms: number; heap: number }

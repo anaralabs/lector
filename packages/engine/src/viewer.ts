@@ -990,6 +990,8 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 		const software = compositor === "canvas2d" && (support.softwareGL || !support.webgl2);
 		const n = workerCount ?? rasterWorkerCount({ cores: navigator.hardwareConcurrency, memoryGB: (navigator as { deviceMemory?: number }).deviceMemory, touch: touchDevice, software });
 		const rasterWorkers: (() => Worker)[] = [];
+		/** the worker currently serving each pool lane */
+		const laneWorkers: (() => Worker)[] = [];
 		const corePorts: MessagePort[] = [];
 		const lanePorts: MessagePort[] = [];
 		cleanups.push(() => {
@@ -1026,35 +1028,52 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 			corePorts.push(channel.port2);
 			lanePorts.push(channel.port1);
 		}
+		/** Sends a booted worker its init for lane `i`; `restart`: it replaces a worker whose PDFium could not restart, or could not reserve memory (`lowMemory`) */
+		const initLane = (worker: Worker, i: number, port: MessagePort, restart = false, lowMemory = false) => {
+			Promise.all([pdfium, opening.then(() => (i > 0 && !blob ? Promise.race([firstOpened, new Promise((r) => setTimeout(r, STAGGER_MAX_MS))]) : undefined))]).then(([module]) => {
+				if (destroyed) return;
+				// A full file that arrived before this worker (e.g. after a retry or respawn) replaces range requests.
+				const first = restart ? !opened : i === 0;
+				const sizes: SizeHint | undefined = !first ? undefined : blob ? { all: true } : sizeHint;
+				// the racing download finished first: the document opens from it
+				if (i === 0 && blob && loadMode === "race") loadMode = "whole";
+				const init: ToRaster = { t: "init", source: blob ? { kind: "blob", blob } : docSource!, port, wasmUrl, password: latestPassword, sizes, ...(lowMemory && { lowMemory }) };
+				try {
+					worker.postMessage(module && !lowMemory ? { ...init, module } : init, [port]);
+				} catch {
+					// a browser that cannot clone compiled modules to workers
+					worker.postMessage(init, [port]);
+				}
+			}, () => {});
+		};
 		let lanesTaken = 0;
 		let lostWorkers = 0;
+		const workerLost = (name: string, ev: ErrorEvent) => {
+			if (++lostWorkers === n) workerFailed(name, ev);
+		};
 		// Workers take lanes in boot order, so the document opens on whichever loads first; the pool skips lanes nobody took.
 		for (let k = 0; k < n; k++) {
-			const { current, booted } = spawn("raster", `lector-raster-${k}`, relay, (ev) => {
-				if (++lostWorkers === n) workerFailed(`lector-raster-${k}`, ev);
-			});
+			const { current, booted } = spawn("raster", `lector-raster-${k}`, relay, (ev) => workerLost(`lector-raster-${k}`, ev));
 			rasterWorkers.push(current);
 			void booted.then((worker) => {
 				if (destroyed) return;
 				const i = lanesTaken++;
 				if (i === 0) workerBootMs = epochNow() - buildAt;
-				const port = lanePorts[i]!;
-				Promise.all([pdfium, opening.then(() => (i > 0 && !blob ? Promise.race([firstOpened, new Promise((r) => setTimeout(r, STAGGER_MAX_MS))]) : undefined))]).then(([module]) => {
-					if (destroyed) return;
-					// A full file that arrived before this worker (e.g. after a retry) replaces range requests.
-					const sizes: SizeHint | undefined = i > 0 ? undefined : blob ? { all: true } : sizeHint;
-					// the racing download finished first: the document opens from it
-					if (i === 0 && blob && loadMode === "race") loadMode = "whole";
-					const init: ToRaster = { t: "init", source: blob ? { kind: "blob", blob } : docSource!, port, wasmUrl, password: latestPassword, sizes };
-					try {
-						worker.postMessage(module ? { ...init, module } : init, [port]);
-					} catch {
-						// a browser that cannot clone compiled modules to workers
-						worker.postMessage(init, [port]);
-					}
-				}, () => {});
+				laneWorkers[i] = current;
+				initLane(worker, i, lanePorts[i]!);
 			});
 		}
+		/** A fresh worker for lane `i`; returns the port the core's end of that lane switches to. */
+		const restartRaster = (i: number, lowMemory: boolean) => {
+			const channel = new MessageChannel();
+			const { current, booted } = spawn("raster", `lector-raster-${i}`, relay, (ev) => workerLost(`lector-raster-${i}`, ev));
+			rasterWorkers.push(current);
+			laneWorkers[i] = current;
+			void booted.then((worker) => {
+				if (!destroyed) initLane(worker, i, channel.port1, true, lowMemory);
+			});
+			return channel.port2;
+		};
 
 		let selectedText = "";
 		let opened = false;
@@ -1119,6 +1138,19 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 					if (offscreenNow) postToCore({ t: "canvas-failed", reason });
 					else core?.canvasFailed(reason);
 				}
+				return;
+			}
+			if (e.type === "raster-worker") {
+				if (destroyed) return;
+				laneWorkers[e.index]?.().terminate();
+				if (e.action === "retire") {
+					// workers waiting to parse from the first one's blocks stop waiting
+					resolveFirstOpened();
+					return;
+				}
+				const port = restartRaster(e.index, e.lowMemory);
+				if (core) core.replaceRaster(e.index, port);
+				else postToCore({ t: "raster-port", index: e.index, port }, [port]);
 				return;
 			}
 			if (e.type === "compositor") {
@@ -1190,7 +1222,7 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 				resolveLoaded({ pages: e.pages, info: e.info });
 				textLayer?.setLayout(e.layout);
 				for (const resolve of unlocks.splice(0)) resolve(true);
-			} else if (e.type === "page-failed") {
+			} else if (e.type === "page-failed" && e.phase === "render") {
 				failedPages.add(e.page);
 				failedPages.setCamera(camera);
 			} else if (e.type === "layout") {

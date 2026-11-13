@@ -13,7 +13,7 @@ import { boxFor, pageTransform, readCharBoxes, type Xf } from "./char-boxes";
 import type { DocSource, DocumentInfo, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
 import { blockVerdict, openErrorCode, RANGE_BLOCK, RANGE_GRANULE, RANGE_MAX_RUN } from "./range";
 import { ONLINE_WAIT_MS, retryingSync, untilOnline } from "./retry";
-import { trapKind } from "./wasm-trap";
+import { capWasmMemory, isOutOfMemory, trapKind } from "./wasm-trap";
 
 const FPDF_ANNOT = 0x01;
 const FPDF_REVERSE_BYTE_ORDER = 0x10; // RGBA instead of BGRA
@@ -142,16 +142,46 @@ function pauseStruct() {
 /** per page index: notes whose icons the host draws (see `hideNoteIcons`) */
 const noteIcons = new Map<number, number[]>();
 
+/** The JS copy of a tile's pixels could not be allocated: PDFium itself is intact. */
+class PixelMemoryError extends Error {}
+
+/** Copies a `sw`×`sh` PDFium bitmap out of the heap as `w`×`h` RGBA, scaled up `r` times. */
+function readPixels(ptr: number, stride: number, sw: number, sh: number, w: number, h: number, r: number): ArrayBuffer {
+	const mem = heap();
+	try {
+		if (r === 1 && stride === w * 4) return mem.slice(ptr, ptr + w * h * 4).buffer;
+		const out = new Uint8Array(w * h * 4);
+		if (r === 1) {
+			for (let row = 0; row < h; row++) out.set(mem.subarray(ptr + row * stride, ptr + row * stride + w * 4), row * w * 4);
+			return out.buffer;
+		}
+		const src = new Uint32Array(mem.buffer, ptr, (stride * sh) / 4);
+		const dst = new Uint32Array(out.buffer);
+		for (let y = 0; y < h; y++) {
+			const from = Math.min(sh - 1, Math.floor(y / r)) * (stride / 4);
+			for (let x = 0; x < w; x++) dst[y * w + x] = src[from + Math.min(sw - 1, Math.floor(x / r))]!;
+		}
+		return out.buffer;
+	} catch (err) {
+		throw trapKind(err) === "oom" ? new PixelMemoryError(String((err as Error).message)) : err;
+	}
+}
+
 async function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 	const t0 = performance.now();
 	const size = sizeOf(msg.page);
 	const { w, h } = msg;
-	const pw = Math.round(size.w * msg.scale);
-	const ph = Math.round(size.h * msg.scale);
+	const r = msg.reduce && msg.reduce > 1 ? msg.reduce : 1;
+	const sw = Math.ceil(w / r);
+	const sh = Math.ceil(h / r);
+	const dx = -msg.x / r;
+	const dy = -msg.y / r;
+	const pw = Math.round((size.w * msg.scale) / r);
+	const ph = Math.round((size.h * msg.scale) / r);
 	const page = loadPage(msg.page);
 	const held = pinned.has(msg.page);
 	pinned.add(msg.page);
-	const bmp = P.FPDFBitmap_Create(w, h, 1);
+	const bmp = P.FPDFBitmap_Create(sw, sh, 1);
 	rendering = msg.id;
 	cancelled = false;
 	let notes = noteIcons.get(msg.page);
@@ -159,10 +189,10 @@ async function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 	const showNotes = notes.length ? hideNoteIcons(P, page, notes) : null;
 	let trapped = false;
 	try {
-		P.FPDFBitmap_FillRect(bmp, 0, 0, w, h, 0xffffffff);
+		P.FPDFBitmap_FillRect(bmp, 0, 0, sw, sh, 0xffffffff);
 		sliceEnd = performance.now() + SLICE_MS;
 		op = "FPDF_RenderPageBitmap";
-		let status = P.FPDF_RenderPageBitmap_Start(bmp, page, -msg.x, -msg.y, pw, ph, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER, pauseStruct());
+		let status = P.FPDF_RenderPageBitmap_Start(bmp, page, dx, dy, pw, ph, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER, pauseStruct());
 		while (status === FPDF_RENDER_TOBECONTINUED) {
 			await yieldToEvents();
 			if (cancelled) break;
@@ -177,20 +207,9 @@ async function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 		// Form fields: drawn by the form fill environment, which also generates
 		// appearances for widgets that have none (NeedAppearances, filled values).
 		op = "FPDF_FFLDraw";
-		if (form) P.FPDF_FFLDraw(form, bmp, page, -msg.x, -msg.y, pw, ph, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
-		const ptr = P.FPDFBitmap_GetBuffer(bmp);
-		const stride = P.FPDFBitmap_GetStride(bmp);
-		const mem = heap();
-		let buf: ArrayBuffer;
-		if (stride === w * 4) {
-			buf = mem.slice(ptr, ptr + w * h * 4).buffer;
-		} else {
-			const out = new Uint8Array(w * h * 4);
-			for (let row = 0; row < h; row++) {
-				out.set(mem.subarray(ptr + row * stride, ptr + row * stride + w * 4), row * w * 4);
-			}
-			buf = out.buffer;
-		}
+		if (form) P.FPDF_FFLDraw(form, bmp, page, dx, dy, pw, ph, 0, FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER);
+		op = "readPixels";
+		const buf = readPixels(P.FPDFBitmap_GetBuffer(bmp), P.FPDFBitmap_GetStride(bmp), sw, sh, w, h, r);
 		if (msg.bake) {
 			const boxes: number[] = [];
 			if (msg.bake.tone) {
@@ -200,8 +219,9 @@ async function renderTile(msg: Extract<ToRaster, { t: "tile" }>) {
 			}
 			const px = new Uint8ClampedArray(buf);
 			bakePixels(px, w, h, msg.bake.gamma, msg.bake.tone, boxes);
-			if (typeof createImageBitmap === "function" && typeof ImageData !== "undefined") {
-				const bitmap = await createImageBitmap(new ImageData(px, w, h));
+			// the browser may refuse bitmap memory: the pixels then travel as they are
+			const bitmap = typeof createImageBitmap === "function" && typeof ImageData !== "undefined" ? await createImageBitmap(new ImageData(px, w, h)).catch(() => null) : null;
+			if (bitmap) {
 				send({ t: "tile", id: msg.id, bitmap, baked: true, w, h, ms: performance.now() - t0, heap: heapBytes() }, [bitmap]);
 				return;
 			}
@@ -877,6 +897,7 @@ async function instantiatePdfium(wasmUrl: string, imports: WebAssembly.Imports, 
 		try {
 			const res = await fetch(wasmUrl, { credentials: "same-origin" });
 			if (!res.ok) throw res.status >= 500 ? new RetryableHttpError(`HTTP ${res.status}`) : new Error(`HTTP ${res.status}`);
+			if (memoryCap) return await WebAssembly.instantiate(capWasmMemory(new Uint8Array(await res.arrayBuffer()), memoryCap), imports);
 			const streaming = typeof WebAssembly.instantiateStreaming === "function" && res.headers.get("Content-Type")?.split(";")[0].trim() === "application/wasm";
 			return streaming ? await WebAssembly.instantiateStreaming(res, imports) : await WebAssembly.instantiate(await res.arrayBuffer(), imports);
 		} catch (err) {
@@ -888,6 +909,10 @@ async function instantiatePdfium(wasmUrl: string, imports: WebAssembly.Imports, 
 }
 
 let wasmUrl = "";
+/** wasm pages PDFium's memory may grow to, below what the binary declares (`lowMemory` workers) */
+let memoryCap = 0;
+/** 1GB: a smaller address-space reservation where the browser could not reserve the default */
+const LOW_MEMORY_PAGES = 16384;
 /** the compiled module, so a fresh instance after a trap needs no download */
 let wasmModule: WebAssembly.Module | undefined;
 let wasmMs: number | undefined;
@@ -941,14 +966,14 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 				}
 				const id = "id" in m ? m.id : undefined;
 				const phase = m.t === "text" ? "text" : "render";
+				const page = "page" in m && m.page >= 0 ? m.page : undefined;
 				if (!kind) {
-					send({ t: "error", message: String((err as Error)?.stack ?? err), code: "unknown", phase, id });
+					send({ t: "error", message: String((err as Error)?.stack ?? err), code: "unknown", phase, id, page, ...(err instanceof PixelMemoryError && { trap: "oom" as const }) });
 					continue;
 				}
-				const page = "page" in m && m.page >= 0 ? m.page : undefined;
 				const where = page === undefined ? "" : ` on page ${page + 1}`;
 				const message = `lector-engine: PDFium ${kind}${where} in ${op}${recovered ? "" : " (could not restart it)"}: ${String((err as Error)?.message ?? err)}`;
-				send({ t: "error", message, code: "wasm-trap", phase, id, page, op, recovered });
+				send({ t: "error", message, code: "wasm-trap", phase, id, page, op, recovered, trap: kind });
 			}
 		}
 		running = false;
@@ -970,12 +995,13 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 	wasmUrl = msg.wasmUrl;
 	try {
 		const t0 = performance.now();
-		P = await loadPdfium(msg.wasmUrl, msg.module);
+		if (msg.lowMemory) memoryCap = LOW_MEMORY_PAGES;
+		P = await loadPdfium(msg.wasmUrl, memoryCap ? undefined : msg.module);
 		P.PDFiumExt_Init();
 		wasmMs = performance.now() - t0;
 		wasmShared = sharedModuleUsed;
 	} catch (err) {
-		send({ t: "error", message: `lector-engine: pdfium.wasm failed to load from ${msg.wasmUrl}: ${String((err as Error)?.message ?? err)}`, code: "wasm", phase: "engine-load" });
+		send({ t: "error", message: `lector-engine: pdfium.wasm failed to load from ${msg.wasmUrl}: ${String((err as Error)?.message ?? err)}`, code: "wasm", phase: "engine-load", ...(isOutOfMemory(err) && { trap: "oom" as const }) });
 		return;
 	}
 	source = msg.source;
