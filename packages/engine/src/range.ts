@@ -76,6 +76,31 @@ export function openErrorCode(pdfiumError: number, readFailed: boolean): ErrorCo
 	return readFailed && code !== "password" ? "fetch" : code;
 }
 
+/** PDFium looks for `%PDF-` only in a file's first KB; pdf.js opens files with more in front of it. */
+export const PDFIUM_HEADER_WINDOW = 1024;
+/** how far into a file the engine looks for a header PDFium missed */
+export const HEADER_SCAN_BYTES = 1024 * 1024;
+
+/** Offset of the first `%PDF-` in `bytes`, or -1. */
+export function headerOffset(bytes: Uint8Array): number {
+	for (let i = bytes.indexOf(0x25); i >= 0 && i + 5 <= bytes.length; i = bytes.indexOf(0x25, i + 1)) {
+		if (bytes[i + 1] === 0x50 && bytes[i + 2] === 0x44 && bytes[i + 3] === 0x46 && bytes[i + 4] === 0x2d) return i;
+	}
+	return -1;
+}
+
+/**
+ * Whether a failed open is worth one more try from the whole file, fetched in
+ * one response: range reads can stitch together two versions of a file
+ * rewritten in place (or meet one whose length changed), which PDFium reports
+ * as a format error or a failed read. A trapped PDFium gets a fresh instance
+ * whatever the source. A password or an unsupported security handler stays.
+ */
+export function reopenWorthIt(code: ErrorCode | "trap", rangeRead: boolean): boolean {
+	if (code === "trap") return true;
+	return rangeRead && (code === "parse" || code === "fetch" || code === "unknown");
+}
+
 /**
  * The linearization dictionary in a file's first bytes (`/Linearized 1 /L len
  * /E endOfFirstPage /O firstPageObj /N pages ...`), or null for a file that is

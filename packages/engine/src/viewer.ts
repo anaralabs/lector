@@ -1008,8 +1008,15 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 			resolveFirstOpened = resolve;
 		});
 		// A block one worker downloaded goes to the others, so each byte crosses the network once.
-		const relay = (ev: MessageEvent<ToRaster | { t: "opened" }>) => {
+		const relay = (ev: MessageEvent<ToRaster | { t: "opened" } | { t: "whole"; blob: Blob }>) => {
 			if (ev.data?.t === "opened") resolveFirstOpened();
+			// range reads could not open the document; a worker opened it from the whole file instead
+			if (ev.data?.t === "whole") {
+				loadMode = "download";
+				fileBytes = ev.data.blob.size;
+				arrived(ev.data.blob);
+				return;
+			}
 			if (ev.data?.t !== "block") return;
 			workerRequests++;
 			workerBytes += ev.data.data.length;

@@ -6,6 +6,8 @@
 //   MBIT (default 0 = unthrottled), RTT (ms, default 0), RANGES=0 (ignore Range),
 //   EXPOSE=0 (no Access-Control-Expose-Headers, like a CDN that hides Content-Range),
 //   ASSETS=0 (only PDFs are throttled: scripts and wasm arrive as if cached; Chrome does not cache over this self-signed cert)
+//   SHORT=<bytes> (206 bodies capped there, as HTTP allows),
+//   SWAP=1 (<file>.pdf is rewritten in place by <file>.pdf.v2 after its first request)
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { open } from "node:fs/promises";
@@ -16,7 +18,9 @@ import { extname, join, normalize } from "node:path";
 
 const root = process.argv[2];
 const port = Number(process.argv[3] ?? 5300);
-const cfg = { mbit: Number(process.env.MBIT ?? 0), rtt: Number(process.env.RTT ?? 0), ranges: process.env.RANGES !== "0", expose: process.env.EXPOSE !== "0", assets: process.env.ASSETS !== "0" };
+const cfg = { mbit: Number(process.env.MBIT ?? 0), rtt: Number(process.env.RTT ?? 0), ranges: process.env.RANGES !== "0", expose: process.env.EXPOSE !== "0", assets: process.env.ASSETS !== "0", short: Number(process.env.SHORT ?? 0), swap: process.env.SWAP === "1" };
+/** files already requested once (SWAP serves their .v2 from then on) */
+const swapped = new Set();
 const extraRoots = (process.env.EXTRA_ROOTS ?? "").split(",").filter(Boolean);
 
 const certDir = join(tmpdir(), "lector-bench-cert");
@@ -80,13 +84,14 @@ const server = http2.createSecureServer({ key: readFileSync(join(certDir, "key.p
 	const url = req.url ?? "/";
 	if (url.startsWith("/__config")) {
 		const q = new URL(url, "https://x").searchParams;
-		for (const k of ["mbit", "rtt"]) if (q.has(k)) cfg[k] = Number(q.get(k));
-		for (const k of ["ranges", "expose", "assets"]) if (q.has(k)) cfg[k] = q.get(k) !== "0";
+		for (const k of ["mbit", "rtt", "short"]) if (q.has(k)) cfg[k] = Number(q.get(k));
+		for (const k of ["ranges", "expose", "assets", "swap"]) if (q.has(k)) cfg[k] = q.get(k) !== "0";
 		res.setHeader("Content-Type", "application/json");
 		res.end(JSON.stringify(cfg));
 		return;
 	}
 	if (url.startsWith("/__reset")) {
+		swapped.clear();
 		log = [];
 		requests = [];
 		res.end("ok");
@@ -112,13 +117,17 @@ const server = http2.createSecureServer({ key: readFileSync(join(certDir, "key.p
 		res.end();
 		return;
 	}
-	const file = resolvePath(url);
+	let file = resolvePath(url);
+	if (file && cfg.swap && file.endsWith(".pdf") && existsSync(`${file}.v2`)) {
+		if (swapped.has(file)) file = `${file}.v2`;
+		else swapped.add(file);
+	}
 	if (!file) {
 		res.statusCode = 404;
 		res.end();
 		return;
 	}
-	const isPdf = file.endsWith(".pdf");
+	const isPdf = /\.pdf(\.v2)?$/.test(file);
 	// Like a CDN: scripts and wasm go out brotli-compressed (PDFs never are).
 	if (!isPdf && /\bbr\b/.test(req.headers["accept-encoding"] ?? "") && /\.(wasm|js|mjs)$/.test(file)) {
 		const body = brotli(file);
@@ -150,6 +159,7 @@ const server = http2.createSecureServer({ key: readFileSync(join(certDir, "key.p
 			start = Number(range[1]);
 			end = range[2] === "" ? size : Math.min(size, Number(range[2]) + 1);
 		}
+		if (cfg.short && end - start > cfg.short) end = start + cfg.short;
 		res.statusCode = 206;
 		res.setHeader("Content-Range", `bytes ${start}-${end - 1}/${size}`);
 	}
