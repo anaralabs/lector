@@ -536,6 +536,85 @@ test.each([
 	},
 );
 
+/**
+ * A reader the way a host embeds one: `Pages` is not the tab stop, and the
+ * reading region around it is. Every click on the document then focuses that
+ * wrapper, which contains the viewport rather than competing with it.
+ */
+async function hostedReader(data = createTextPdf(20, 3)) {
+	const pdfjs = await loadPdfJs();
+	pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+		"../node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs",
+		import.meta.url,
+	).href;
+	let api!: ReturnType<typeof usePdfSelection>;
+	function Probe() {
+		api = usePdfSelection();
+		return null;
+	}
+	const view = render(
+		<div tabIndex={0} data-testid="reading-region">
+			<Root source={{ data }} style={{ height: 500, width: 700 }}>
+				<Probe />
+				<Pages tabIndex={undefined} virtualizerOptions={{ overscan: 0 }}>
+					<Page>
+						<TextLayer />
+					</Page>
+				</Pages>
+			</Root>
+		</div>,
+	);
+	const page = (number: number) =>
+		view.container.querySelector<HTMLElement>(
+			`.textLayer[data-page-number="${number}"]`,
+		);
+	await waitFor(
+		() => expect(page(1)?.querySelector("span")?.firstChild).toBeTruthy(),
+		{ timeout: 15000 },
+	);
+	return {
+		page,
+		get api() {
+			return api;
+		},
+		region: view.getByTestId("reading-region") as HTMLElement,
+	};
+}
+
+test("a word the browser selects is kept while the host's reading region has focus", async () => {
+	const r = await hostedReader();
+	const span = r.page(1)!.querySelector("span")!;
+
+	await userEvent.dblClick(span, { position: { x: 8, y: 5 } });
+
+	// The wrapper owns focus, because `Pages` is not a tab stop here. It
+	// contains the viewport, so it is not an external control and the word the
+	// browser selected is the reader's.
+	expect(document.activeElement).toBe(r.region);
+	await waitFor(() => expect(r.api.getText()?.trim()).toBe("Page"));
+	expect(r.api.selection?.anchor.pageNumber).toBe(1);
+});
+
+test("a control outside the reader still keeps a saved selection to itself", async () => {
+	const r = await hostedReader();
+	act(() =>
+		r.api.setSelection(
+			{ pageNumber: 1, offset: 0 },
+			{ pageNumber: 1, offset: 4 },
+		),
+	);
+	const before = r.api.selection;
+	const toolbar = render(<button type="button">Other page control</button>);
+
+	toolbar.getByRole("button").focus();
+	// Collapsing the native range is what pressing such a control does.
+	document.getSelection()?.removeAllRanges();
+	document.dispatchEvent(new Event("selectionchange"));
+	await new Promise(requestAnimationFrame);
+
+	expect(r.api.selection).toEqual(before);
+});
+
 test("mouse selection gives the PDF viewport keyboard ownership", async () => {
 	const r = await reader();
 	await userEvent.dblClick(r.page(1)!.querySelector("span")!, {
