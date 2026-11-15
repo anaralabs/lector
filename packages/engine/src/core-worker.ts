@@ -23,8 +23,10 @@ const reply = (m: CoreReply, transfer: Transferable[] = []) => self.postMessage(
 
 reply({ t: "boot" });
 
-self.onmessage = (ev: MessageEvent<Msg>) => {
+self.onmessage = (ev: MessageEvent<Msg | null>) => {
 	const m = ev.data;
+	// extensions that wrap Worker post their own messages (null, strings) to every worker
+	if (!m || typeof m !== "object") return;
 	if (m.t === "dispose") {
 		core?.dispose();
 		core = null;

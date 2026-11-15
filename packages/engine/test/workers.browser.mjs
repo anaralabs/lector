@@ -45,6 +45,7 @@ window.result = (async () => {
 		onEvent: (e) => e.type === "error" && errors.push(e.code + ": " + e.message),
 	});
 	const { info } = await v.loaded;
+	window.stray?.();
 	const text = await v.pageText(info.pageCount - 1);
 	const offscreen = v.offscreen;
 	v.destroy();
@@ -88,6 +89,28 @@ const noModuleWorkers = () => {
 			if (d && "value" in d && d.value === "module") throw new TypeError("Module scripts are not supported on DedicatedWorker yet.");
 			super(url, { name: options.name });
 		}
+	};
+};
+
+// What some extensions do: wrap Worker and post their own non-object messages to every worker.
+const strayMessages = () => {
+	const Native = Worker;
+	const workers = [];
+	const stray = (w) => {
+		for (const m of [null, undefined, 0, "ping", true]) w.postMessage(m);
+	};
+	window.stray = () => workers.forEach(stray);
+	globalThis.Worker = class extends Native {
+		constructor(url, options) {
+			super(url, options);
+			workers.push(this);
+			stray(this);
+		}
+	};
+	const nativePost = MessagePort.prototype.postMessage;
+	MessagePort.prototype.postMessage = function (...args) {
+		nativePost.call(this, null);
+		return nativePost.apply(this, args);
 	};
 };
 
@@ -152,6 +175,16 @@ const cases = [
 			assert.equal(r.pages, 4, JSON.stringify(r));
 			assert.deepEqual(r.errors, []);
 			assert.ok(r.types.length >= 2 && r.types.every((t) => t === "classic"), r.types.join());
+		},
+	},
+	{
+		name: "non-object messages from an extension do not fail a worker",
+		query: "workers=2&factory=0",
+		init: strayMessages,
+		check: (r) => {
+			assert.equal(r.pages, 4, JSON.stringify(r));
+			assert.match(r.text, /page 4/);
+			assert.deepEqual(r.errors, []);
 		},
 	},
 	{
