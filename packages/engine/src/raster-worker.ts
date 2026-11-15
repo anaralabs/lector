@@ -1079,8 +1079,9 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 		}
 		running = false;
 	};
-	port.onmessage = (ev: MessageEvent<ToRaster>) => {
+	port.onmessage = (ev: MessageEvent<ToRaster | null>) => {
 		const m = ev.data;
+		if (!m || typeof m !== "object") return;
 		if (m.t === "cancel") {
 			if (m.id === rendering) cancelled = true;
 			return;
@@ -1125,21 +1126,24 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 // loader), so announce readiness instead of assuming the first message lands.
 self.postMessage({ t: "boot" });
 
-self.onmessage = (ev: MessageEvent<ToRaster>) => {
-	if (ev.data.t === "source") {
+self.onmessage = (ev: MessageEvent<ToRaster | null>) => {
+	const m = ev.data;
+	// extensions that wrap Worker post their own messages (null, strings) to every worker
+	if (!m || typeof m !== "object") return;
+	if (m.t === "source") {
 		// The full file arrived: no more network round-trips. Cached blocks stay valid.
 		if (source?.kind !== "url") return;
-		if (ev.data.blob.size === fileLen) source = { kind: "blob", blob: ev.data.blob };
-		else if (!doc) wholeBlob = ev.data.blob;
+		if (m.blob.size === fileLen) source = { kind: "blob", blob: m.blob };
+		else if (!doc) wholeBlob = m.blob;
 		return;
 	}
-	if (ev.data.t === "block") {
-		if (!cache) early.push([ev.data.start, ev.data.data]);
-		else if (source?.kind === "url") cache.seed(ev.data.start, ev.data.data);
+	if (m.t === "block") {
+		if (!cache) early.push([m.start, m.data]);
+		else if (source?.kind === "url") cache.seed(m.start, m.data);
 		return;
 	}
-	if (ev.data.t !== "init") return;
-	open(ev.data).catch((err) => {
+	if (m.t !== "init") return;
+	open(m).catch((err) => {
 		const message = String((err as Error)?.stack ?? err);
 		if (port) send({ t: "error", message, code: trapKind(err) ? "wasm-trap" : "unknown", phase: "document-load" });
 		else console.error(message);
