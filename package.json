@@ -105,8 +105,8 @@
       "uuid": "^11.1.1",
       "ws@8": "^8.20.1",
       "yaml@2": "^2.8.3",
-      "vite@5": "6.4.4",
-      "vite@6": "6.4.4",
+      "vite@5": "6.4.5",
+      "vite@6": "6.4.5",
       "@babel/core": "^7.29.7",
       "socks": "^2.8.9",
       "ip-address@10": "10.7.4",
@@ -124,7 +124,11 @@
       "proxy-addr@2": "2.0.8",
       "source-map-js@1": "1.2.2",
       "postcss-selector-parser@7": "7.1.6",
-      "hono@4": "4.13.11",
+      "hono@4": "4.13.16",
+      "@hono/node-server@2": "2.1.6",
+      "body-parser@2": "2.4.0",
+      "qs@6": "6.16.1",
+      "sucrase@3": "3.35.1",
       "zod@4": "4.6.6"
     },
     "patchedDependencies": {
