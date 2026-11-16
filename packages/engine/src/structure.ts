@@ -7,7 +7,7 @@ export interface LayoutLine {
 	t: number;
 	r: number;
 	b: number;
-	dir?: "rtl" | "ttb";
+	dir?: "rtl" | "ttb" | "btt";
 }
 
 export interface Box {
@@ -136,9 +136,10 @@ export class PageLayout {
 			const L = lines[li]!;
 			const heights: number[] = [];
 			for (let i = L.start; i < L.end; i++) if (this.hasBox(i)) heights.push(boxes[i * 4 + 3]! - boxes[i * 4 + 1]!);
-			const h = L.dir === "ttb" ? L.r - L.l : median(heights) || L.b - L.t;
+			const vertical = L.dir === "ttb" || L.dir === "btt";
+			const h = vertical ? L.r - L.l : median(heights) || L.b - L.t;
 			const R = this.rows[this.rows.length - 1];
-			if (R && L.dir !== "ttb" && !R.ttb && this.joins(R, L, h)) {
+			if (R && !vertical && !R.ttb && this.joins(R, L, h)) {
 				R.end = L.end;
 				R.l = Math.min(R.l, L.l);
 				R.t = Math.min(R.t, L.t);
@@ -146,7 +147,7 @@ export class PageLayout {
 				R.b = Math.max(R.b, L.b);
 				if (L.end - L.start > 2) R.h = Math.max(R.h, h);
 			} else {
-				this.rows.push({ start: L.start, end: L.end, l: L.l, t: L.t, r: L.r, b: L.b, h, ttb: L.dir === "ttb", rtl: L.dir === "rtl", margin: false, column: -1, para: -1 });
+				this.rows.push({ start: L.start, end: L.end, l: L.l, t: L.t, r: L.r, b: L.b, h, ttb: vertical, rtl: L.dir === "rtl", margin: false, column: -1, para: -1 });
 			}
 			this.rowOfLine[li] = this.rows.length - 1;
 		}
