@@ -13,8 +13,8 @@ export interface TextLayerLine {
 	y: number;
 	w: number;
 	h: number;
-	/** right-to-left run (bidi), or a vertical line (CJK) */
-	dir?: "rtl" | "ttb";
+	/** right-to-left run (bidi), a vertical line (CJK), or text rotated 90° anticlockwise */
+	dir?: "rtl" | "ttb" | "btt";
 }
 
 const KEEP_PAGES = 12;
@@ -180,7 +180,8 @@ export class TextLayer {
 			if (!text.trim()) continue;
 			const span = document.createElement("span");
 			span.textContent = text;
-			const vertical = line.dir === "ttb";
+			const up = line.dir === "btt";
+			const vertical = up || line.dir === "ttb";
 			// Font size from the line box; stretch the run to the box's length.
 			// PDFium's loose boxes span ascent to descent; a CSS em box of that
 			// size draws glyphs low, so size it a bit below the box.
@@ -190,9 +191,10 @@ export class TextLayer {
 			const k = natural > 0 ? length / natural : 1;
 			const inset = ((vertical ? line.w : line.h) - size) / 2;
 			const left = vertical ? line.x + inset : line.x;
-			const top = vertical ? line.y : line.y + inset;
+			const top = up ? line.y + line.h : vertical ? line.y : line.y + inset;
 			let css = `position:absolute;left:${left}px;top:${top}px;font-size:${size}px;transform-origin:0 0;`;
-			if (vertical) css += `writing-mode:vertical-rl;transform:scaleY(${k});`;
+			if (up) css += `transform:rotate(-90deg) scaleX(${k});`;
+			else if (vertical) css += `writing-mode:vertical-rl;transform:scaleY(${k});`;
 			else css += `transform:scaleX(${k});`;
 			if (line.dir === "rtl") span.dir = "rtl";
 			span.style.cssText = css;

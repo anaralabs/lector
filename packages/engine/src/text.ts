@@ -17,9 +17,11 @@ export interface Line {
 	t: number;
 	r: number;
 	b: number;
-	/** right-to-left (its first strong char is Hebrew/Arabic/...), or vertical (top to bottom) */
-	dir?: "rtl" | "ttb";
+	/** right-to-left (its first strong char is Hebrew/Arabic/...), vertical top to bottom (CJK), or bottom to top (text rotated 90° anticlockwise) */
+	dir?: "rtl" | "ttb" | "btt";
 }
+
+export const isVertical = (dir: Line["dir"]) => dir === "ttb" || dir === "btt";
 
 export interface TextPoint {
 	page: number;
@@ -86,6 +88,7 @@ export class PageText {
 		/** the line's direction is settled (first strong char seen / orientation known) */
 		let dirSet = false;
 		let lastT = 0;
+		let lastB = 0;
 		/**
 		 * The embedded opposite-direction run in progress: the line's far edge when
 		 * it began (`floor`) and the run's own far edge (`edge`: its right in an LTR
@@ -122,12 +125,18 @@ export class PageText {
 				const minH = Math.min(b - t, h);
 				const minW = Math.min(r - l, w);
 				let breaks: boolean;
-				if (cur.end - cur.start === 1 && cur.dir !== "ttb" && hOverlap > minW * 0.5 && vOverlap < minH * 0.5 && t >= cur.t + h * 0.5 && t - cur.b < h) {
+				const stacked = cur.end - cur.start === 1 && !isVertical(cur.dir) && hOverlap > minW * 0.5 && vOverlap < minH * 0.5;
+				if (stacked && t >= cur.t + h * 0.5 && t - cur.b < h) {
 					// Second char directly below the first: a vertical line.
 					cur.dir = "ttb";
 					breaks = false;
+				} else if (stacked && b <= cur.b - h * 0.5 && cur.t - b < h) {
+					cur.dir = "btt";
+					breaks = false;
 				} else if (cur.dir === "ttb") {
 					breaks = hOverlap < minW * 0.5 || t < lastT - w * 0.5 || t - cur.b > w * 2;
+				} else if (cur.dir === "btt") {
+					breaks = hOverlap < minW * 0.5 || b > lastB + w * 0.5 || cur.t - b > w * 2;
 				} else {
 					const rtlLine = cur.dir === "rtl";
 					const prev = run;
@@ -168,13 +177,14 @@ export class PageText {
 				line.r = Math.max(line.r, r);
 				line.b = Math.max(line.b, b);
 			}
-			if (!dirSet && line.dir !== "ttb") {
+			if (!dirSet && !isVertical(line.dir)) {
 				if (RTL.test(ch)) {
 					line.dir = "rtl";
 					dirSet = true;
 				} else if (STRONG_LTR.test(ch)) dirSet = true;
 			}
 			lastT = t;
+			lastB = b;
 		}
 		close();
 	}
@@ -222,7 +232,7 @@ export class PageText {
 			const dy = y < line.t ? line.t - y : y > line.b ? y - line.b : 0;
 			// Distance across lines matters more: prefer the line you are level with
 			// (for vertical lines, the column you are in).
-			const d = line.dir === "ttb" ? dx * 4 + dy : dy * 4 + dx;
+			const d = isVertical(line.dir) ? dx * 4 + dy : dy * 4 + dx;
 			if (d < bestD) {
 				bestD = d;
 				best = i;
@@ -239,11 +249,11 @@ export class PageText {
 		let best = this.lines[n]!;
 		// Lines that overlap the point's band (split mixed-direction runs): the one
 		// with the nearest glyph wins, not the first in logical order.
-		if (best.dir !== "ttb" && y >= best.t && y <= best.b) {
+		if (!isVertical(best.dir) && y >= best.t && y <= best.b) {
 			let nearest = Infinity;
 			for (let i = 0; i < this.lines.length; i++) {
 				const line = this.lines[i]!;
-				if ((accept && !accept(i)) || line.dir === "ttb" || y < line.t || y > line.b) continue;
+				if ((accept && !accept(i)) || isVertical(line.dir) || y < line.t || y > line.b) continue;
 				const d = this.glyphDistance(line, x, y);
 				if (d < nearest) {
 					nearest = d;
@@ -281,15 +291,17 @@ export class PageText {
 	 * char on its leading half (the left half of an LTR char, the right half of
 	 * an RTL one), after it on the trailing half. Mixed runs (Latin in Hebrew,
 	 * Hebrew in Latin) are not visually monotonic in logical order, so the
-	 * glyph boxes decide, not a logical scan. Vertical lines go top to bottom.
+	 * glyph boxes decide, not a logical scan. Vertical lines go along their direction.
 	 */
 	private caretInLine(line: Line, x: number, y: number) {
 		const { boxes } = this;
-		if (line.dir === "ttb") {
+		if (isVertical(line.dir)) {
+			const up = line.dir === "btt";
 			let last = line.start;
 			for (let i = line.start; i < line.end; i++) {
 				if (!this.hasBox(i)) continue;
-				if (y < (boxes[i * 4 + 1]! + boxes[i * 4 + 3]!) / 2) return i;
+				const mid = (boxes[i * 4 + 1]! + boxes[i * 4 + 3]!) / 2;
+				if (up ? y > mid : y < mid) return i;
 				last = i + 1;
 			}
 			return last;
@@ -325,7 +337,7 @@ export class PageText {
 			if (line.end <= from || line.start >= to) continue;
 			const a = Math.max(from, line.start);
 			const z = Math.min(to, line.end);
-			if (line.dir === "ttb") {
+			if (isVertical(line.dir)) {
 				let t = Infinity;
 				let b = -Infinity;
 				for (let i = a; i < z; i++) {
@@ -422,7 +434,7 @@ export class PageText {
 	}
 
 	/** One entry per line for the hidden DOM text layer (page points). */
-	layerLines(): { text: string; x: number; y: number; w: number; h: number; dir?: "rtl" | "ttb" }[] {
+	layerLines(): { text: string; x: number; y: number; w: number; h: number; dir?: Line["dir"] }[] {
 		return this.lines.map((line) => ({
 			text: this.text(line.start, line.end).replace(/[\r\n]+$/, ""),
 			x: line.l,

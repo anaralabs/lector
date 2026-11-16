@@ -310,3 +310,46 @@ test("rects: a tall glyph reaching past the next row's bottom never yields a neg
 	assert.ok(rects.length >= 1);
 	for (const r of rects) assert.ok(r.h > 0 && r.w > 0, JSON.stringify(r));
 });
+
+/** columns of text rotated 90° anticlockwise (sideways table cells): each glyph sits above the one before */
+const sideways = (columns: string[], down = false) => {
+	const codes: number[] = [];
+	const boxes: number[] = [];
+	for (const [n, col] of columns.entries()) {
+		if (n) {
+			codes.push(13, 10);
+			boxes.push(0, 0, 0, 0, 0, 0, 0, 0);
+		}
+		[...col].forEach((ch, i) => {
+			codes.push(ch.codePointAt(0)!);
+			const t = down ? 100 + i * 6 : 400 - (i + 1) * 6;
+			boxes.push(...(ch === " " ? [0, 0, 0, 0] : [50 + n * 40, t, 60 + n * 40, t + 6]));
+		});
+	}
+	return new PageText(Uint32Array.from(codes), Float32Array.from(boxes));
+};
+
+test("lines: text rotated anticlockwise is one bottom-to-top line per column, not one per glyph", () => {
+	const t = sideways(["gene editing", "tail vein"]);
+	assert.deepEqual(
+		t.lines.map((l) => [t.text(l.start, l.end).trim(), l.dir]),
+		[
+			["gene editing", "btt"],
+			["tail vein", "btt"],
+		],
+	);
+	const [first] = t.lines;
+	assert.deepEqual(t.layerLines()[0], { text: "gene editing", x: 50, y: first!.t, w: 10, h: first!.b - first!.t, dir: "btt" });
+	assert.equal(t.hitTest(55, 399), first!.start, "the bottom of the column is its start");
+	assert.equal(t.hitTest(55, 383), first!.start + 3, "carets advance upwards");
+	assert.equal(t.rects(first!.start, first!.start + 4).length, 1);
+});
+
+test("lines: CJK top-to-bottom columns stay vertical", () => {
+	const t = sideways(["縦書きの文", "二行目"], true);
+	assert.deepEqual(
+		t.lines.map((l) => l.dir),
+		["ttb", "ttb"],
+	);
+	assert.equal(t.hitTest(55, 101), t.lines[0]!.start);
+});
