@@ -27,7 +27,7 @@ import { EngineError } from "./errors";
 import { FailedPages } from "./failed-pages";
 import { FormLayer, modifiers, type FormHit } from "./form-layer";
 import type { DocSource, DocumentInfo, OpenTiming, OutlineItem, PageSize, SizeHint, ToRaster } from "./protocol";
-import { rasterWorkerCount } from "./raster-pool";
+import { budgetedWorkerCount, rasterWorkerCount } from "./raster-pool";
 import { abandonWhole, HEAD_BYTES, rangesBeside, probeReadBytes, probeVerdict, RACE_FILE_MAX, RANGE_GRANULE, readLinearization, WHOLE_FILE_MAX } from "./range";
 import { fetchRetrying, isNetworkError, retrying, retryableStatus } from "./retry";
 import { findStartxref, pagePathObjects, parseXref } from "./xref";
@@ -41,6 +41,8 @@ import { type CreateWorker, retryUrl, startWorker, type WorkerType } from "./wor
 export interface ViewerOptions extends Partial<CoreOptions> {
 	/** URL of the package's `pdfium.wasm` (`@anaralabs/lector-engine/pdfium.wasm`) */
 	wasmUrl: string;
+	/** URL of `pdfium.asm.js`, PDFium compiled to plain JS: used where WebAssembly is off (see `./vite-wasm`) */
+	pdfiumJsUrl?: string;
 	/** number of PDFium raster workers (default: half the cores, 2-4; 2 on touch devices or with 4GB or less; without a GPU 1, or 2 from 8 cores) */
 	workers?: number;
 	/** run the compositor in a worker with an OffscreenCanvas (default: when WebGL2 works on one) */
@@ -675,6 +677,8 @@ const FORM_TAP_MS = 600;
 const NAV_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "PageDown", "PageUp", "Home", "End", " ", "Escape"]);
 
 const compiled = new Map<string, Promise<WebAssembly.Module | undefined>>();
+/** raster workers of every open viewer in this page */
+let livePdfiumWorkers = 0;
 
 /**
  * Compiles pdfium.wasm once per page and URL; every raster worker of every
@@ -682,6 +686,7 @@ const compiled = new Map<string, Promise<WebAssembly.Module | undefined>>();
  * Call it early (e.g. on hover) to take the compile off the open path.
  */
 export function preloadPdfium(wasmUrl: string): Promise<WebAssembly.Module | undefined> {
+	if (typeof WebAssembly !== "object") return Promise.resolve(undefined);
 	const url = new URL(wasmUrl, location.href).href;
 	let module = compiled.get(url);
 	if (!module) {
@@ -718,6 +723,7 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 	}
 	const {
 		wasmUrl: wasmUrlOption,
+		pdfiumJsUrl: pdfiumJsUrlOption,
 		workers: workerCount,
 		offscreen: wantOffscreen,
 		onEvent,
@@ -739,6 +745,8 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 	const startedAt = epochNow();
 	// Workers may run from blob: URLs (host loaders), where relative URLs don't resolve.
 	const wasmUrl = new URL(wasmUrlOption, location.href).href;
+	if (support.pdfium === "js" && !pdfiumJsUrlOption) throw new EngineError("lector-engine: WebAssembly is off in this browser and no pdfiumJsUrl was given", "wasm", "engine-load");
+	const pdfiumJsUrl = support.pdfium === "js" && pdfiumJsUrlOption ? new URL(pdfiumJsUrlOption, location.href).href : undefined;
 	// One Blob shared by every raster worker (posting a Blob does not copy it);
 	// workers read blocks from it on demand. Range loading starts from the URL.
 	// The workers start (and compile pdfium) while the file downloads.
@@ -988,7 +996,11 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 		if (motionQuery) coreOptions.reducedMotion = motionQuery.matches;
 		if (touchDevice) coreOptions.textureBudgetMB ??= 128;
 		const software = compositor === "canvas2d" && (support.softwareGL || !support.webgl2);
-		const n = workerCount ?? rasterWorkerCount({ cores: navigator.hardwareConcurrency, memoryGB: (navigator as { deviceMemory?: number }).deviceMemory, touch: touchDevice, software });
+		const n = pdfiumJsUrl ? 1 : workerCount ?? budgetedWorkerCount(rasterWorkerCount({ cores: navigator.hardwareConcurrency, memoryGB: (navigator as { deviceMemory?: number }).deviceMemory, touch: touchDevice, software }), livePdfiumWorkers);
+		livePdfiumWorkers += n;
+		cleanups.push(() => {
+			livePdfiumWorkers -= n;
+		});
 		const rasterWorkers: (() => Worker)[] = [];
 		/** the worker currently serving each pool lane */
 		const laneWorkers: (() => Worker)[] = [];
@@ -1044,7 +1056,7 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 				const sizes: SizeHint | undefined = !first ? undefined : blob ? { all: true } : sizeHint;
 				// the racing download finished first: the document opens from it
 				if (i === 0 && blob && loadMode === "race") loadMode = "whole";
-				const init: ToRaster = { t: "init", source: blob ? { kind: "blob", blob } : docSource!, port, wasmUrl, password: latestPassword, sizes, ...(lowMemory && { lowMemory }) };
+				const init: ToRaster = { t: "init", source: blob ? { kind: "blob", blob } : docSource!, port, wasmUrl, ...(pdfiumJsUrl && { pdfiumJsUrl }), password: latestPassword, sizes, ...(lowMemory && { lowMemory }) };
 				try {
 					worker.postMessage(module && !lowMemory ? { ...init, module } : init, [port]);
 				} catch {

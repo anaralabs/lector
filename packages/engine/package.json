@@ -32,6 +32,7 @@
 		"./raster-worker": "./dist/raster-worker.js",
 		"./core-worker": "./dist/core-worker.js",
 		"./pdfium.wasm": "./dist/pdfium.wasm",
+		"./pdfium.asm.js": "./dist/pdfium.asm.js",
 		"./package.json": "./package.json"
 	},
 	"files": [

@@ -5,6 +5,7 @@ import type { CompositorKind } from "./gl";
 export type EngineFeature =
 	| "webgl2"
 	| "canvas2d"
+	/** no longer reported: without WebAssembly PDFium runs as JS (`pdfiumJsUrl`) */
 	| "wasm"
 	| "workers"
 	/** no longer reported: without module workers the engine starts classic ones */
@@ -31,6 +32,8 @@ export interface EngineSupport {
 	offscreenBy: Record<CompositorKind, boolean>;
 	/** workers can be modules; otherwise the engine starts its workers as classic scripts */
 	moduleWorkers: boolean;
+	/** "js" where WebAssembly is off (Lockdown Mode, JIT-less policies): PDFium runs from `pdfiumJsUrl`, slower */
+	pdfium: "wasm" | "js";
 }
 
 let cached: EngineSupport | null = null;
@@ -94,7 +97,7 @@ export function getEngineSupport(): EngineSupport {
 	const gl = hasDom && typeof WebGL2RenderingContext !== "undefined" ? probeWebgl2(document.createElement("canvas")) : { ok: false, renderer: null };
 	const has2d = hasDom && canvas2d(document.createElement("canvas"));
 	if (!gl.ok && !has2d) missing.push("canvas2d");
-	if (typeof WebAssembly !== "object" || typeof WebAssembly.instantiate !== "function") missing.push("wasm");
+	const pdfium = typeof WebAssembly === "object" && typeof WebAssembly.instantiate === "function" ? "wasm" : "js";
 	if (typeof Worker === "undefined") missing.push("workers");
 	if (typeof MessageChannel === "undefined") missing.push("message-channel");
 	if (typeof ResizeObserver === "undefined") missing.push("resize-observer");
@@ -111,7 +114,7 @@ export function getEngineSupport(): EngineSupport {
 		webgl2: transferable && gl.ok && probeWebgl2(new OffscreenCanvas(1, 1)).ok,
 		canvas2d: transferable && canvas2d(new OffscreenCanvas(1, 1)),
 	};
-	cached = { supported: missing.length === 0, missing, compositor, webgl2: gl.ok, renderer: gl.renderer, softwareGL, offscreen: offscreenBy[compositor], offscreenBy, moduleWorkers: moduleWorkers() };
+	cached = { supported: missing.length === 0, missing, compositor, webgl2: gl.ok, renderer: gl.renderer, softwareGL, offscreen: offscreenBy[compositor], offscreenBy, moduleWorkers: moduleWorkers(), pdfium };
 	return cached;
 }
 

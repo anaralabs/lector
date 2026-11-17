@@ -118,6 +118,14 @@ export function rasterWorkerCount({ cores, memoryGB, touch, software = false }: 
 	return memoryGB !== undefined && memoryGB <= 4 ? 2 : n;
 }
 
+/** PDFium heaps a page keeps alive across its viewers: Chrome reserves the same address space for each, whatever its size, and refuses the 125th. */
+export const PAGE_PDFIUM_BUDGET = 16;
+
+/** Raster workers for one more viewer when `live` PDFium workers already run in this page: always at least 1. */
+export function budgetedWorkerCount(want: number, live: number, budget = PAGE_PDFIUM_BUDGET) {
+	return Math.max(1, Math.min(want, budget - live));
+}
+
 const median = (xs: number[]) => {
 	const s = [...xs].sort((a, b) => a - b);
 	return s.length ? s[Math.floor(s.length / 2)]! : undefined;

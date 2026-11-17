@@ -11,7 +11,7 @@ const dist = new URL("../dist/", import.meta.url).pathname;
 const root = await mkdtemp(join(tmpdir(), "lector-worker-start-"));
 await mkdir(join(root, "assets"));
 await mkdir(join(root, "app"));
-for (const file of ["raster-worker.js", "core-worker.js", "pdfium.wasm"]) await copyFile(join(dist, file), join(root, "assets", file));
+for (const file of ["raster-worker.js", "core-worker.js", "pdfium.wasm", "pdfium.asm.js"]) await copyFile(join(dist, file), join(root, "assets", file));
 for (const file of await readdir(dist)) if (file.endsWith(".js") && !file.includes("worker")) await copyFile(join(dist, file), join(root, "app", file));
 const { PDFDocument, StandardFonts } = createRequire(import.meta.url)("pdf-lib");
 const pdf = await PDFDocument.create();
@@ -39,6 +39,7 @@ window.result = (async () => {
 	const errors = [];
 	const v = await createViewer(document.getElementById("v"), "/doc.pdf", {
 		wasmUrl: "/assets/pdfium.wasm",
+		pdfiumJsUrl: "/assets/pdfium.asm.js",
 		workerUrls: { raster: "/assets/raster-worker.js", core: "/assets/core-worker.js" },
 		workers: Number(q.get("workers") ?? 2),
 		createWorker: q.get("factory") === "0" ? undefined : createWorker,
@@ -90,6 +91,11 @@ const noModuleWorkers = () => {
 			super(url, { name: options.name });
 		}
 	};
+};
+
+// Safari's Lockdown Mode and JIT-less policies: no WebAssembly at all.
+const noWebAssembly = () => {
+	delete globalThis.WebAssembly;
 };
 
 // What some extensions do: wrap Worker and post their own non-object messages to every worker.
@@ -185,6 +191,18 @@ const cases = [
 			assert.equal(r.pages, 4, JSON.stringify(r));
 			assert.match(r.text, /page 4/);
 			assert.deepEqual(r.errors, []);
+		},
+	},
+	{
+		name: "without WebAssembly PDFium runs as JS on one worker",
+		query: "workers=2&factory=0",
+		init: noWebAssembly,
+		check: (r) => {
+			assert.equal(r.pages, 4, JSON.stringify(r));
+			assert.match(r.text, /page 4/);
+			assert.deepEqual(r.errors, []);
+			assert.equal(requested.filter((p) => p === "assets/pdfium.asm.js").length, 1, requested.join(", "));
+			assert.ok(!requested.includes("assets/pdfium.wasm"), requested.join(", "));
 		},
 	},
 	{

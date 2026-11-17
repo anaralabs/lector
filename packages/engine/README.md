@@ -108,6 +108,7 @@ Pages are **0-based** everywhere. Page-space geometry is in PDF points with a to
 | option | default | |
 | --- | --- | --- |
 | `wasmUrl` | required | URL of `pdfium.wasm` |
+| `pdfiumJsUrl` | | URL of `pdfium.asm.js` (`pdfiumJsUrl` from `./vite-wasm`): PDFium as plain JS, used on one worker where WebAssembly is off (Safari's Lockdown Mode, JIT-less policies). Without it those browsers fail with code `wasm` |
 | `workers` | half the cores, 2–4 (2 with 4GB or less, 2 on touch devices, 1 on touch devices with 2GB or less; without a GPU 1, or 2 from 8 cores) | PDFium raster workers |
 | `offscreen` | when supported | composite in a worker (`OffscreenCanvas`) |
 | `createWorker`, `workerUrls` | | see [Workers and the wasm](#workers-and-the-wasm) |
@@ -361,11 +362,13 @@ Lines are grouped by direction. A line whose first strong character is Hebrew, A
 | Safari (macOS) | 15 | main thread on 15–16.x; worker from 17 |
 | iOS / iPadOS Safari | 15 | main thread on 15–16.x; worker from 17 |
 
-The build targets these browsers (`chrome80, firefox114, safari15`), so newer syntax is down-levelled. WebGL2, WebAssembly, workers, pointer events and `ResizeObserver` are all older. Without module workers (Firefox before 114, some managed browsers) the workers start as classic scripts.
+The build targets these browsers (`chrome80, firefox114, safari15`), so newer syntax is down-levelled. WebGL2, WebAssembly, workers, pointer events and `ResizeObserver` are all older. Without module workers (Firefox before 114, some managed browsers) the workers start as classic scripts. Without WebAssembly, PDFium runs from `pdfiumJsUrl` (Binaryen's wasm2js of the same binary: identical pixels, 17MB / 3MB gzipped, several times slower) and `getEngineSupport().pdfium` is `"js"`.
+
+Viewers in one page share a budget of 16 PDFium workers (each gets at least one): Chrome reserves the same address space for every PDFium heap whatever its size and refuses new ones past ~124 per tab, so a host with dozens of open viewers would otherwise run out.
 
 Below the minimum, nothing is half-rendered:
 
-- `isEngineSupported()` returns `false`. `getEngineSupport()` also lists what is missing (`canvas2d`, `wasm`, `workers`, `message-channel`, `resize-observer`, `pointer-events`), the compositor `auto` picks (`compositor`), the WebGL `renderer` string and whether it is a software rasteriser (`softwareGL`). Both functions are synchronous and cached.
+- `isEngineSupported()` returns `false`. `getEngineSupport()` also lists what is missing (`canvas2d`, `workers`, `message-channel`, `resize-observer`, `pointer-events`), the compositor `auto` picks (`compositor`), the WebGL `renderer` string and whether it is a software rasteriser (`softwareGL`). Both functions are synchronous and cached.
 - `createViewer` (and `<LectorView>`, through `onEvent`) rejects with `lector-engine is not supported in this browser (missing: …)`.
 - If no raster worker loads (after the retries), an `{ type: "error" }` event names the worker.
 

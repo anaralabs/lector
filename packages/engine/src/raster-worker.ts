@@ -1020,11 +1020,26 @@ let wasmMs: number | undefined;
 let wasmShared = false;
 let sharedModuleUsed = false;
 
+/** set where WebAssembly is off: PDFium runs from this plain-JS build */
+let pdfiumJsUrl: string | undefined;
+
+/** The JS build's exports stand in for a wasm instance; the glue only reads `exports`. */
+async function instantiatePdfiumJs(url: string, imports: WebAssembly.Imports): Promise<WebAssembly.Instance> {
+	// the glue builds its abort errors from WebAssembly.RuntimeError
+	(globalThis as { WebAssembly?: unknown }).WebAssembly ??= { RuntimeError: class RuntimeError extends Error {} };
+	const { asmFunc } = (await import(/* @vite-ignore */ url)) as { asmFunc: (imports: WebAssembly.Imports) => WebAssembly.Exports };
+	return { exports: asmFunc(imports) } as WebAssembly.Instance;
+}
+
 function loadPdfium(wasmUrl: string, compiled?: WebAssembly.Module): Promise<Pdfium> {
 	return new Promise<Pdfium>((resolve, reject) => {
 		init({
 			instantiateWasm(imports: WebAssembly.Imports, receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void) {
 				(async () => {
+					if (pdfiumJsUrl) {
+						receive(await instantiatePdfiumJs(pdfiumJsUrl, imports), undefined as unknown as WebAssembly.Module);
+						return;
+					}
 					const { instance, module } = await instantiatePdfium(wasmUrl, imports, compiled);
 					wasmModule = module;
 					receive(instance, module);
@@ -1095,6 +1110,7 @@ async function open(msg: Extract<ToRaster, { t: "init" }>) {
 		void run();
 	};
 	wasmUrl = msg.wasmUrl;
+	pdfiumJsUrl = msg.pdfiumJsUrl;
 	try {
 		const t0 = performance.now();
 		if (msg.lowMemory) memoryCap = LOW_MEMORY_PAGES;

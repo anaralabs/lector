@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { FromRaster, ToRaster } from "../src/protocol.ts";
-import { OOM_REDUCE, RasterPool, rasterWorkerCount, WORKER_RESTARTS } from "../src/raster-pool.ts";
+import { budgetedWorkerCount, OOM_REDUCE, PAGE_PDFIUM_BUDGET, RasterPool, rasterWorkerCount, WORKER_RESTARTS } from "../src/raster-pool.ts";
 
 class FakePort {
 	sent: ToRaster[] = [];
@@ -502,4 +502,13 @@ test("a document that cannot be opened is still reported once, by the first work
 	fail(ports[0]!);
 	assert.deepEqual(errors, ["parse"]);
 	assert.deepEqual(retired, []);
+});
+
+test("viewers share a page-wide PDFium budget and each keeps at least one worker", () => {
+	assert.equal(budgetedWorkerCount(4, 0), 4);
+	assert.equal(budgetedWorkerCount(4, PAGE_PDFIUM_BUDGET - 2), 2);
+	assert.equal(budgetedWorkerCount(4, PAGE_PDFIUM_BUDGET), 1);
+	let live = 0;
+	for (let i = 0; i < 32; i++) live += budgetedWorkerCount(4, live);
+	assert.equal(live, PAGE_PDFIUM_BUDGET + 32 - PAGE_PDFIUM_BUDGET / 4);
 });
