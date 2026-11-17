@@ -56,7 +56,7 @@ export type SizeHint = { all: true } | { all: false; pages: number[]; fraction?:
 export type ToRaster =
 	/** sizes: omitted for all but one worker (sizes are read as pages are used there) */
 	/** lowMemory: cap PDFium's memory lower (a retry after the browser could not reserve it) */
-	| { t: "init"; source: DocSource; port: MessagePort; wasmUrl: string; module?: WebAssembly.Module; password?: string; sizes?: SizeHint; lowMemory?: boolean }
+	| { t: "init"; source: DocSource; port: MessagePort; wasmUrl: string; pdfiumJsUrl?: string; module?: WebAssembly.Module; password?: string; sizes?: SizeHint; lowMemory?: boolean }
 	/** sent to the worker itself (not the port): the full file arrived, read from it from now on */
 	| { t: "source"; blob: Blob }
 	/** sent to the worker itself: the bytes of one range request another worker made */
