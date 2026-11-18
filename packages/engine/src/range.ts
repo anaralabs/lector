@@ -96,9 +96,22 @@ export function headerOffset(bytes: Uint8Array): number {
  * as a format error or a failed read. A trapped PDFium gets a fresh instance
  * whatever the source. A password or an unsupported security handler stays.
  */
-export function reopenWorthIt(code: ErrorCode | "trap", rangeRead: boolean): boolean {
+export function reopenWorthIt(code: ErrorCode | "trap", rangeRead: boolean, cutOff = false): boolean {
 	if (code === "trap") return true;
+	if (cutOff && code === "parse") return true;
 	return rangeRead && (code === "parse" || code === "fetch" || code === "unknown");
+}
+
+/** A PDF header with no `%%EOF` at the end: the bytes most likely stop short of the file (a download cut off, or a short cached copy). */
+export function looksCutOff(detail: { header: string; truncated: boolean } | undefined): boolean {
+	return !!detail && detail.header === "pdf" && detail.truncated;
+}
+
+/** Whether a 200 body is all of the file: its length matches `Content-Length` (when declared and not content-encoded). */
+export function bodyComplete(received: number, contentLength: string | null, contentEncoding: string | null): boolean {
+	if ((contentEncoding ?? "identity") !== "identity") return received > 0;
+	const declared = Number(contentLength ?? "");
+	return received > 0 && (!(declared > 0) || declared === received);
 }
 
 /**

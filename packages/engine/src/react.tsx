@@ -20,14 +20,14 @@ export interface LectorViewProps extends Omit<ViewerOptions, "onEvent" | keyof C
 }
 
 export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function LectorView(
-	{ source, options, onEvent, onViewer, className, style, wasmUrl, pdfiumJsUrl, workers, offscreen, onLink, createWorker, workerUrls, password, textLayer, interceptFind, rangeLoading, autoFetch, tileCache },
+	{ source, options, onEvent, onViewer, className, style, wasmUrl, pdfiumJsUrl, workers, offscreen, onLink, createWorker, workerUrls, password, sourceUrl, textLayer, interceptFind, rangeLoading, autoFetch, tileCache },
 	ref,
 ) {
 	const container = useRef<HTMLDivElement>(null);
 	const [viewer, setViewer] = useState<Viewer | null>(null);
-	const latest = useRef({ onEvent, onViewer, onLink, options, createWorker, tileCache });
+	const latest = useRef({ onEvent, onViewer, onLink, options, createWorker, tileCache, sourceUrl });
 	useLayoutEffect(() => {
-		latest.current = { onEvent, onViewer, onLink, options, createWorker, tileCache };
+		latest.current = { onEvent, onViewer, onLink, options, createWorker, tileCache, sourceUrl };
 	});
 	// compared by value: an inline `{ key }` object must not recreate the viewer every render
 	const tileCacheKey = JSON.stringify(tileCache ?? false);
@@ -45,6 +45,7 @@ export const LectorView = forwardRef<Viewer | null, LectorViewProps>(function Le
 			createWorker: latest.current.createWorker,
 			workerUrls,
 			password,
+			sourceUrl: latest.current.sourceUrl,
 			textLayer,
 			interceptFind,
 			rangeLoading,

@@ -17,7 +17,10 @@ const { PDFDocument, StandardFonts } = createRequire(import.meta.url)("pdf-lib")
 const pdf = await PDFDocument.create();
 const font = await pdf.embedFont(StandardFonts.Helvetica);
 for (let i = 1; i <= 4; i++) pdf.addPage([612, 792]).drawText(`Worker start, page ${i}`, { x: 72, y: 700, size: 18, font });
-await writeFile(join(root, "doc.pdf"), await pdf.save());
+const docBytes = await pdf.save();
+await writeFile(join(root, "doc.pdf"), docBytes);
+// stored cut off: a fresh download is the same bytes
+await writeFile(join(root, "cut.pdf"), docBytes.subarray(0, Math.floor(docBytes.length * 0.6)));
 
 await writeFile(
 	join(root, "index.html"),
@@ -37,7 +40,15 @@ const createWorker = (url, name, options) => {
 };
 window.result = (async () => {
 	const errors = [];
-	const v = await createViewer(document.getElementById("v"), "/doc.pdf", {
+	// bytes the host downloaded that stop short of the file, as a dropped or short cached download leaves them
+	const cut = Number(q.get("cut") ?? 0);
+	let source = "/doc.pdf";
+	if (cut) {
+		const bytes = new Uint8Array(await (await fetch(q.get("src") ?? "/doc.pdf")).arrayBuffer());
+		source = bytes.slice(0, Math.floor(bytes.length * cut));
+	}
+	const v = await createViewer(document.getElementById("v"), source, {
+		sourceUrl: q.get("sourceUrl") ?? undefined,
 		wasmUrl: "/assets/pdfium.wasm",
 		pdfiumJsUrl: "/assets/pdfium.asm.js",
 		workerUrls: { raster: "/assets/raster-worker.js", core: "/assets/core-worker.js" },
@@ -203,6 +214,33 @@ const cases = [
 			assert.deepEqual(r.errors, []);
 			assert.equal(requested.filter((p) => p === "assets/pdfium.asm.js").length, 1, requested.join(", "));
 			assert.ok(!requested.includes("assets/pdfium.wasm"), requested.join(", "));
+		},
+	},
+	{
+		name: "bytes that stop short of the file open from one fresh download of sourceUrl",
+		query: "workers=3&factory=0&cut=0.6&sourceUrl=/doc.pdf",
+		check: (r) => {
+			assert.equal(r.pages, 4, JSON.stringify(r));
+			assert.match(r.text, /page 4/);
+			assert.deepEqual(r.errors, []);
+			// the host's download, then exactly one more from the first lane
+			assert.equal(requested.filter((p) => p === "doc.pdf").length, 2, requested.join(", "));
+		},
+	},
+	{
+		name: "cut-off bytes without sourceUrl still fail with parse",
+		query: "workers=2&factory=0&cut=0.6",
+		check: (r) => {
+			assert.equal(r.code, "parse", JSON.stringify(r));
+			assert.equal(requested.filter((p) => p === "doc.pdf").length, 1, requested.join(", "));
+		},
+	},
+	{
+		name: "a file stored cut off is downloaded once more, then fails with parse",
+		query: "workers=2&factory=0&cut=1&src=/cut.pdf&sourceUrl=/cut.pdf",
+		check: (r) => {
+			assert.equal(r.code, "parse", JSON.stringify(r));
+			assert.equal(requested.filter((p) => p === "cut.pdf").length, 2, requested.join(", "));
 		},
 	},
 	{

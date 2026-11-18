@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { abandonWhole, blockVerdict, headerOffset, openErrorCode, reopenWorthIt, HEAD_BYTES, probeReadBytes, probeVerdict, RACE_FILE_MAX, RANGE_GRANULE, rangesBeside, readLinearization, totalFromContentRange, WHOLE_FILE_MAX, WHOLE_PATIENCE_MS } from "../src/range.ts";
+import { abandonWhole, blockVerdict, bodyComplete, headerOffset, looksCutOff, openErrorCode, reopenWorthIt, HEAD_BYTES, probeReadBytes, probeVerdict, RACE_FILE_MAX, RANGE_GRANULE, rangesBeside, readLinearization, totalFromContentRange, WHOLE_FILE_MAX, WHOLE_PATIENCE_MS } from "../src/range.ts";
 
 test("Content-Range total, including when CORS hides it", () => {
 	assert.equal(totalFromContentRange("bytes 0-1023/52428800"), 52428800);
@@ -127,4 +127,25 @@ test("a failed open from range reads is retried from the whole file; a trap alwa
 	assert.equal(reopenWorthIt("trap", false), true);
 	assert.equal(reopenWorthIt("trap", true), true);
 	for (const code of ["password", "security", "file"] as const) assert.equal(reopenWorthIt(code, true), false, code);
+});
+
+test("bytes with a PDF header and no %%EOF are retried from a fresh download; other formats stay", () => {
+	assert.equal(looksCutOff({ header: "pdf", truncated: true }), true);
+	assert.equal(looksCutOff({ header: "pdf", truncated: false }), false);
+	assert.equal(looksCutOff({ header: "other", truncated: true }), false);
+	assert.equal(looksCutOff({ header: "html", truncated: true }), false);
+	assert.equal(looksCutOff(undefined), false);
+	assert.equal(reopenWorthIt("parse", false, true), true);
+	assert.equal(reopenWorthIt("parse", false, false), false);
+	for (const code of ["password", "security", "fetch", "unknown"] as const) assert.equal(reopenWorthIt(code, false, true), false, code);
+});
+
+test("a fresh download counts only when it is all of the declared length", () => {
+	assert.equal(bodyComplete(1000, "1000", null), true);
+	assert.equal(bodyComplete(600, "1000", null), false);
+	assert.equal(bodyComplete(1000, null, null), true);
+	assert.equal(bodyComplete(0, null, null), false);
+	// an encoded body's Content-Length counts compressed bytes
+	assert.equal(bodyComplete(1000, "400", "gzip"), true);
+	assert.equal(bodyComplete(1000, "1000", "identity"), true);
 });
