@@ -7,8 +7,8 @@ type Canvas = HTMLCanvasElement | OffscreenCanvas;
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
 const RESTORE_WAIT_MS = 1500;
-/** fresh canvases one viewer may take; a GPU that keeps dropping them is given up on */
-const MAX_SWAPS = 3;
+/** shorter than the visible wait hosts give a lost context before giving up on the viewer */
+export const SWITCH_WATCHDOG_MS = 3000;
 
 const GPU_2D: CanvasRenderingContext2DSettings = { alpha: false, desynchronized: true };
 // willReadFrequently keeps the canvas in CPU memory: it draws even while the GPU process is gone.
@@ -42,7 +42,6 @@ const realTimers: Timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (t) => 
 
 export class ContextRecovery {
 	private losses = 0;
-	private swaps = 0;
 	private failedSwaps = 0;
 	private timer: unknown = null;
 	/** the pending request goes out at once (a later loss event must not push it back) */
@@ -78,7 +77,9 @@ export class ContextRecovery {
 		this.emit({ type: "error", message, code: "gpu", phase: "render" });
 		// Mobile browsers drop the contexts of a hidden page: that says nothing about the GPU.
 		if (!this.hidden) this.losses++;
-		this.request(cause || this.losses > 1 ? 0 : RESTORE_WAIT_MS);
+		// browsers restore lost 2D contexts on their own, and a canvas that keeps dropping must not spin
+		const now = cause || (gl.kind === "webgl2" && this.losses > 1);
+		this.request(now ? 0 : RESTORE_WAIT_MS);
 	}
 
 	private request(ms: number) {
@@ -92,8 +93,7 @@ export class ContextRecovery {
 				this.dueWhileHidden = true;
 				return;
 			}
-			if (this.swaps >= MAX_SWAPS) this.fail(`gave up after ${MAX_SWAPS} canvases`);
-			else this.emit({ type: "need-canvas", reason: "context-lost" });
+			this.emit({ type: "need-canvas", reason: "context-lost" });
 		}, ms);
 	}
 
@@ -111,12 +111,11 @@ export class ContextRecovery {
 		if (this.stopped) return null;
 		try {
 			const next = make(canvas);
-			this.swaps++;
 			this.failedSwaps = 0;
 			return next;
 		} catch (err) {
 			const reason = String((err as Error)?.message ?? err);
-			if (++this.failedSwaps === 1 && this.swaps < MAX_SWAPS) this.emit({ type: "need-canvas", reason: "context-lost" });
+			if (++this.failedSwaps === 1) this.emit({ type: "need-canvas", reason: "context-lost" });
 			else this.fail(reason);
 			return null;
 		}
@@ -140,6 +139,41 @@ export class ContextRecovery {
 		this.cancel();
 		this.stopped = true;
 	}
+}
+
+/** Runs `fn` once `ms` of visible time has passed since `start`; `stop` cancels. */
+export function visibleTimer(ms: number, fn: () => void, timers: Timers = realTimers) {
+	let timer: unknown = null;
+	let armed = false;
+	const doc = (globalThis as { document?: Document }).document;
+	const clear = () => {
+		if (timer !== null) timers.clear(timer);
+		timer = null;
+	};
+	const sync = () => {
+		if (!armed) return;
+		if (doc?.visibilityState === "hidden") clear();
+		else
+			timer ??= timers.set(() => {
+				timer = null;
+				stop();
+				fn();
+			}, ms);
+	};
+	const stop = () => {
+		armed = false;
+		clear();
+		doc?.removeEventListener("visibilitychange", sync);
+	};
+	return {
+		start() {
+			if (armed) return;
+			armed = true;
+			doc?.addEventListener("visibilitychange", sync);
+			sync();
+		},
+		stop,
+	};
 }
 
 /** What a core whose `failed` compositor could not start retries with on a fresh canvas: Canvas 2D, unless the host pinned the one that failed. */
