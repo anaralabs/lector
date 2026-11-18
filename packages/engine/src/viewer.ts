@@ -87,6 +87,12 @@ export interface ViewerOptions extends Partial<CoreOptions> {
 	/** password for an encrypted document (else an `error` event with code `password`; see `unlock`) */
 	password?: string;
 	/**
+	 * Where a byte source came from (e.g. a download the host started early).
+	 * Bytes that open as a cut-off file (a PDF header and no `%%EOF`) are
+	 * downloaded from here once more instead of failing. URL sources need nothing.
+	 */
+	sourceUrl?: string;
+	/**
 	 * Hidden DOM text for the visible pages ±1 (default true): screen readers
 	 * read it and the browser's find (Cmd/Ctrl+F) matches it. It is transparent
 	 * and click-through; selection stays on the GPU.
@@ -731,6 +737,7 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 		createWorker,
 		workerUrls,
 		password,
+		sourceUrl: sourceUrlOption,
 		rangeLoading = false,
 		autoFetch = true,
 		textLayer: wantTextLayer = true,
@@ -767,11 +774,17 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 	// Every download this viewer starts (probe, seeds, the background full file) stops with it.
 	const network = new AbortController();
 	let sourceUrl: string | undefined;
+	/** downloaded once more by a worker whose blob opens as a cut-off file */
+	const refetchUrl = () => sourceUrl ?? (sourceUrlOption ? new URL(sourceUrlOption, location.href).href : undefined);
+	const blobSource = (b: Blob): DocSource => {
+		const url = refetchUrl();
+		return url ? { kind: "blob", blob: b, url } : { kind: "blob", blob: b };
+	};
 	const open = (resolved: string | ArrayBuffer | Uint8Array): Promise<void> => {
 		if (typeof resolved !== "string") {
 			blob = new Blob([(resolved instanceof Uint8Array ? resolved : new Uint8Array(resolved)) as Uint8Array<ArrayBuffer>], { type: "application/pdf" });
 			fileBytes = blob.size;
-			docSource = { kind: "blob", blob };
+			docSource = blobSource(blob);
 			return Promise.resolve();
 		}
 		const absolute = new URL(resolved, location.href).href;
@@ -788,7 +801,7 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 			fetchBytes = blob?.size ?? (opened as { seeds: [number, Uint8Array][] }).seeds.reduce((sum, [, b]) => sum + b.length, 0);
 			fileBytes = blob?.size ?? (opened as { length: number }).length;
 			docSource = blob
-				? { kind: "blob", blob }
+				? blobSource(blob)
 				: { kind: "url", url: absolute, length: (opened as { length: number }).length, credentials: new URL(absolute).origin === location.origin, seeds: (opened as { seeds: [number, Uint8Array][] }).seeds };
 		});
 	};
@@ -1026,6 +1039,8 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 			if (ev.data?.t === "whole") {
 				loadMode = "download";
 				fileBytes = ev.data.blob.size;
+				// a blob that opened cut off is replaced by the fresh copy
+				if (blob && blob.size !== ev.data.blob.size) blob = null;
 				arrived(ev.data.blob);
 				return;
 			}
@@ -1056,7 +1071,7 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 				const sizes: SizeHint | undefined = !first ? undefined : blob ? { all: true } : sizeHint;
 				// the racing download finished first: the document opens from it
 				if (i === 0 && blob && loadMode === "race") loadMode = "whole";
-				const init: ToRaster = { t: "init", source: blob ? { kind: "blob", blob } : docSource!, port, wasmUrl, ...(pdfiumJsUrl && { pdfiumJsUrl }), password: latestPassword, sizes, ...(lowMemory && { lowMemory }) };
+				const init: ToRaster = { t: "init", source: blob ? blobSource(blob) : docSource!, port, wasmUrl, ...(pdfiumJsUrl && { pdfiumJsUrl }), password: latestPassword, sizes, ...(lowMemory && { lowMemory }) };
 				try {
 					worker.postMessage(module && !lowMemory ? { ...init, module } : init, [port]);
 				} catch {

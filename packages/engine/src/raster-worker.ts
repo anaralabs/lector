@@ -11,7 +11,7 @@ import { init, type Pdfium } from "./pdfium/pdfium.js";
 import { bakePixels } from "./bake";
 import { boxFor, pageTransform, readCharBoxes, type Xf } from "./char-boxes";
 import type { DocSource, DocumentInfo, ErrorCode, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
-import { blockVerdict, HEADER_SCAN_BYTES, headerOffset, openErrorCode, PDFIUM_HEADER_WINDOW, RANGE_BLOCK, RANGE_GRANULE, RANGE_MAX_RUN, reopenWorthIt } from "./range";
+import { blockVerdict, bodyComplete, HEADER_SCAN_BYTES, headerOffset, looksCutOff, openErrorCode, PDFIUM_HEADER_WINDOW, RANGE_BLOCK, RANGE_GRANULE, RANGE_MAX_RUN, reopenWorthIt } from "./range";
 import { ONLINE_WAIT_MS, retryingSync, untilOnline } from "./retry";
 import { capWasmMemory, isOutOfMemory, trapKind } from "./wasm-trap";
 
@@ -692,6 +692,22 @@ let fileOffset = 0;
 let wholeBlob: Blob | null = null;
 /** blocks came from range reads: they may mix two versions of a file rewritten in place */
 let rangeRead = false;
+/** how long a lane whose bytes opened as a cut-off file waits for the first lane's fresh copy */
+const REFETCH_WAIT_MS = 30_000;
+let wholeWaiter: ((blob: Blob | null) => void) | null = null;
+
+/** The whole file once another lane shares it (null after `ms`). */
+function nextWhole(ms: number): Promise<Blob | null> {
+	return new Promise((resolve) => {
+		const timer = setTimeout(() => done(null), ms);
+		const done = (blob: Blob | null) => {
+			clearTimeout(timer);
+			wholeWaiter = null;
+			resolve(blob);
+		};
+		wholeWaiter = done;
+	});
+}
 
 const heapBytes = () => heap().length + (cache?.bytes ?? 0);
 
@@ -761,10 +777,12 @@ function newCache() {
 }
 
 /** The whole file in one response: one version of it, whatever happens to the object meanwhile. */
-async function downloadWhole(src: Extract<DocSource, { kind: "url" }>): Promise<Blob | null> {
+async function downloadWhole(src: { url: string }): Promise<Blob | null> {
 	try {
 		const res = await fetch(src.url, { credentials: "same-origin", cache: "no-store" });
-		return res.status === 200 ? await res.blob() : null;
+		if (res.status !== 200) return null;
+		const blob = await res.blob();
+		return bodyComplete(blob.size, res.headers.get("Content-Length"), res.headers.get("Content-Encoding")) ? blob : null;
 	} catch {
 		return null;
 	}
@@ -838,11 +856,25 @@ function tryOpen(password: string | undefined): OpenResult | OpenFailure {
 	return shifted.code === "trap" ? shifted : first;
 }
 
-/** Gets ready to open once more: from the whole file (range reads failed), and with a fresh PDFium after a trap. False when there is nothing new to try. */
+/** Gets ready to open once more: from the whole file (range reads failed, or the bytes stop short of the file), and with a fresh PDFium after a trap. False when there is nothing new to try. */
 async function startOver(failure: OpenFailure): Promise<boolean> {
-	if (!reopenWorthIt(failure.code, rangeRead)) return false;
+	const cutOff = looksCutOff(failure.detail);
+	if (!reopenWorthIt(failure.code, rangeRead, cutOff)) return false;
 	let fresh = false;
-	if (rangeRead && source) {
+	if (cutOff && !rangeRead && source?.kind === "blob" && source.url) {
+		// the first lane downloads; the others open from the copy it shares
+		const { url } = source;
+		const shared = wholeBlob;
+		const blob = shared ?? (sizeHint ? await downloadWhole({ url }) : await nextWhole(REFETCH_WAIT_MS));
+		// the same length again is the file as stored: reopening it would fail the same way
+		if (blob && blob.size !== fileLen) {
+			source = { kind: "blob", blob, url };
+			fileLen = blob.size;
+			newCache();
+			fresh = true;
+			if (!shared && sizeHint) self.postMessage({ t: "whole", blob });
+		}
+	} else if (rangeRead && source) {
 		rangeRead = false;
 		const shared = source.kind === "blob" ? source.blob : wholeBlob;
 		const blob = shared ?? (source.kind === "url" ? await downloadWhole(source) : null);
@@ -1147,6 +1179,14 @@ self.onmessage = (ev: MessageEvent<ToRaster | null>) => {
 	// extensions that wrap Worker post their own messages (null, strings) to every worker
 	if (!m || typeof m !== "object") return;
 	if (m.t === "source") {
+		// A fresh copy of a file whose bytes opened cut off: open from it.
+		if (source?.kind === "blob") {
+			if (!doc && m.blob.size !== fileLen) {
+				wholeBlob = m.blob;
+				wholeWaiter?.(m.blob);
+			}
+			return;
+		}
 		// The full file arrived: no more network round-trips. Cached blocks stay valid.
 		if (source?.kind !== "url") return;
 		if (m.blob.size === fileLen) source = { kind: "blob", blob: m.blob };

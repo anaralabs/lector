@@ -36,7 +36,8 @@ export type ErrorPhase = "engine-load" | "document-load" | "render" | "text" | "
  *   file as a Blob (`source` message)
  */
 export type DocSource =
-	| { kind: "blob"; blob: Blob }
+	/** `url`: where the bytes came from, downloaded once more if they open as a cut-off file */
+	| { kind: "blob"; blob: Blob; url?: string }
 	| {
 			kind: "url";
 			url: string;
