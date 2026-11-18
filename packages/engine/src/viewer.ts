@@ -21,7 +21,7 @@ import {
 import type { PdfAnnotation } from "./annotations";
 import type { PageFigure } from "./figures";
 import type { SearchOptions } from "./search";
-import { retryCompositor } from "./context-loss";
+import { retryCompositor, SWITCH_WATCHDOG_MS, visibleTimer } from "./context-loss";
 import { type CoreInput, type CoreReply, replayInput } from "./core-input";
 import { EngineError } from "./errors";
 import { FailedPages } from "./failed-pages";
@@ -1144,21 +1144,30 @@ export async function createViewer(container: HTMLElement, source: ViewerSource,
 		};
 		const progressFns = new Map<number, (r: SearchResults) => void>();
 		const flights = new Map<number, (landed: boolean) => void>();
+		const handOverCanvas = () => {
+			if (destroyed) return;
+			try {
+				const fresh = freshCanvas();
+				if (offscreenNow) {
+					const off = fresh.transferControlToOffscreen();
+					postToCore({ t: "canvas", canvas: off }, [off]);
+				} else core?.swapCanvas(fresh);
+			} catch (err) {
+				const reason = String((err as Error)?.message ?? err);
+				if (offscreenNow) postToCore({ t: "canvas-failed", reason });
+				else core?.canvasFailed(reason);
+			}
+		};
+		// hosts give up on a lost context after a few visible seconds: hand over a canvas ourselves before then
+		const switchWatchdog = visibleTimer(SWITCH_WATCHDOG_MS, handOverCanvas);
+		cleanups.push(() => switchWatchdog.stop());
 		const handleEvent = (e: CoreEvent) => {
 			if (e.type === "need-canvas") {
-				const fresh = freshCanvas();
-				try {
-					if (offscreenNow) {
-						const off = fresh.transferControlToOffscreen();
-						postToCore({ t: "canvas", canvas: off }, [off]);
-					}
-				} catch (err) {
-					const reason = String((err as Error)?.message ?? err);
-					if (offscreenNow) postToCore({ t: "canvas-failed", reason });
-					else core?.canvasFailed(reason);
-				}
+				handOverCanvas();
 				return;
 			}
+			if (e.type === "error" && e.code === "gpu" && e.phase === "render") switchWatchdog.start();
+			else if (e.type === "compositor" || e.type === "restored") switchWatchdog.stop();
 			if (e.type === "raster-worker") {
 				if (destroyed) return;
 				laneWorkers[e.index]?.().terminate();

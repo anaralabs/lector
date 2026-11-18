@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ContextRecovery, open2d } from "../src/context-loss.ts";
+import { ContextRecovery, open2d, visibleTimer } from "../src/context-loss.ts";
 import type { Compositor } from "../src/gl.ts";
 
 type Settings = { willReadFrequently?: boolean };
@@ -223,19 +223,37 @@ test("every loss ends in a compositor or a typed error", () => {
 	}
 });
 
-test("a GPU that keeps dropping fresh canvases is given up on", () => {
+test("a GPU that keeps dropping fresh canvases is never given up on, and waits for a restore each time", () => {
 	const { timers, recovery, types } = setup();
 	let current = fakeCompositor("webgl2");
 	recovery.watch(current, () => {});
-	for (let i = 0; i < 4; i++) {
+	for (let i = 0; i < 8; i++) {
 		current.onLost();
-		timers.advance(2000);
-		if (types().at(-1) !== "need-canvas") break;
+		timers.advance(1499);
+		assert.notEqual(types().at(-1), "need-canvas", `swap ${i} came before the browser could restore`);
+		timers.advance(1);
+		assert.equal(types().at(-1), "need-canvas");
 		current = recovery.swap({} as Canvas, () => fakeCompositor("canvas2d"))!;
 		recovery.watch(current, () => {});
 	}
-	assert.equal(types().at(-1), "error:compositor");
-	assert.equal(types().filter((t) => t === "need-canvas").length, 3);
+	assert.ok(!types().includes("error:compositor"), types().join());
+	assert.equal(types().filter((t) => t === "need-canvas").length, 8);
+});
+
+test("a canvas lost on every trip to the background is replaced every time", () => {
+	const { timers, recovery, types } = setup();
+	let current = fakeCompositor("canvas2d");
+	recovery.watch(current, () => {});
+	for (let i = 0; i < 6; i++) {
+		recovery.setHidden(true);
+		current.onLost();
+		timers.advance(10_000);
+		recovery.setHidden(false);
+		timers.advance(1500);
+		current = recovery.swap({} as Canvas, () => fakeCompositor("canvas2d"))!;
+		recovery.watch(current, () => {});
+	}
+	assert.ok(!types().includes("error:compositor"), types().join());
 });
 
 test("a disposed core stops asking", () => {
@@ -294,4 +312,23 @@ test("losses while hidden do not use up canvases", () => {
 	gl.onLost();
 	timers.advance(1500);
 	assert.equal(types().filter((t) => t === "need-canvas").length, 1);
+});
+
+test("the visible timer fires once after its time and not after stop", () => {
+	const timers = new FakeTimers();
+	let fired = 0;
+	const t = visibleTimer(3000, () => fired++, timers);
+	t.start();
+	t.start();
+	timers.advance(2999);
+	assert.equal(fired, 0);
+	timers.advance(1);
+	assert.equal(fired, 1);
+	timers.advance(10_000);
+	assert.equal(fired, 1);
+	t.start();
+	timers.advance(1000);
+	t.stop();
+	timers.advance(10_000);
+	assert.equal(fired, 1);
 });
