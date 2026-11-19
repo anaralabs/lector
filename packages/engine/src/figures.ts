@@ -2,6 +2,7 @@
 // (images, vector paths) and the page text (captions). `readFigureInput` runs in
 // the raster workers; `detectFigures` is pure so it can be tested on its own.
 
+import { loadTextPage } from "./char-boxes";
 import type { Pdfium } from "./pdfium/pdfium.js";
 import type { Rect } from "./text";
 
@@ -736,7 +737,7 @@ export function readFigureLines(
 	page: number,
 ): FigureLine[] {
 	const { P } = ctx;
-	const tp = P.FPDFText_LoadPage(page);
+	const tp = loadTextPage(P, page);
 	if (!tp) return [];
 	const rect = P.pdfium.wasmExports.malloc(16);
 	try {

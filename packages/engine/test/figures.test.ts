@@ -1,18 +1,17 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { createRequire, register } from "node:module";
 import { test } from "node:test";
-import {
-	type Box,
-	detectFigures,
-	type FigureLine,
-	figureAt,
-	findCaptions,
-	linesFromChars,
-	type PageFigure,
-	readFigureLines,
-	readFigureObjects,
-} from "../src/figures.ts";
+
+// src/ imports without extensions (bundler style); resolve them for Node.
+register(
+	`data:text/javascript,${encodeURIComponent(
+		"export async function resolve(s, c, n) { try { return await n(s, c); } catch (e) { if (s.startsWith('.') && !s.endsWith('.ts')) return n(s + '.ts', c); throw e; } }",
+	)}`,
+);
+import type { Box, FigureLine, PageFigure } from "../src/figures.ts";
+
+const { detectFigures, figureAt, findCaptions, linesFromChars, readFigureLines, readFigureObjects } = await import("../src/figures.ts");
 
 const require = createRequire(import.meta.url);
 const W = 612;
@@ -252,4 +251,28 @@ test("attention-is-all-you-need: every figure and table found with its label", a
 		"p14 vector Figure 4",
 		"p15 vector Figure 5",
 	]);
+});
+
+test("figure lines on sideways pages are in reading order", async () => {
+	const { init } = await import(require.resolve("@embedpdf/pdfium").replace(/index\.cjs$/, "index.js"));
+	const P = await init({ wasmBinary: readFileSync(require.resolve("@embedpdf/pdfium/pdfium.wasm")) });
+	P.PDFiumExt_Init();
+	// @ts-expect-error plain .mjs script, no types
+	const { makeRotated, ROTATED_LINES } = await import("./fixtures/make-rotated.mjs");
+	const bytes: Uint8Array = makeRotated([90, 270]);
+	const heap = () => (P.pdfium as { HEAPU8: Uint8Array }).HEAPU8;
+	const ptr = P.pdfium.wasmExports.malloc(bytes.length);
+	heap().set(bytes, ptr);
+	const doc = P.FPDF_LoadMemDocument(ptr, bytes.length, "");
+	for (const i of [0, 1]) {
+		const page = P.FPDF_LoadPage(doc, i);
+		const lines = readFigureLines({ P, heap, toPage: (x: number, y: number): [number, number] => [x, y] }, page);
+		assert.deepEqual(
+			lines.map((l: FigureLine) => l.text.trim()),
+			ROTATED_LINES,
+		);
+		assert.equal(P.FPDFPage_GetRotation(page), i === 0 ? 1 : 3, "/Rotate restored");
+		P.FPDF_ClosePage(page);
+	}
+	P.FPDF_CloseDocument(doc);
 });
