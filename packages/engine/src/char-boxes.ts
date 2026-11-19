@@ -42,6 +42,17 @@ export function boxFor(xf: Xf, x0: number, y0: number, x1: number, y1: number): 
 
 /** Unicode code and loose box (l, t, r, b; zero for generated chars) of every char on a loaded page. */
 export function readCharBoxes(P: Pdfium, heap: () => Uint8Array, page: number, xf: Xf): { codes: Uint32Array; boxes: Float32Array } {
+	// PDFium orders a rotated page's text by its displayed layout, out of reading order.
+	const rotation = P.FPDFPage_GetRotation(page);
+	if (rotation) P.FPDFPage_SetRotation(page, 0);
+	try {
+		return readUnrotated(P, heap, page, xf);
+	} finally {
+		if (rotation) P.FPDFPage_SetRotation(page, rotation);
+	}
+}
+
+function readUnrotated(P: Pdfium, heap: () => Uint8Array, page: number, xf: Xf): { codes: Uint32Array; boxes: Float32Array } {
 	const tp = P.FPDFText_LoadPage(page);
 	const n = Math.max(0, P.FPDFText_CountChars(tp));
 	const codes = new Uint32Array(n);

@@ -87,8 +87,12 @@ export class PageText {
 		let line: Line | null = null;
 		/** the line's direction is settled (first strong char seen / orientation known) */
 		let dirSet = false;
+		let lastL = 0;
 		let lastT = 0;
+		let lastR = 0;
 		let lastB = 0;
+		/** chars in the line with their own box (a ligature's extra chars share its box) */
+		let glyphs = 0;
 		/**
 		 * The embedded opposite-direction run in progress: the line's far edge when
 		 * it began (`floor`) and the run's own far edge (`edge`: its right in an LTR
@@ -116,6 +120,11 @@ export class PageText {
 			const r = boxes[i * 4 + 2]!;
 			const b = boxes[i * 4 + 3]!;
 			const ch = String.fromCodePoint(codes[i]!);
+			if (line && l === lastL && t === lastT && r === lastR && b === lastB) {
+				// Another char of the previous glyph ("fi" ligature): same box, same line.
+				(line as Line).end = i + 1;
+				continue;
+			}
 			if (line) {
 				const cur: Line = line;
 				const h = cur.b - cur.t;
@@ -125,7 +134,7 @@ export class PageText {
 				const minH = Math.min(b - t, h);
 				const minW = Math.min(r - l, w);
 				let breaks: boolean;
-				const stacked = cur.end - cur.start === 1 && !isVertical(cur.dir) && hOverlap > minW * 0.5 && vOverlap < minH * 0.5;
+				const stacked = glyphs === 1 && !isVertical(cur.dir) && hOverlap > minW * 0.5 && vOverlap < minH * 0.5;
 				if (stacked && t >= cur.t + h * 0.5 && t - cur.b < h) {
 					// Second char directly below the first: a vertical line.
 					cur.dir = "ttb";
@@ -170,7 +179,9 @@ export class PageText {
 				line = { start: i, end: i + 1, l, t, r, b };
 				dirSet = false;
 				run = null;
+				glyphs = 1;
 			} else {
+				glyphs++;
 				line.end = i + 1;
 				line.l = Math.min(line.l, l);
 				line.t = Math.min(line.t, t);
@@ -183,7 +194,9 @@ export class PageText {
 					dirSet = true;
 				} else if (STRONG_LTR.test(ch)) dirSet = true;
 			}
+			lastL = l;
 			lastT = t;
+			lastR = r;
 			lastB = b;
 		}
 		close();

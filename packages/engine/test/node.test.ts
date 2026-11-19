@@ -8,6 +8,8 @@ const { makePaper } = await import("../bench/fixtures/make-paper.mjs");
 // @ts-expect-error plain .mjs scripts, no types
 const { extractText } = await import("./fixtures/pdfium-text.mjs");
 const { PDFDocument, StandardFonts, degrees } = await import("pdf-lib");
+// @ts-expect-error plain .mjs scripts, no types
+const { makeRotated, ROTATED_LINES } = await import("./fixtures/make-rotated.mjs");
 
 const pdfium = await loadPdfium();
 const paper: Uint8Array = await makePaper();
@@ -65,6 +67,25 @@ test("rotated pages: size and boxes are as displayed", async () => {
 		assert.ok(l >= 0 && t >= 0 && r <= page.size.w + 0.5 && b <= page.size.h + 0.5, `page ${i} rects inside the page`);
 		// Upright text runs along x; on a quarter-turned page it runs along y.
 		assert.equal(r - l > b - t, !sideways, `page ${i} orientation`);
+	}
+	doc.close();
+});
+
+test("rotated pages: text reads in order, one line per text line, and a drag selects only the dragged lines", () => {
+	const angles = [0, 90, 270, 180];
+	const doc = pdfium.open(makeRotated(angles));
+	for (const [i, angle] of angles.entries()) {
+		const page = doc.pageText(i);
+		assert.equal(page.text, ROTATED_LINES.join("\n"), `/Rotate ${angle} reading order`);
+		if (angle === 180) continue;
+		assert.deepEqual(
+			page.model.lines.map((l: { start: number; end: number }) => page.model.text(l.start, l.end).trim()),
+			ROTATED_LINES,
+			`/Rotate ${angle} lines`,
+		);
+		const from = page.text.indexOf("first");
+		const to = page.text.indexOf("second") + "second".length;
+		assert.equal(page.rects(from, to).length, 2, `/Rotate ${angle} drag from line 1 into line 2`);
 	}
 	doc.close();
 });

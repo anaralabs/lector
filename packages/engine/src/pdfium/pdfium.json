@@ -2,7 +2,7 @@
 	"source": "@embedpdf/pdfium@2.15.1",
 	"sourceSha256": "5e4cd023c3dad4a895b3571ca573d3fc51bac6de48360d95283134385b954eaa",
 	"binaryen": "132.0.0",
-	"sha256": "ab04bf1dc3787911ef57f6b131e8147151d264e486dcb570820abd97aeb25acc",
+	"sha256": "124c9b50017c554dc4f648537eca9d8f2ec3dbc69b86ce2a7519559d0f3fdd64",
 	"api": [
 		"EPDFAnnot_GetColor",
 		"EPDFAnnot_GetObjectNumber",
@@ -74,6 +74,8 @@
 		"FPDFPage_GetAnnotCount",
 		"FPDFPage_GetAnnotIndex",
 		"FPDFPage_GetObject",
+		"FPDFPage_GetRotation",
+		"FPDFPage_SetRotation",
 		"FPDFText_ClosePage",
 		"FPDFText_CountChars",
 		"FPDFText_GetBoundedText",
