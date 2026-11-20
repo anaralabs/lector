@@ -3,6 +3,7 @@ import type { TextContent } from "pdfjs-dist/types/src/display/api";
 import { expect, test } from "vitest";
 import { calculateHighlightRects } from "../src/hooks/search/useSearchPosition";
 import { loadPdfJs } from "../src/lib/pdfjs";
+import { inkBounds } from "./fixtures/ink";
 import { createTextGeometryPdf } from "./fixtures/text-geometry";
 
 async function readTextItems(page: PDFPageProxy) {
@@ -39,27 +40,11 @@ for (const rotation of [0, 90, 180, 270]) {
 				canvas.height = viewport.height;
 				const context = canvas.getContext("2d")!;
 				await page.render({ canvasContext: context, canvas, viewport }).promise;
-				const pixels = context.getImageData(
-					0,
-					0,
+				const { left, top, right, bottom } = inkBounds(
+					context.getImageData(0, 0, canvas.width, canvas.height).data,
 					canvas.width,
 					canvas.height,
-				).data;
-				let left = canvas.width,
-					top = canvas.height,
-					right = 0,
-					bottom = 0;
-				for (let y = 0; y < canvas.height; y++) {
-					for (let x = 0; x < canvas.width; x++) {
-						const index = (y * canvas.width + x) * 4;
-						if (pixels[index]! < 128 && pixels[index + 3]! > 128) {
-							left = Math.min(left, x);
-							top = Math.min(top, y);
-							right = Math.max(right, x + 1);
-							bottom = Math.max(bottom, y + 1);
-						}
-					}
-				}
+				);
 				expect(right).toBeGreaterThan(left);
 				const rects = await calculateHighlightRects(page, {
 					pageNumber: 1,
