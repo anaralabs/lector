@@ -353,3 +353,15 @@ test("lines: CJK top-to-bottom columns stay vertical", () => {
 	);
 	assert.equal(t.hitTest(55, 101), t.lines[0]!.start);
 });
+
+test("lines: a sideways line that starts with a ligature stays one line", () => {
+	// PDFium gives every char of a ligature glyph ("fi") the glyph's box.
+	const glyphs = ["fi", "n", "a", "l"];
+	const codes = Uint32Array.from(glyphs.join(""), (c) => c.codePointAt(0)!);
+	const boxes = Float32Array.from(glyphs.flatMap((g, n) => [...g].flatMap(() => [50, 100 + n * 8, 60, 108 + n * 8])));
+	const t = new PageText(codes, boxes);
+	assert.deepEqual(
+		t.lines.map((l) => [t.text(l.start, l.end), l.dir]),
+		[["final", "ttb"]],
+	);
+});

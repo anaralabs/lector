@@ -40,9 +40,19 @@ export function boxFor(xf: Xf, x0: number, y0: number, x1: number, y1: number): 
 	return [Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)];
 }
 
+/** FPDFText_LoadPage in reading order: PDFium orders a /Rotate page's text by its displayed layout. Char boxes stay in user space. */
+export function loadTextPage(P: Pdfium, page: number): number {
+	const rotation = P.FPDFPage_GetRotation(page);
+	if (rotation <= 0) return P.FPDFText_LoadPage(page);
+	P.FPDFPage_SetRotation(page, 0);
+	const tp = P.FPDFText_LoadPage(page);
+	P.FPDFPage_SetRotation(page, rotation);
+	return tp;
+}
+
 /** Unicode code and loose box (l, t, r, b; zero for generated chars) of every char on a loaded page. */
 export function readCharBoxes(P: Pdfium, heap: () => Uint8Array, page: number, xf: Xf): { codes: Uint32Array; boxes: Float32Array } {
-	const tp = P.FPDFText_LoadPage(page);
+	const tp = loadTextPage(P, page);
 	const n = Math.max(0, P.FPDFText_CountChars(tp));
 	const codes = new Uint32Array(n);
 	const boxes = new Float32Array(n * 4);

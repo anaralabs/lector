@@ -1,4 +1,4 @@
-// PDFium page text in Node, as the raster worker extracts it (codes + loose boxes, top-left points).
+// PDFium page text in Node, as the raster worker extracts it on unrotated pages (codes + loose boxes, top-left points).
 // Usage: node test/fixtures/pdfium-text.mjs <file.pdf> <out.json> [pages, e.g. 0,1]
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";

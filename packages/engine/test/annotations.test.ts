@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { createRequire, register } from "node:module";
 import { test } from "node:test";
-import { hideNoteIcons, noteIconIndices, type PdfAnnotation, parsePdfDate, type RawAnnotation, readAnnotations, threadReplies } from "../src/annotations.ts";
+
+// src/ imports without extensions (bundler style); resolve them for Node.
+register(
+	`data:text/javascript,${encodeURIComponent(
+		"export async function resolve(s, c, n) { try { return await n(s, c); } catch (e) { if (s.startsWith('.') && !s.endsWith('.ts')) return n(s + '.ts', c); throw e; } }",
+	)}`,
+);
+import type { PdfAnnotation, RawAnnotation } from "../src/annotations.ts";
+
+const { hideNoteIcons, noteIconIndices, parsePdfDate, readAnnotations, threadReplies } = await import("../src/annotations.ts");
 // @ts-expect-error plain .mjs script, no types
 import { annotated, H, ROTATED_RECT, W, ZOTERO_RECTS } from "../bench/fixtures/make-annotations.mjs";
 

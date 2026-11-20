@@ -2,6 +2,7 @@
 // host lists them, read in the raster workers through PDFium's fpdf_annot API.
 // Tiles render their appearance streams, so nothing here draws.
 
+import { loadTextPage } from "./char-boxes";
 import type { Pdfium } from "./pdfium/pdfium.js";
 import type { Rect } from "./text";
 
@@ -370,7 +371,7 @@ export function readAnnotations(ctx: AnnotContext, pageIndex: number, page: numb
 	const raw: RawAnnotation[] = [];
 	const mem = P.pdfium.wasmExports.malloc(32);
 	let tp = 0;
-	const textPage = () => (tp ||= P.FPDFText_LoadPage(page));
+	const textPage = () => (tp ||= loadTextPage(P, page));
 	try {
 		for (let i = 0; i < n; i++) {
 			const annot = P.FPDFPage_GetAnnot(page, i);
