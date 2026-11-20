@@ -18,6 +18,30 @@ export function createTextPdf(
 		);
 	}
 	objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+	return writePdf(objects);
+}
+
+/**
+ * One page whose running header is marked as an `Artifact` and whose body is
+ * ordinary tagged content, the way Word and Acrobat exports mark decoration.
+ */
+export function createArtifactPdf(): Uint8Array {
+	const text = [
+		"/Artifact << /Type /Pagination /Subtype /Header >> BDC",
+		"BT /F1 9 Tf 1 0 0 1 40 760 Tm (Running header) Tj ET EMC",
+		"/P << /MCID 0 >> BDC",
+		"BT /F1 11 Tf 1 0 0 1 40 700 Tm (Body text) Tj ET EMC",
+	].join("\n");
+	return writePdf([
+		"<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> >>",
+		"<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+		`<< /Length ${text.length} >>\nstream\n${text}\nendstream`,
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+	]);
+}
+
+function writePdf(objects: string[]): Uint8Array {
 	let pdf = "%PDF-1.7\n";
 	const offsets = [0];
 	objects.forEach((object, i) => {
