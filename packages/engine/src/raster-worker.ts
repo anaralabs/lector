@@ -9,6 +9,7 @@ import { applyFormOp, type FormContext, readWidgets, saveDocument } from "./form
 import type { FormOp } from "./forms";
 import { init, type Pdfium } from "./pdfium/pdfium.js";
 import { bakePixels } from "./bake";
+import { paperVerdict } from "./scan-paper";
 import { boxFor, pageTransform, readCharBoxes, type Xf } from "./char-boxes";
 import type { DocSource, DocumentInfo, ErrorCode, FromRaster, Link, LoadFailureDetail, OutlineItem, SizeEntry, SizeHint, ToRaster } from "./protocol";
 import { blockVerdict, bodyComplete, HEADER_SCAN_BYTES, headerOffset, looksCutOff, openErrorCode, PDFIUM_HEADER_WINDOW, RANGE_BLOCK, RANGE_GRANULE, RANGE_MAX_RUN, reopenWorthIt } from "./range";
@@ -424,82 +425,30 @@ const SCAN_COVERAGE_MIN = 0.7;
 /** strip/grid-encoded scans: smallest tile, and how densely the tiles fill their union box */
 const SCAN_TILE_MIN_FRACTION = 0.005;
 const SCAN_TILE_DENSITY_MIN = 0.85;
-const SCAN_WHITE_MIN_FRACTION = 0.6;
-const SCAN_OPAQUE_MIN_FRACTION = 0.99;
-const SCAN_SATURATED_MAX_FRACTION = 0.15;
-const SCAN_SAMPLE_PX = 64;
 const SCAN_MAX_TILES = 64;
 const FPDFBitmap_Gray = 1;
 const FPDFBitmap_BGR = 2;
 const FPDFBitmap_BGRx = 3;
 const FPDFBitmap_BGRA = 4;
 
-/**
- * Paper verdict for one image: null when it is not paper (photo, colourful,
- * cut-out), else whether it carries dark ink. Samples a block-averaged ~64px
- * grid of the image as painted (masks applied), like lector's drawImage downsample.
- */
+/** Paper verdict for one image as painted (masks applied); see `paperVerdict`. */
 function classifyPaper(page: number, obj: number): { inked: boolean } | null {
 	let bmp = P.FPDFImageObj_GetRenderedBitmap(doc, page, obj);
 	if (!bmp) bmp = P.FPDFImageObj_GetBitmap(obj);
 	if (!bmp) return null;
 	try {
-		const w = P.FPDFBitmap_GetWidth(bmp);
-		const h = P.FPDFBitmap_GetHeight(bmp);
-		const stride = P.FPDFBitmap_GetStride(bmp);
 		const format = P.FPDFBitmap_GetFormat(bmp);
 		const bpp = format === FPDFBitmap_Gray ? 1 : format === FPDFBitmap_BGR ? 3 : format === FPDFBitmap_BGRx || format === FPDFBitmap_BGRA ? 4 : 0;
-		if (w <= 0 || h <= 0 || !bpp) return null;
-		const ptr = P.FPDFBitmap_GetBuffer(bmp);
-		const mem = heap();
-		const scale = Math.min(1, SCAN_SAMPLE_PX / Math.max(w, h));
-		const gw = Math.max(1, Math.round(w * scale));
-		const gh = Math.max(1, Math.round(h * scale));
-		// Block sums: r, g, b, alpha, count
-		const acc = new Float64Array(gw * gh * 5);
-		// Reading every pixel of a big rendered image is wasteful: step so each block gets ~16x16 reads.
-		const step = Math.max(1, Math.floor(Math.max(w / gw, h / gh) / 16));
-		for (let y = 0; y < h; y += step) {
-			const by = Math.min(gh - 1, Math.floor(y * scale));
-			const row = ptr + y * stride;
-			for (let x = 0; x < w; x += step) {
-				const bx = Math.min(gw - 1, Math.floor(x * scale));
-				const o = row + x * bpp;
-				const k = (by * gw + bx) * 5;
-				if (bpp === 1) {
-					acc[k] += mem[o]!;
-					acc[k + 1] += mem[o]!;
-					acc[k + 2] += mem[o]!;
-					acc[k + 3] += 255;
-				} else {
-					acc[k] += mem[o + 2]!;
-					acc[k + 1] += mem[o + 1]!;
-					acc[k + 2] += mem[o]!;
-					acc[k + 3] += format === FPDFBitmap_BGRA ? mem[o + 3]! : 255;
-				}
-				acc[k + 4]++;
-			}
-		}
-		const total = gw * gh;
-		let white = 0;
-		let opaque = 0;
-		let saturated = 0;
-		let ink = 0;
-		for (let k = 0; k < acc.length; k += 5) {
-			const n = acc[k + 4]!;
-			if (!n || acc[k + 3]! / n < 250) continue;
-			opaque++;
-			const r = acc[k]! / n;
-			const g = acc[k + 1]! / n;
-			const b = acc[k + 2]! / n;
-			const max = Math.max(r, g, b);
-			const min = Math.min(r, g, b);
-			if (min > 200 && max - min < 32) white++;
-			else if (max > 60 && (max - min) / max > 0.35) saturated++;
-			if (max < 100) ink++;
-		}
-		const paper = opaque / total >= SCAN_OPAQUE_MIN_FRACTION && white / total >= SCAN_WHITE_MIN_FRACTION && saturated / total <= SCAN_SATURATED_MAX_FRACTION;
-		return paper ? { inked: ink >= 1 } : null;
+		if (!bpp) return null;
+		return paperVerdict({
+			data: heap(),
+			offset: P.FPDFBitmap_GetBuffer(bmp),
+			width: P.FPDFBitmap_GetWidth(bmp),
+			height: P.FPDFBitmap_GetHeight(bmp),
+			stride: P.FPDFBitmap_GetStride(bmp),
+			bpp,
+			alpha: format === FPDFBitmap_BGRA,
+		});
 	} finally {
 		P.FPDFBitmap_Destroy(bmp);
 	}
