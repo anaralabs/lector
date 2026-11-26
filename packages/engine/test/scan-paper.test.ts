@@ -31,17 +31,44 @@ test("a 1-bit text scan is inked paper", () => {
 	});
 });
 
-test("a rendered scan's antialiased transparent edge does not make it a cut-out", () => {
-	const w = 793;
-	const h = 613;
-	const page = bitmap(w, h, 4, (x, y) => {
-		const edge = x === w - 1 || y === h - 1;
-		const ink =
-			x > 100 && x < 700 && y > 100 && y < 500 && y % 14 < 8 && x % 3 === 0;
+const renderedScan =
+	(w: number, h: number, edge: number): Px =>
+	(x, y) => {
+		const onEdge = x < edge || y >= h - edge;
+		const ink = y % 14 < 8 && x % 3 === 0 && x > 10 && x < w - 10;
 		const v = ink ? 0 : 255;
-		return [v, v, v, edge ? 120 : 255];
-	});
-	assert.deepEqual(paperVerdict(page), { inked: true });
+		return [v, v, v, onEdge ? 120 : 255];
+	};
+
+test("a rendered scan's antialiased edge, up to 3px, does not make it a cut-out", () => {
+	assert.deepEqual(
+		paperVerdict(bitmap(793, 613, 4, renderedScan(793, 613, 3))),
+		{ inked: true },
+	);
+});
+
+test("a short strip tile with an antialiased edge is still paper", () => {
+	assert.deepEqual(
+		paperVerdict(bitmap(2480, 96, 4, renderedScan(2480, 96, 2))),
+		{ inked: true },
+	);
+});
+
+test("a slightly rotated (deskewed) scan's transparent corner wedges do not make it a cut-out", () => {
+	const w = 550;
+	const h = 775;
+	const wedge: Px = (x, y) => {
+		const [r, g, b] = renderedScan(w, h, 0)(x, y);
+		return [r, g, b, y < 9 - x / 60 || x < 12 - y / 60 ? 0 : 255];
+	};
+	assert.deepEqual(paperVerdict(bitmap(w, h, 4, wedge)), { inked: true });
+});
+
+test("transparent padding wider than an antialiased edge is a cut-out", () => {
+	assert.equal(
+		paperVerdict(bitmap(400, 400, 4, renderedScan(400, 400, 40))),
+		null,
+	);
 });
 
 test("blank paper is paper without ink", () => {
